@@ -189,24 +189,24 @@ def test_selective_reaction_inclusion(tmp_path):
     generator = EquationSystemGenerator(reactions=reactions, validator=validator)
     code = generator.generate_code()
 
-    # Verify DEFAULT_DIAGENETIC_REACTIONS contains aerobic_respiration and hs_oxidation_velde
+    # Verify DEFAULT_DIAGENETIC_REACTIONS contains aerobic_respiration_fast and hs_oxidation_velde
     def_start = code.find("DEFAULT_DIAGENETIC_REACTIONS = [")
     def_end = code.find("DIAGENETIC_REACTIONS = DEFAULT_DIAGENETIC_REACTIONS")
     default_rxns = code[def_start:def_end]
-    assert "aerobic_respiration" in default_rxns
-    assert "hs_oxidation_velde" in default_rxns
-    assert "FeS_precipitation_dissolution_smooth_transition" not in default_rxns
+    assert "rxn_aerobic_respiration_fast" in default_rxns
+    assert "rxn_hs_oxidation_velde" in default_rxns
+    assert "FeS_precipitation_dissolution" not in default_rxns
     assert "dissimilatory_iron_reduction" not in default_rxns
     assert "sulfate_reduction" not in default_rxns
 
     # Verify Jacobian selectively only includes active reactions
     jac_start = code.find("def compute_chemical_jacobian")
     jacobian_code = code[jac_start:]
-    assert "1. Aerobic respiration" in jacobian_code
-    assert "5. HS oxidation" in jacobian_code
-    assert "2. Dissimilatory iron reduction" not in jacobian_code
-    assert "3. Sulfate reduction" not in jacobian_code
-    assert "4. FeS precipitation / dissolution" not in jacobian_code
+    assert "Reaction: aerobic_respiration_fast" in jacobian_code
+    assert "Reaction: hs_oxidation_velde" in jacobian_code
+    assert "Reaction: dissimilatory_iron_reduction" not in jacobian_code
+    assert "Reaction: sulfate_reduction" not in jacobian_code
+    assert "Reversible Saturation: FeS_precipitation_dissolution" not in jacobian_code
 
 
 def test_resolve_and_prepare_equations_timestamp_check(tmp_path, monkeypatch):
@@ -285,17 +285,17 @@ def test_fes2_precipitation_ts2_generation():
     code = generator.generate_code()
 
     # Function defined
-    assert "def FeS2_precipitation_TS2" in code
+    assert "def rxn_FeS2_precipitation_TS2" in code
     # Dispatched in DEFAULT_DIAGENETIC_REACTIONS
     def_start = code.find("DEFAULT_DIAGENETIC_REACTIONS = [")
     def_end = code.find("DIAGENETIC_REACTIONS = DEFAULT_DIAGENETIC_REACTIONS")
     default_rxns = code[def_start:def_end]
-    assert "FeS2_precipitation_TS2" in default_rxns
+    assert "rxn_FeS2_precipitation_TS2" in default_rxns
 
     # Jacobian included
     jac_start = code.find("def compute_chemical_jacobian")
     jacobian_code = code[jac_start:]
-    assert "10. FeS2 precipitation via TS2" in jacobian_code
+    assert "Reaction: FeS2_precipitation_TS2" in jacobian_code
 
 
 def test_invalid_reaction_syntax_raises_value_error():
@@ -348,8 +348,8 @@ def test_arbitrary_species_and_reactions_generated():
     assert "def rxn_denitrification_custom" in code
     assert "rxn_custom_poc_fe2_reaction" in code
     assert "rxn_denitrification_custom" in code
-    assert "Custom Reaction: custom_poc_fe2_reaction" in code
-    assert "Custom Reaction: denitrification_custom" in code
+    assert "Reaction: custom_poc_fe2_reaction" in code
+    assert "Reaction: denitrification_custom" in code
 
 
 def test_arbitrary_reaction_name_classified_and_generated():
@@ -371,13 +371,13 @@ def test_arbitrary_reaction_name_classified_and_generated():
 
     generator = EquationSystemGenerator(reactions=reactions, validator=validator)
     code = generator.generate_code()
-    assert "def dissimilatory_iron_reduction" in code
-    assert "dissimilatory_iron_reduction" in code
+    assert "def rxn_my_arbitrary_fe3_reduction_name" in code
+    assert "rxn_my_arbitrary_fe3_reduction_name" in code
     assert "compute_chemical_jacobian" in code
     # Check that Jacobian includes iron reduction derivative terms
     jac_start = code.find("def compute_chemical_jacobian")
     jacobian_code = code[jac_start:]
-    assert "2. Dissimilatory iron reduction" in jacobian_code
+    assert "Reaction: my_arbitrary_fe3_reduction_name" in jacobian_code
 
 
 def test_missing_reactions_file_raises_filenotfound(tmp_path):

@@ -837,40 +837,9 @@ class EquationSystemGenerator:
         else:
             phase_archetype = "solid_transformation"
 
-        # 4. Canonical archetype matching for backward compatibility
+        # 4. Canonical name is simply the reaction name or phase_mechanism
         r_name = r.get("reaction_name", "")
-        canonical_name = ""
-
-        if mechanism == "reversible_saturation":
-            canonical_name = "FeS_precipitation_dissolution"
-        elif mechanism == "disproportionation":
-            canonical_name = "elemental_sulfur_disproportionation"
-        elif "O2" in r_sp and any("POC" in sp or "TOC" in sp or "OM" in sp or "CH2O" in sp for sp in r_sp):
-            canonical_name = "aerobic_respiration"
-        elif any("Fe3" in sp or "FeOOH" in sp for sp in r_sp) and any("POC" in sp or "TOC" in sp or "OM" in sp or "CH2O" in sp for sp in r_sp):
-            canonical_name = "dissimilatory_iron_reduction"
-        elif any("SO4" in sp for sp in r_sp) and any("POC" in sp or "TOC" in sp or "OM" in sp or "CH2O" in sp for sp in r_sp):
-            canonical_name = "sulfate_reduction"
-        elif any(sp in ("HS", "TS2", "H2S") for sp in r_sp) and "O2" in r_sp and "SO4" in p_sp:
-            canonical_name = "hs_oxidation"
-        elif any("Fe2" in sp for sp in r_sp) and "O2" in r_sp and any("Fe3" in sp for sp in p_sp):
-            canonical_name = "Fe2_oxidation"
-        elif any(sp in ("HS", "TS2", "H2S") for sp in r_sp) and any("Fe3" in sp for sp in r_sp) and "SO4" in p_sp:
-            canonical_name = "sulfide_mediated_iron_reduction_velde"
-        elif any(sp in ("HS", "TS2", "H2S") for sp in r_sp) and any("Fe3" in sp for sp in r_sp) and "S0" in p_sp:
-            canonical_name = "sulfide_mediated_iron_reduction"
-        elif any(sp == "FeS" for sp in r_sp) and "O2" in r_sp and ("Fe3" in p_sp or "SO4" in p_sp):
-            canonical_name = "FeS_oxidation"
-        elif any(sp == "FeS2" for sp in r_sp) and "O2" in r_sp:
-            canonical_name = "FeS2_oxidation"
-        elif any(sp == "FeS" for sp in r_sp) and any(sp in ("HS", "TS2", "H2S") for sp in r_sp) and any("FeS2" in sp for sp in p_sp):
-            canonical_name = "FeS2_precipitation_TS2"
-        elif any(sp == "FeS" for sp in r_sp) and any("S0" in sp for sp in r_sp) and any("FeS2" in sp for sp in p_sp):
-            canonical_name = "pyrite_formation_fes_s0"
-        elif any("S0" in sp for sp in r_sp) and "O2" in r_sp and "SO4" in p_sp:
-            canonical_name = "elemental_sulfur_oxidation"
-        else:
-            canonical_name = r_name or f"{phase_archetype}_{mechanism}"
+        canonical_name = r_name or f"{phase_archetype}_{mechanism}"
 
         return ReactionCategory(
             canonical_name,
@@ -883,8 +852,8 @@ class EquationSystemGenerator:
             canonical_name=canonical_name,
         )
 
-    def _generate_custom_reaction_fn(self, r: Dict[str, Any], cat: ReactionCategory) -> List[str]:
-        r_name = r.get("reaction_name", "custom_rxn")
+    def _generate_kinetic_reaction_fn(self, r: Dict[str, Any], cat: ReactionCategory) -> List[str]:
+        r_name = r.get("reaction_name", "rxn")
         fn_name = f"rxn_{r_name}"
         reactants = cat.reactants
         products = cat.products
@@ -904,11 +873,33 @@ class EquationSystemGenerator:
                 break
 
         master_parent = self.validator.get_parent_species(master_sp)
-        other_reactants = {
-            self.validator.get_parent_species(sp): coeff
-            for coeff, sp in reactants
-            if self.validator.get_parent_species(sp) != master_parent
-        }
+
+        ref_sp = None
+        ref_coeff = 1.0
+        if r.get("ref_species"):
+            ref_sp = r["ref_species"]
+            ref_coeff = float(r.get("stoich_ref", 1.0))
+        else:
+            for coeff, sp in reactants:
+                p_sp = self.validator.get_parent_species(sp)
+                if isinstance(k_name, str) and (p_sp in k_name or sp in k_name):
+                    ref_sp = p_sp
+                    ref_coeff = float(coeff)
+                    break
+            if not ref_sp:
+                ref_sp = master_parent
+                ref_coeff = float(master_coeff)
+
+        other_reactants_entries = []
+        for coeff, sp in reactants:
+            p_sp = self.validator.get_parent_species(sp)
+            if p_sp != master_parent:
+                if p_sp == "O2" and "POC" in master_parent:
+                    other_reactants_entries.append(f'"{p_sp}": getattr(mp, "POC_O2_ratio", {coeff})')
+                else:
+                    other_reactants_entries.append(f'"{p_sp}": {coeff}')
+        other_reactants_str = "{" + ", ".join(other_reactants_entries) + "}"
+
         transport_products = {
             self.validator.get_parent_species(sp): coeff
             for coeff, sp in products
@@ -934,7 +925,10 @@ class EquationSystemGenerator:
                 coeff_expr += f' * {term}'
 
         for l_name in (r.get("limiters") or []):
-            lines.append(f'    _lim_{l_name} = lim.get("{l_name}_implicit", lim.get("{l_name}", 1.0))')
+            if l_name == "O2_TS2":
+                lines.append(f'    _lim_{l_name} = lim.get("O2_implicit_TS2", lim.get("O2_TS2_implicit", lim.get("O2_TS2", 1.0)))')
+            else:
+                lines.append(f'    _lim_{l_name} = lim.get("{l_name}_implicit", lim.get("{l_name}", 1.0))')
             coeff_expr += f' * _lim_{l_name}'
         for i_name in (r.get("inhibitors") or []):
             lines.append(f'    _inh_{i_name} = lim.get("{i_name}_inhibit", lim.get("{i_name}_inhib", 1.0))')
@@ -946,246 +940,101 @@ class EquationSystemGenerator:
             '    add_coupled_reaction(',
             '        CROSS=CROSS, LHS=LHS, RATES=RATES, mp=mp,',
             f'        master_species={{"{master_parent}": {master_coeff}}},',
-            f'        reactants={other_reactants},',
+            f'        reactants={other_reactants_str},',
             f'        products={transport_products},',
-            '        coeff_master=coeff_master, rate_master=rate_master,',
+            f'        coeff_master=coeff_master, rate_master=rate_master,',
             f'        has_solid=has_solid, reaction_name="{r_name}",',
-            f'        ref_species="{master_parent}", stoich_ref={master_coeff},',
+            f'        ref_species="{ref_sp}", stoich_ref={ref_coeff},',
             '    )',
         ])
+
+        iso_sp_map = r.get("isotope_species")
+        if iso_sp_map:
+            # Find the reactant that participates in isotope tracking
+            iso_r_candidates = [
+                (coeff, self.validator.get_parent_species(sp))
+                for coeff, sp in reactants
+                if self.validator.get_parent_species(sp) in iso_sp_map
+            ]
+            if iso_r_candidates:
+                iso_master_coeff, iso_master_parent = iso_r_candidates[0]
+                iso_master_32 = iso_sp_map[iso_master_parent]
+                lines.append('    if getattr(mp, "isotopes", False):')
+                iso_frac = r.get("isotope_fractionation")
+                if iso_frac:
+                    frac_key, frac_val = next(iter(iso_frac.items()))
+                    alpha_name, lim_name = frac_val[0], frac_val[1]
+                    src_sp = frac_key.split(" ")[0].replace("_32", "")
+                    src_sp_32 = iso_sp_map.get(src_sp, f"{src_sp}_32")
+                    lines.extend([
+                        f'        _alpha = 1.0 + (getattr(mp, "{alpha_name}", 1.0) - 1.0) * lim.get("{lim_name}", 1.0)',
+                        f'        coeff_master_32 = calculate_fractionated_coeff_32(',
+                        f'            coeff_master, getattr(c, "{src_sp}"), getattr(c, "{src_sp_32}"), _alpha, eps=1e-30',
+                        '        )',
+                    ])
+                else:
+                    lines.append('        coeff_master_32 = coeff_master')
+
+                iso_other_reactants = {}
+                for coeff, sp in reactants:
+                    p_sp = self.validator.get_parent_species(sp)
+                    if p_sp != iso_master_parent and p_sp in iso_sp_map:
+                        iso_other_reactants[iso_sp_map[p_sp]] = coeff
+                iso_products = {}
+                for coeff, sp in products:
+                    p_sp = self.validator.get_parent_species(sp)
+                    if p_sp in iso_sp_map:
+                        iso_products[iso_sp_map[p_sp]] = coeff
+
+                lines.extend([
+                    '        add_coupled_reaction(',
+                    '            CROSS=CROSS, LHS=LHS, RATES=RATES, mp=mp,',
+                    f'            master_species={{"{iso_master_32}": {iso_master_coeff}}},',
+                    f'            reactants={iso_other_reactants},',
+                    f'            products={iso_products},',
+                    f'            coeff_master=coeff_master_32, rate_master=coeff_master_32 * getattr(c, "{iso_master_32}"),',
+                    f'            has_solid=has_solid, reaction_name="{r_name}_32",',
+                    f'            ref_species="{ref_sp}", stoich_ref={ref_coeff},',
+                    '        )',
+                ])
+
         if r_name != fn_name:
             lines.append(f'{r_name} = {fn_name}')
         lines.append('')
         return lines
 
-    def _generate_custom_reaction_jacobian(self, r: Dict[str, Any], cat: ReactionCategory) -> List[str]:
-        r_name = r.get("reaction_name", "custom_rxn")
-        k_name = r.get("k_value_name")
-        reactants = cat.reactants
-        products = cat.products
-        has_solid = cat.has_solid_reactant
-        fac_var = "solid_fac" if has_solid else "diss_fac"
+    def _generate_reversible_saturation_fn(self, r: Dict[str, Any], cat: ReactionCategory) -> List[str]:
+        r_name = r.get("reaction_name", "mineral_saturation")
+        fn_name = f"rxn_{r_name}"
+        k_name = r.get("k_value_name", {})
+        if isinstance(k_name, dict):
+            k_prec_name = k_name.get("precipitation", f"{r_name}_isp")
+            k_diss_name = k_name.get("dissolution", f"{r_name}_isd")
+            k_sp_name = k_name.get("equilibrium", f"{r_name}_sp")
+        else:
+            k_prec_name = f"{k_name}_isp"
+            k_diss_name = f"{k_name}_isd"
+            k_sp_name = f"{k_name}_sp"
 
-        r_parents = [(coeff, self.validator.get_parent_species(sp)) for coeff, sp in reactants]
-        p_parents = [
-            (coeff, self.validator.get_parent_species(sp)) for coeff, sp in products
-            if self.validator.is_transport_species(self.validator.get_parent_species(sp))
-        ]
-
-        ref_coeff, ref_sp = r_parents[0]
-        conds = [f'"{sp}" in idx' for _, sp in r_parents]
         lines = [
-            f'    # Custom Reaction: {r_name} ({r.get("reaction", "")})',
-            f'    if {" and ".join(conds)}:',
-            f'        k_num_{r_name} = float(mp.k.get("{k_name}") if hasattr(mp, "k") else getattr(k, "{k_name}", 0.0))',
-        ]
-        for coeff, r_sp in r_parents:
-            lines.append(f'        c_{r_sp} = np.asarray(c["{r_sp}"].value if hasattr(c["{r_sp}"], "value") else c["{r_sp}"])')
-
-        for _, diff_sp in r_parents:
-            other_c = [f'c_{s}' for _, s in r_parents if s != diff_sp]
-            other_prod = " * ".join(other_c) if other_c else "1.0"
-            d_var = f"d_{diff_sp}_{r_name}"
-            lines.append(f'        {d_var} = {fac_var} * k_num_{r_name} * {other_prod} / {ref_coeff}')
-            for coeff_r, r_tgt in r_parents:
-                lines.append(f'        J[:, idx["{r_tgt}"], idx["{diff_sp}"]] -= {coeff_r} * {d_var}')
-            for coeff_p, p_tgt in p_parents:
-                lines.append(f'        J[:, idx["{p_tgt}"], idx["{diff_sp}"]] += {coeff_p} * {d_var}')
-        lines.append('')
-        return lines
-
-    def generate_code(self) -> str:
-        """Generates complete Python source for equations.py."""
-        code = []
-        code.extend([
-            '# -----------------------------------------------------------------------------',
-            '# Individual Reaction Functions',
-            '# -----------------------------------------------------------------------------',
-            '',
-            'def aerobic_respiration(c, k_val, lim, LHS, RHS, RATES, CROSS, mp):',
-            '    """Reaction: POC + O2 -> CO2"""',
-            '    has_solid = True',
-            '    poc_species = k_val.get("poc_species", "POC_fast") if isinstance(k_val, dict) else "POC_fast"',
-            '    poc_k_name = k_val.get("poc_k", "POC_fast") if isinstance(k_val, dict) else "POC_fast"',
-            '    k_num = mp.k.get(poc_k_name) if hasattr(mp, "k") else getattr(k_val, poc_k_name, 0.0)',
-            '    poc_var = getattr(c, poc_species)',
-            '    lim_O2 = lim["O2_implicit"]',
-            '    rate_base = k_num * poc_var * c.O2 * lim_O2',
-            '    ratio = getattr(mp, "POC_O2_ratio", 1.0)',
-            '    coeff_O2 = ratio * k_num * poc_var * lim_O2',
-            '    add_implicit_sink(LHS, RATES, "O2", coeff_O2, ratio * rate_base, mp=mp, has_solid=has_solid, c=c)',
-            '    coeff_POC = k_num * 1.0 * c.O2 * lim_O2',
-            '    add_implicit_sink(LHS, RATES, poc_species, coeff_POC, rate_base, mp=mp, has_solid=has_solid, c=c)',
-            '',
-            'def dissimilatory_iron_reduction(c, k_val, lim, LHS, RHS, RATES, CROSS, mp):',
-            '    """Reaction: POC + 4 Fe3 -> 4 Fe2_total"""',
-            '    has_solid = True',
-            '    poc_species = k_val.get("poc_species", "POC_fast") if isinstance(k_val, dict) else "POC_fast"',
-            '    poc_k_name = k_val.get("poc_k", "POC_fast") if isinstance(k_val, dict) else "POC_fast"',
-            '    k_num = mp.k.get(poc_k_name) if hasattr(mp, "k") else getattr(k_val, poc_k_name, 0.0)',
-            '    poc_var = getattr(c, poc_species)',
-            '    fe3_lim = lim["Fe3_diss_red_implicit"]',
-            '    o2_inhib = lim["O2_inhibit"]',
-            '    rate_base = k_num * poc_var * c.Fe3 * o2_inhib * fe3_lim',
-            '    coeff_master = k_num * poc_var * 1.0 * o2_inhib * fe3_lim',
-            '    add_coupled_reaction(',
-            '        CROSS=CROSS, LHS=LHS, RATES=RATES, mp=mp,',
-            '        master_species={"Fe3": 4}, reactants={poc_species: 1}, products={"Fe2_total": 4},',
-            '        coeff_master=coeff_master, rate_master=rate_base,',
-            '        has_solid=has_solid, reaction_name=f"dissimilatory_iron_reduction_{poc_species}",',
-            '        ref_species="POC", stoich_ref=1.0,',
-            '    )',
-            '',
-            'def sulfate_reduction(c, k_val, lim, LHS, RHS, RATES, CROSS, mp):',
-            '    """Reaction: 2 POC + SO4 -> TS2"""',
-            '    has_solid = True',
-            '    poc_species = k_val.get("poc_species", "POC_fast") if isinstance(k_val, dict) else "POC_fast"',
-            '    poc_k_name = k_val.get("poc_k", "POC_fast") if isinstance(k_val, dict) else "POC_fast"',
-            '    k_num = mp.k.get(poc_k_name) if hasattr(mp, "k") else getattr(k_val, poc_k_name, 0.0)',
-            '    poc_var = getattr(c, poc_species)',
-            '    so4_lim = lim["SO4_implicit"]',
-            '    o2_inhib = lim["O2_inhibit"]',
-            '    fe3_inhib = lim["Fe3_diss_red_inhib"]',
-            '    rate_base = k_num * poc_var * c.SO4 * o2_inhib * so4_lim * fe3_inhib',
-            '    coeff_master = k_num * poc_var * 1.0 * o2_inhib * so4_lim * fe3_inhib',
-            '    add_coupled_reaction(',
-            '        CROSS=CROSS, LHS=LHS, RATES=RATES, mp=mp,',
-            '        master_species={"SO4": 1}, reactants={poc_species: 2}, products={"TS2": 1},',
-            '        coeff_master=coeff_master, rate_master=rate_base,',
-            '        has_solid=has_solid, reaction_name=f"sulfate_reduction_{poc_species}",',
-            '        ref_species="POC", stoich_ref=2.0,',
-            '    )',
-            '    if getattr(mp, "isotopes", False):',
-            '        alpha = 1.0 + (mp.msr_alpha - 1.0) * lim["SO4_alpha_explicit"]',
-            '        coeff_master_32 = calculate_fractionated_coeff_32(',
-            '            coeff_master, c.SO4, c.SO4_32, alpha, eps=1e-30',
-            '        )',
-            '        add_coupled_reaction(',
-            '            CROSS=CROSS, LHS=LHS, RATES=RATES, mp=mp,',
-            '            master_species={"SO4_32": 1}, reactants={}, products={"TS2_32": 1},',
-            '            coeff_master=coeff_master_32, rate_master=coeff_master_32 * c.SO4_32,',
-            '            has_solid=has_solid, reaction_name=f"sulfate_reduction_32_{poc_species}",',
-            '            ref_species="POC", stoich_ref=2.0,',
-            '        )',
-            '',
-            'def hs_oxidation_velde(c, k_val, lim, LHS, RHS, RATES, CROSS, mp):',
-            '    """Reaction: HS + 2 O2 -> SO4"""',
-            '    has_solid = False',
-            '    k_num = mp.k.get("TS2_O2") if hasattr(mp, "k") else getattr(k_val, "TS2_O2", 0.0)',
-            '    o2_lim = lim["O2_implicit_TS2"]',
-            '    hs_conc = c.TS2 * mp.hs_frac',
-            '    rate_base = k_num * hs_conc * c.O2 * o2_lim',
-            '    coeff_master = k_num * mp.hs_frac * c.O2 * o2_lim',
-            '    add_coupled_reaction(',
-            '        CROSS=CROSS, LHS=LHS, RATES=RATES, mp=mp,',
-            '        master_species={"TS2": 1}, reactants={}, products={"SO4": 1},',
-            '        coeff_master=coeff_master, rate_master=rate_base,',
-            '        has_solid=has_solid, reaction_name="hs_oxidation_velde",',
-            '        ref_species="TS2", stoich_ref=1.0,',
-            '    )',
-            '    coeff_O2 = 2.0 * k_num * hs_conc * o2_lim',
-            '    add_implicit_sink(LHS, RATES, "O2", coeff_O2, 2.0 * rate_base, mp=mp, has_solid=has_solid, c=c)',
-            '    if getattr(mp, "isotopes", False):',
-            '        alpha = 1.0 + (mp.TS2_O2_alpha - 1.0) * lim["TS2_alpha_explicit"]',
-            '        coeff_master_32 = calculate_fractionated_coeff_32(',
-            '            coeff_master, c.TS2, c.TS2_32, alpha, eps=1e-30',
-            '        )',
-            '        add_coupled_reaction(',
-            '            CROSS=CROSS, LHS=LHS, RATES=RATES, mp=mp,',
-            '            master_species={"TS2_32": 1}, reactants={}, products={"SO4_32": 1},',
-            '            coeff_master=coeff_master_32, rate_master=coeff_master_32 * c.TS2_32,',
-            '            has_solid=has_solid, reaction_name="hs_oxidation_velde_32",',
-            '            ref_species="TS2", stoich_ref=1.0,',
-            '        )',
-            '',
-            'def Fe2_oxidation(c, k_val, lim, LHS, RHS, RATES, CROSS, mp):',
-            '    """Reaction: 4 Fe2_total + O2 -> 4 Fe3"""',
-            '    has_solid = False',
-            '    k_num = mp.k.get("Fe2_O2") if hasattr(mp, "k") else getattr(k_val, "Fe2_O2", 0.0)',
-            '    rate_base = k_num * c.Fe2_total * c.O2',
-            '    coeff_master = k_num * 1.0 * c.O2',
-            '    add_coupled_reaction(',
-            '        CROSS=CROSS, LHS=LHS, RATES=RATES, mp=mp,',
-            '        master_species={"Fe2_total": 4}, reactants={}, products={"Fe3": 4},',
-            '        coeff_master=coeff_master, rate_master=rate_base,',
-            '        has_solid=has_solid, reaction_name="Fe2_oxidation",',
-            '        ref_species="Fe2_total", stoich_ref=4.0,',
-            '    )',
-            '    coeff_O2 = (1.0 / 4.0) * k_num * c.Fe2_total * 1.0',
-            '    add_implicit_sink(LHS, RATES, "O2", coeff_O2, 0.25 * rate_base, mp=mp, has_solid=has_solid, c=c)',
-            '',
-            'def FeS_oxidation(c, k_val, lim, LHS, RHS, RATES, CROSS, mp):',
-            '    """Reaction: 4 FeS + 9 O2 -> 4 Fe3 + 4 SO4"""',
-            '    has_solid = True',
-            '    k_num = mp.k.get("FeS_O2") if hasattr(mp, "k") else getattr(k_val, "FeS_O2", 0.0)',
-            '    rate_base = k_num * c.FeS * c.O2',
-            '    coeff_master = k_num * 1.0 * c.O2',
-            '    add_coupled_reaction(',
-            '        CROSS=CROSS, LHS=LHS, RATES=RATES, mp=mp,',
-            '        master_species={"FeS": 4}, reactants={}, products={"Fe3": 4, "SO4": 4},',
-            '        coeff_master=coeff_master, rate_master=rate_base,',
-            '        has_solid=has_solid, reaction_name="FeS_oxidation",',
-            '        ref_species="FeS", stoich_ref=4.0,',
-            '    )',
-            '    coeff_O2 = (9.0 / 4.0) * k_num * c.FeS * 1.0',
-            '    add_implicit_sink(LHS, RATES, "O2", coeff_O2, 2.25 * rate_base, mp=mp, has_solid=has_solid, c=c)',
-            '    if getattr(mp, "isotopes", False):',
-            '        coeff_FeS_32 = k_num * c.O2',
-            '        add_coupled_reaction(',
-            '            CROSS=CROSS, LHS=LHS, RATES=RATES, mp=mp,',
-            '            master_species={"FeS_32": 1}, reactants={}, products={"SO4_32": 1},',
-            '            coeff_master=coeff_FeS_32, rate_master=coeff_FeS_32 * c.FeS_32,',
-            '            has_solid=has_solid, reaction_name="FeS_oxidation_32",',
-            '            ref_species="FeS", stoich_ref=1.0,',
-            '        )',
-            '',
-            'def sulfide_mediated_iron_reduction_velde(c, k_val, lim, LHS, RHS, RATES, CROSS, mp):',
-            '    """Reaction: HS + 8 Fe3 -> SO4 + 8 Fe2_total"""',
-            '    has_solid = True',
-            '    k_num = mp.k.get("Fe3_hs") if hasattr(mp, "k") else getattr(k_val, "Fe3_hs", 0.0)',
-            '    hs_conc = c.TS2 * mp.hs_frac',
-            '    fe3_lim = lim["Fe3_implicit"]',
-            '    o2_inhib = lim["O2_inhibit"]',
-            '    rate_base = k_num * hs_conc * c.Fe3 * o2_inhib * fe3_lim',
-            '    coeff_master = k_num * c.Fe3 * 1.0 * mp.hs_frac * o2_inhib * fe3_lim',
-            '    add_coupled_reaction(',
-            '        CROSS=CROSS, LHS=LHS, RATES=RATES, mp=mp,',
-            '        master_species={"TS2": 1}, reactants={"Fe3": 8}, products={"Fe2_total": 8, "SO4": 1},',
-            '        coeff_master=coeff_master, rate_master=rate_base,',
-            '        has_solid=has_solid, reaction_name="sulfide_mediated_iron_reduction_velde",',
-            '        ref_species="Fe3", stoich_ref=8.0,',
-            '    )',
-            '    if getattr(mp, "isotopes", False):',
-            '        coeff_master_32 = coeff_master',
-            '        add_coupled_reaction(',
-            '            CROSS=CROSS, LHS=LHS, RATES=RATES, mp=mp,',
-            '            master_species={"TS2_32": 1}, reactants={}, products={"SO4_32": 1},',
-            '            coeff_master=coeff_master_32, rate_master=coeff_master_32 * c.TS2_32,',
-            '            has_solid=has_solid, reaction_name="sulfide_mediated_iron_reduction_velde_32",',
-            '            ref_species="Fe3", stoich_ref=8.0,',
-            '        )',
-            '',
-            'def FeS_precipitation_dissolution_smooth_transition(c, k_val, lim, LHS, RHS, RATES, CROSS, mp):',
-            '    """Reaction: Fe2_liq + HS -> FeS with C1 smooth transition across Omega = 1."""',
-            '    import numpy as np',
+            f'def {fn_name}(c, k_val, lim, LHS, RHS, RATES, CROSS, mp):',
+            f'    """Reaction: {r.get("reaction", "")} (reversible saturation with C1 smooth transition)"""',
             '    phi = mp.phi',
-            '    has_solid = True',
-            '    has_solid_prec = False',
             '    Fe2_val = np.maximum(np.asarray(c.Fe2_total.value if hasattr(c.Fe2_total, "value") else c.Fe2_total), 1e-20)',
             '    TS2_val = np.maximum(np.asarray(c.TS2.value if hasattr(c.TS2, "value") else c.TS2), 1e-20)',
             '    FeS_val = np.maximum(np.asarray(c.FeS.value if hasattr(c.FeS, "value") else c.FeS), 1e-20)',
             '    Fe2_pw = Fe2_val * mp.Fe2_diss',
             '    hs_val = TS2_val * mp.hs_frac',
             '    k_Hplus = getattr(k_val, "Hplus", getattr(mp, "Hplus", 10**-7.5))',
-            '    k_FeS_sp = getattr(k_val, "FeS_sp", getattr(mp, "FeS_sp", 10**-3.5))',
-            '    k_FeS_isp = getattr(k_val, "FeS_isp", getattr(mp, "FeS_isp", 1.0))',
-            '    k_FeS_isd = getattr(k_val, "FeS_isd", getattr(mp, "FeS_isd", 0.3))',
-            '    omega_den = k_Hplus * k_FeS_sp + 1e-30',
+            f'    k_sp = getattr(k_val, "{k_sp_name}", getattr(mp, "{k_sp_name}", 10**-3.5))',
+            f'    k_isp = getattr(k_val, "{k_prec_name}", getattr(mp, "{k_prec_name}", 1.0))',
+            f'    k_isd = getattr(k_val, "{k_diss_name}", getattr(mp, "{k_diss_name}", 0.3))',
+            '    omega_den = k_Hplus * k_sp + 1e-30',
             '    omega = Fe2_pw * hs_val / omega_den',
             '    is_prec = np.where(omega >= 1.0, 1.0, 0.0)',
             '    is_diss = np.where(omega < 1.0, 1.0, 0.0)',
-            '    epsilon = float(getattr(mp, "fes_smooth_epsilon", 0.01))',
-            '    k_prec_eff = k_FeS_isp * is_prec',
+            '    epsilon = float(getattr(mp, "fes_smooth_epsilon", getattr(mp, "saturation_smooth_epsilon", 0.01)))',
+            '    k_prec_eff = k_isp * is_prec',
             '    df = np.maximum(omega - 1.0, 0.0)',
             '    u_prec = np.minimum(df / (epsilon + 1e-30), 1.0)',
             '    smooth_ramp_prec = (3.0 * u_prec**2 - 2.0 * u_prec**3)',
@@ -1198,21 +1047,21 @@ class EquationSystemGenerator:
             '    prec_rate_TS2 = prec_coeff_TS2 * TS2_val',
             '    add_implicit_coupling_new(',
             '        CROSS, RATES, LHS, target_species="FeS", source_species="Fe2_total",',
-            '        coeff=prec_coeff_Fe2, rate=prec_rate_Fe2, mp=mp, has_solid=has_solid_prec,',
+            '        coeff=prec_coeff_Fe2, rate=prec_rate_Fe2, mp=mp, has_solid=False,',
             '        add_lhs_sink=False, stoich_ratio=1.0,',
             '    )',
             '    add_implicit_coupling_new(',
             '        CROSS, RATES, LHS, target_species="FeS", source_species="TS2",',
-            '        coeff=prec_coeff_TS2, rate=prec_rate_TS2, mp=mp, has_solid=has_solid_prec,',
+            '        coeff=prec_coeff_TS2, rate=prec_rate_TS2, mp=mp, has_solid=False,',
             '        add_lhs_sink=False, stoich_ratio=1.0,',
             '    )',
-            '    add_implicit_sink(LHS, RATES, "Fe2_total", prec_coeff_Fe2, prec_rate_Fe2, mp=mp, has_solid=has_solid_prec)',
-            '    add_implicit_sink(LHS, RATES, "TS2", prec_coeff_TS2, prec_rate_TS2, mp=mp, has_solid=has_solid_prec)',
+            '    add_implicit_sink(LHS, RATES, "Fe2_total", prec_coeff_Fe2, prec_rate_Fe2, mp=mp, has_solid=False)',
+            '    add_implicit_sink(LHS, RATES, "TS2", prec_coeff_TS2, prec_rate_TS2, mp=mp, has_solid=False)',
             '    CROSS["Fe2_total"].append(("TS2", -prec_coeff_TS2 * phi))',
             '    RATES["Fe2_total"] -= prec_rate_TS2 * phi',
             '    CROSS["TS2"].append(("Fe2_total", -prec_coeff_Fe2 * phi))',
             '    RATES["TS2"] -= prec_rate_Fe2 * phi',
-            '    k_diss_eff = k_FeS_isd * is_diss',
+            '    k_diss_eff = k_isd * is_diss',
             '    us = np.maximum(1.0 - omega, 0.0)',
             '    u_diss = np.minimum(us / (epsilon + 1e-30), 1.0)',
             '    smooth_ramp_diss = (3.0 * u_diss**2 - 2.0 * u_diss**3)',
@@ -1220,12 +1069,12 @@ class EquationSystemGenerator:
             '    diss_rate_FeS = diss_coeff_FeS * FeS_val',
             '    add_implicit_coupling_new(',
             '        CROSS, RATES, LHS, target_species="Fe2_total", source_species="FeS",',
-            '        coeff=diss_coeff_FeS, rate=diss_rate_FeS, mp=mp, has_solid=has_solid,',
+            '        coeff=diss_coeff_FeS, rate=diss_rate_FeS, mp=mp, has_solid=True,',
             '        add_lhs_sink=True, stoich_ratio=1.0,',
             '    )',
             '    add_implicit_coupling_new(',
             '        CROSS, RATES, LHS, target_species="TS2", source_species="FeS",',
-            '        coeff=diss_coeff_FeS, rate=diss_rate_FeS, mp=mp, has_solid=has_solid,',
+            '        coeff=diss_coeff_FeS, rate=diss_rate_FeS, mp=mp, has_solid=True,',
             '        add_lhs_sink=False, stoich_ratio=1.0,',
             '    )',
             '    if getattr(mp, "isotopes", False):',
@@ -1236,7 +1085,7 @@ class EquationSystemGenerator:
             '        hs_32_val = np.asarray(hs_32)',
             '        TS2_val_np = np.asarray(c.TS2.value if hasattr(c.TS2, "value") else c.TS2)',
             '        TS2_32_val = np.asarray(c.TS2_32.value if hasattr(c.TS2_32, "value") else c.TS2_32)',
-            '        f32_default = 1.0 / (1.0 + mp.VCDT)',
+            '        f32_default = 1.0 / (1.0 + float(mp.VCDT))',
             '        f32_hs = np.where(hs_val_np > 1e-6, hs_32_val / (hs_val_np + 1e-30), f32_default)',
             '        f32_hs = np.clip(f32_hs, 0.5, 1.5)',
             '        f32_TS2 = np.where(TS2_val_np > 1e-6, TS2_32_val / (TS2_val_np + 1e-30), f32_default)',
@@ -1245,15 +1094,15 @@ class EquationSystemGenerator:
             '        prec_coeff_TS2_32 = prec_coeff_TS2 * ratio_hs_ts2',
             '        add_implicit_coupling_new(',
             '            CROSS, RATES, LHS, target_species="FeS_32", source_species="TS2_32",',
-            '            coeff=prec_coeff_TS2_32, rate=prec_rate_TS2 * f32_hs, mp=mp, has_solid=has_solid_prec,',
+            '            coeff=prec_coeff_TS2_32, rate=prec_rate_TS2 * f32_hs, mp=mp, has_solid=False,',
             '            add_lhs_sink=False, stoich_ratio=1.0,',
             '        )',
             '        add_implicit_coupling_new(',
             '            CROSS, RATES, LHS, target_species="FeS_32", source_species="Fe2_total",',
-            '            coeff=prec_coeff_Fe2 * f32_hs, rate=prec_rate_Fe2 * f32_hs, mp=mp, has_solid=has_solid_prec,',
+            '            coeff=prec_coeff_Fe2 * f32_hs, rate=prec_rate_Fe2 * f32_hs, mp=mp, has_solid=False,',
             '            add_lhs_sink=False, stoich_ratio=1.0,',
             '        )',
-            '        add_implicit_sink(LHS, RATES, "TS2_32", prec_coeff_TS2_32, prec_rate_TS2 * f32_hs, mp=mp, has_solid=has_solid_prec)',
+            '        add_implicit_sink(LHS, RATES, "TS2_32", prec_coeff_TS2_32, prec_rate_TS2 * f32_hs, mp=mp, has_solid=False)',
             '        CROSS["TS2_32"].append(("Fe2_total", -prec_coeff_Fe2 * f32_hs * phi))',
             '        RATES["TS2_32"] -= prec_rate_Fe2 * f32_hs * phi',
             '        FeS_val_np = np.asarray(c.FeS.value if hasattr(c.FeS, "value") else c.FeS)',
@@ -1262,220 +1111,235 @@ class EquationSystemGenerator:
             '        f32_FeS = np.clip(f32_FeS, 0.5, 1.5)',
             '        add_implicit_coupling_new(',
             '            CROSS, RATES, LHS, target_species="TS2_32", source_species="FeS_32",',
-            '            coeff=diss_coeff_FeS, rate=diss_rate_FeS * f32_FeS, mp=mp, has_solid=has_solid,',
+            '            coeff=diss_coeff_FeS, rate=diss_rate_FeS * f32_FeS, mp=mp, has_solid=True,',
             '            add_lhs_sink=True, stoich_ratio=1.0,',
             '        )',
+            '        add_implicit_coupling_new(',
+            '            CROSS, RATES, LHS, target_species="Fe2_total", source_species="FeS_32",',
+            '            coeff=diss_coeff_FeS, rate=diss_rate_FeS * f32_FeS, mp=mp, has_solid=True,',
+            '            add_lhs_sink=False, stoich_ratio=1.0,',
+            '        )',
+        ]
+        if r_name != fn_name:
+            lines.append(f'{r_name} = {fn_name}')
+        lines.append('')
+        return lines
+
+    def _generate_reversible_saturation_jacobian(self, r: Dict[str, Any], cat: ReactionCategory) -> List[str]:
+        r_name = r.get("reaction_name", "mineral_saturation")
+        k_name = r.get("k_value_name", {})
+        if isinstance(k_name, dict):
+            k_prec_name = k_name.get("precipitation", f"{r_name}_isp")
+            k_diss_name = k_name.get("dissolution", f"{r_name}_isd")
+            k_sp_name = k_name.get("equilibrium", f"{r_name}_sp")
+        else:
+            k_prec_name = f"{k_name}_isp"
+            k_diss_name = f"{k_name}_isd"
+            k_sp_name = f"{k_name}_sp"
+
+        lines = [
+            f'    # Reversible Saturation: {r_name}',
+            '    if "Fe2_total" in idx and "TS2" in idx and "FeS" in idx:',
+            '        i_fe2 = idx["Fe2_total"]',
+            '        i_ts2 = idx["TS2"]',
+            '        i_fes = idx["FeS"]',
+            '        Fe2_val = np.maximum(c["Fe2_total"].value if hasattr(c["Fe2_total"], "value") else c["Fe2_total"], 1e-20)',
+            '        TS2_val = np.maximum(c["TS2"].value if hasattr(c["TS2"], "value") else c["TS2"], 1e-20)',
+            '        FeS_val = np.maximum(c["FeS"].value if hasattr(c["FeS"], "value") else c["FeS"], 1e-20)',
+            '        Fe2_pw = Fe2_val * float(mp.Fe2_diss)',
+            '        hs_val = TS2_val * float(mp.hs_frac)',
+            '        k_Hplus = float(getattr(k, "Hplus", getattr(mp, "Hplus", 10**-7.5)))',
+            f'        k_FeS_sp = float(getattr(k, "{k_sp_name}", getattr(mp, "{k_sp_name}", 10**-3.5)))',
+            f'        k_FeS_isp = float(getattr(k, "{k_prec_name}", getattr(mp, "{k_prec_name}", 1.0)))',
+            f'        k_FeS_isd = float(getattr(k, "{k_diss_name}", getattr(mp, "{k_diss_name}", 0.3)))',
+            '        omega = (Fe2_pw * hs_val) / (k_Hplus * k_FeS_sp + 1e-30)',
+            '        d_omega_dFe2 = (float(mp.Fe2_diss) * hs_val) / (k_Hplus * k_FeS_sp + 1e-30)',
+            '        d_omega_dTS2 = (Fe2_pw * float(mp.hs_frac)) / (k_Hplus * k_FeS_sp + 1e-30)',
+            '        eps_sm = float(getattr(mp, "fes_smooth_epsilon", getattr(mp, "saturation_smooth_epsilon", 0.01)))',
+            '        is_prec = omega >= 1.0',
+            '        df_p = np.maximum(omega - 1.0, 0.0)',
+            '        u_p = np.clip(df_p / (eps_sm + 1e-30), 0.0, 1.0)',
+            '        S_p = 3.0 * u_p**2 - 2.0 * u_p**3',
+            '        dS_du = np.where((u_p > 0.0) & (u_p < 1.0), 6.0 * u_p * (1.0 - u_p), 0.0)',
+            '        dS_p_domega = dS_du / (eps_sm + 1e-30)',
+            '        dR_prec_domega = k_FeS_isp * (S_p + df_p * dS_p_domega) * is_prec',
+            '        R_prec = k_FeS_isp * df_p * S_p * is_prec',
+            '        dRp_dFe2 = diss_fac * dR_prec_domega * d_omega_dFe2',
+            '        dRp_dTS2 = diss_fac * dR_prec_domega * d_omega_dTS2',
+            '        is_diss = omega < 1.0',
+            '        us_d = np.maximum(1.0 - omega, 0.0)',
+            '        u_d = np.clip(us_d / (eps_sm + 1e-30), 0.0, 1.0)',
+            '        S_d = 3.0 * u_d**2 - 2.0 * u_d**3',
+            '        dS_d_du = np.where((u_d > 0.0) & (u_d < 1.0), 6.0 * u_d * (1.0 - u_d), 0.0)',
+            '        dS_d_domega = -dS_d_du / (eps_sm + 1e-30)',
+            '        dR_diss_domega = -k_FeS_isd * (S_d + us_d * (dS_d_du / (eps_sm + 1e-30))) * FeS_val * is_diss',
+            '        dR_diss_dFeS = k_FeS_isd * us_d * S_d * is_diss',
+            '        R_diss = k_FeS_isd * us_d * S_d * FeS_val * is_diss',
+            '        dRd_dFe2 = solid_fac * dR_diss_domega * d_omega_dFe2',
+            '        dRd_dTS2 = solid_fac * dR_diss_domega * d_omega_dTS2',
+            '        dRd_dFeS = solid_fac * dR_diss_dFeS',
+            '        d_net_dFe2 = dRp_dFe2 - dRd_dFe2',
+            '        d_net_dTS2 = dRp_dTS2 - dRd_dTS2',
+            '        d_net_dFeS = -dRd_dFeS',
+            '        J[:, i_fes, i_fe2] += d_net_dFe2',
+            '        J[:, i_fes, i_ts2] += d_net_dTS2',
+            '        J[:, i_fes, i_fes] += d_net_dFeS',
+            '        J[:, i_fe2, i_fe2] -= d_net_dFe2',
+            '        J[:, i_fe2, i_ts2] -= d_net_dTS2',
+            '        J[:, i_fe2, i_fes] -= d_net_dFeS',
+            '        J[:, i_ts2, i_fe2] -= d_net_dFe2',
+            '        J[:, i_ts2, i_ts2] -= d_net_dTS2',
+            '        J[:, i_ts2, i_fes] -= d_net_dFeS',
+            '        if "FeS_32" in idx and "TS2_32" in idx and getattr(mp, "isotopes", False):',
+            '            i_fes_32 = idx["FeS_32"]',
+            '            i_ts2_32 = idx["TS2_32"]',
+            '            hs_32 = partition_equilibrium_isotope_32(',
+            '                c["TS2_32"].value if hasattr(c["TS2_32"], "value") else c["TS2_32"],',
+            '                mp.hs_frac, mp.h2s_frac, mp.h2s_hs_alpha,',
+            '            )',
+            '            f32_default = 1.0 / (1.0 + float(mp.VCDT))',
+            '            mask_hs = hs_val > 1e-6',
+            '            f32_hs = np.where(mask_hs, np.asarray(hs_32) / (hs_val + 1e-30), f32_default)',
+            '            f32_hs = np.clip(f32_hs, 0.5, 1.5)',
+            '            R_prec_bulk = diss_fac * R_prec',
+            '            dRp32_dFe2 = dRp_dFe2 * f32_hs',
+            '            dRp32_dTS2 = dRp_dTS2 * f32_hs - np.where(mask_hs, (R_prec_bulk / TS2_val) * f32_hs, 0.0)',
+            '            dRp32_dTS2_32 = np.where(is_prec & mask_hs, R_prec_bulk / TS2_val, 0.0)',
+            '            R_diss_bulk = solid_fac * R_diss',
+            '            mask_fes = FeS_val > 1e-3',
+            '            FeS_32_val = np.asarray(c["FeS_32"].value if hasattr(c["FeS_32"], "value") else c["FeS_32"])',
+            '            f32_FeS = np.where(mask_fes, FeS_32_val / (FeS_val + 1e-30), f32_hs)',
+            '            f32_FeS = np.clip(f32_FeS, 0.5, 1.5)',
+            '            dRd32_dFe2 = dRd_dFe2 * f32_FeS',
+            '            dRd32_dTS2 = dRd_dTS2 * f32_FeS',
+            '            dRd32_dFeS = np.where(~mask_fes, dRd_dFeS * f32_hs, 0.0)',
+            '            dRd32_dFeS_32 = np.where(is_diss & mask_fes, R_diss_bulk / FeS_val, 0.0)',
+            '            J[:, i_fes_32, i_fe2] += (dRp32_dFe2 - dRd32_dFe2)',
+            '            J[:, i_fes_32, i_ts2] += (dRp32_dTS2 - dRd32_dTS2)',
+            '            J[:, i_fes_32, i_fes] -= dRd32_dFeS',
+            '            J[:, i_fes_32, i_ts2_32] += dRp32_dTS2_32',
+            '            J[:, i_fes_32, i_fes_32] -= dRd32_dFeS_32',
+            '            J[:, i_ts2_32, i_fe2] -= (dRp32_dFe2 - dRd32_dFe2)',
+            '            J[:, i_ts2_32, i_ts2] -= (dRp32_dTS2 - dRd32_dTS2)',
+            '            J[:, i_ts2_32, i_fes] += dRd32_dFeS',
+            '            J[:, i_ts2_32, i_ts2_32] -= dRp32_dTS2_32',
+            '            J[:, i_ts2_32, i_fes_32] += dRd32_dFeS_32',
+            '',
+        ]
+        return lines
+
+    def _generate_kinetic_reaction_jacobian(self, r: Dict[str, Any], cat: ReactionCategory) -> List[str]:
+        r_name = r.get("reaction_name", "rxn")
+        k_name = r.get("k_value_name")
+        reactants = cat.reactants
+        products = cat.products
+        has_solid = cat.has_solid_reactant
+        fac_var = "solid_fac" if has_solid else "diss_fac"
+
+        r_parents = [(coeff, sp, self.validator.get_parent_species(sp)) for coeff, sp in reactants]
+        p_parents = [
+            (coeff, sp, self.validator.get_parent_species(sp)) for coeff, sp in products
+            if self.validator.is_transport_species(self.validator.get_parent_species(sp))
+        ]
+
+        ref_sp = None
+        ref_coeff = 1.0
+        if r.get("ref_species"):
+            ref_sp = r["ref_species"]
+            ref_coeff = float(r.get("stoich_ref", 1.0))
+        else:
+            for coeff, sp in reactants:
+                p_sp = self.validator.get_parent_species(sp)
+                if isinstance(k_name, str) and (p_sp in k_name or sp in k_name):
+                    ref_sp = p_sp
+                    ref_coeff = float(coeff)
+                    break
+            if not ref_sp:
+                ref_sp = r_parents[0][2]
+                ref_coeff = float(r_parents[0][0])
+
+        all_needed_parents = set([p for _, _, p in r_parents] + [p for _, _, p in p_parents])
+        conds = [f'"{p}" in idx' for p in sorted(all_needed_parents)]
+        lines = [
+            f'    # Reaction: {r_name} ({r.get("reaction", "")})',
+            f'    if {" and ".join(conds)}:',
+            f'        k_num_{r_name} = float(mp.k.get("{k_name}") if hasattr(mp, "k") else getattr(k, "{k_name}", 0.0))',
+        ]
+        for p in sorted(all_needed_parents):
+            lines.append(f'        c_{p} = np.asarray(c["{p}"].value if hasattr(c["{p}"], "value") else c["{p}"])')
+
+        # Limiters & Inhibitors terms
+        lim_terms = []
+        for l_name in (r.get("limiters") or []):
+            if l_name == "O2_TS2":
+                lines.append(f'        _lim_{l_name} = lim.get("O2_implicit_TS2", lim.get("O2_TS2_implicit", lim.get("O2_TS2", 1.0)))')
+            else:
+                lines.append(f'        _lim_{l_name} = lim.get("{l_name}_implicit", lim.get("{l_name}", 1.0))')
+            lim_terms.append(f'_lim_{l_name}')
+
+        for i_name in (r.get("inhibitors") or []):
+            lines.append(f'        _inh_{i_name} = lim.get("{i_name}_inhibit", lim.get("{i_name}_inhib", 1.0))')
+            lim_terms.append(f'_inh_{i_name}')
+
+        for coeff_diff, orig_sp_diff, diff_p in r_parents:
+            other_r = [
+                (c, sp, p) for c, sp, p in r_parents if p != diff_p
+            ]
+            other_terms = []
+            for c, sp, p in other_r:
+                spec = self.validator.get_speciation_factor_expr(sp)
+                term = f'c_{p}' if not spec else f'(c_{p} * float({spec}))'
+                other_terms.append(term)
+            
+            diff_spec = self.validator.get_speciation_factor_expr(orig_sp_diff)
+            spec_factor = f' * float({diff_spec})' if diff_spec else ''
+            
+            all_prod = " * ".join(other_terms + lim_terms) if (other_terms or lim_terms) else "1.0"
+            d_var = f"d_{diff_p}_{r_name}"
+            lines.append(f'        {d_var} = {fac_var} * (k_num_{r_name} / {ref_coeff}){spec_factor} * {all_prod}')
+
+            for coeff_r, _, r_tgt in r_parents:
+                if r_tgt == "O2" and "POC" in diff_p:
+                    ratio_str = 'float(getattr(mp, "POC_O2_ratio", 1.0))'
+                    lines.append(f'        J[:, idx["{r_tgt}"], idx["{diff_p}"]] -= {ratio_str} * {d_var}')
+                else:
+                    lines.append(f'        J[:, idx["{r_tgt}"], idx["{diff_p}"]] -= {coeff_r} * {d_var}')
+            for coeff_p, _, p_tgt in p_parents:
+                lines.append(f'        J[:, idx["{p_tgt}"], idx["{diff_p}"]] += {coeff_p} * {d_var}')
+
+            # Companion 32S isotopes
+            iso_sp_map = r.get("isotope_species")
+            if iso_sp_map and diff_p in iso_sp_map:
+                diff_32 = iso_sp_map[diff_p]
+                lines.append(f'        if "{diff_32}" in idx and getattr(mp, "isotopes", False):')
+                for coeff_r, _, r_tgt in r_parents:
+                    if r_tgt in iso_sp_map:
+                        r_tgt_32 = iso_sp_map[r_tgt]
+                        lines.append(f'            J[:, idx["{r_tgt_32}"], idx["{diff_32}"]] -= {coeff_r} * {d_var}')
+                for coeff_p, _, p_tgt in p_parents:
+                    if p_tgt in iso_sp_map:
+                        p_tgt_32 = iso_sp_map[p_tgt]
+                        lines.append(f'            J[:, idx["{p_tgt_32}"], idx["{diff_32}"]] += {coeff_p} * {d_var}')
+
+        lines.append('')
+        return lines
+
+    def generate_code(self) -> str:
+        """Generates complete Python source for equations.py."""
+        code = []
+        code.extend([
+            '# -----------------------------------------------------------------------------',
+            '# Individual Reaction Functions',
+            '# -----------------------------------------------------------------------------',
+            '',
         ])
 
-        active_categories = {self.classify_reaction(r) for r in self.reactions}
-        if "FeS2_oxidation" in active_categories:
-            code.extend([
-                'def FeS2_oxidation(c, k_val, lim, LHS, RHS, RATES, CROSS, mp):',
-                '    """Reaction: 1 FeS2 + 3.5 O2 -> 1 Fe3 + 2 SO4"""',
-                '    has_solid = True',
-                '    k_num = mp.k.get("FeS2_O2") if hasattr(mp, "k") else getattr(k_val, "FeS2_O2", 0.0)',
-                '    rate_base = k_num * c.FeS2 * c.O2',
-                '    coeff_master = k_num * 1.0 * c.O2',
-                '    add_coupled_reaction(',
-                '        CROSS=CROSS, LHS=LHS, RATES=RATES, mp=mp,',
-                '        master_species={"FeS2": 1}, reactants={}, products={"Fe3": 1, "SO4": 2},',
-                '        coeff_master=coeff_master, rate_master=rate_base,',
-                '        has_solid=has_solid, reaction_name="FeS2_oxidation",',
-                '        ref_species="FeS2", stoich_ref=1.0,',
-                '    )',
-                '    coeff_O2 = 3.5 * k_num * c.FeS2 * 1.0',
-                '    add_implicit_sink(LHS, RATES, "O2", coeff_O2, 3.5 * rate_base, mp=mp, has_solid=has_solid, c=c)',
-                '    if getattr(mp, "isotopes", False):',
-                '        coeff_FeS2_32 = k_num * c.O2',
-                '        add_coupled_reaction(',
-                '            CROSS=CROSS, LHS=LHS, RATES=RATES, mp=mp,',
-                '            master_species={"FeS2_32": 1}, reactants={}, products={"SO4_32": 1},',
-                '            coeff_master=coeff_FeS2_32, rate_master=coeff_FeS2_32 * c.FeS2_32,',
-                '            has_solid=has_solid, reaction_name="FeS2_oxidation_32",',
-                '            ref_species="FeS2", stoich_ref=1.0,',
-                '        )',
-                '',
-            ])
-
-        if "FeS2_precipitation_TS2" in active_categories:
-            code.extend([
-                'def FeS2_precipitation_TS2(c, k_val, lim, LHS, RHS, RATES, CROSS, mp):',
-                '    """Reaction: 1 FeS + 1 HS -> 1 FeS2"""',
-                '    has_solid = True',
-                '    hs_conc = c.TS2 * mp.hs_frac',
-                '    k_num = mp.k.get("FeS_TS2") if hasattr(mp, "k") else getattr(k_val, "FeS_TS2", 0.0)',
-                '    rate_base = k_num * c.FeS * hs_conc',
-                '    coeff_master = k_num * 1.0 * hs_conc',
-                '    add_coupled_reaction(',
-                '        CROSS=CROSS, LHS=LHS, RATES=RATES, mp=mp,',
-                '        master_species={"FeS": 1}, reactants={}, products={"FeS2": 1},',
-                '        coeff_master=coeff_master, rate_master=rate_base,',
-                '        has_solid=has_solid, reaction_name="FeS2_precipitation_TS2",',
-                '        ref_species="FeS", stoich_ref=1.0,',
-                '    )',
-                '    coeff_TS2 = k_num * c.FeS * 1.0 * mp.hs_frac',
-                '    add_implicit_sink(LHS, RATES, "TS2", coeff_TS2, rate_base, mp=mp, has_solid=has_solid, c=c)',
-                '    if getattr(mp, "isotopes", False):',
-                '        coeff_FeS_32 = k_num * 1.0 * hs_conc',
-                '        add_coupled_reaction(',
-                '            CROSS=CROSS, LHS=LHS, RATES=RATES, mp=mp,',
-                '            master_species={"FeS_32": 1}, reactants={}, products={"FeS2_32": 1},',
-                '            coeff_master=coeff_FeS_32, rate_master=coeff_FeS_32 * c.FeS_32,',
-                '            has_solid=has_solid, reaction_name="FeS2_precipitation_TS2_FeS_32",',
-                '            ref_species="FeS", stoich_ref=1.0,',
-                '        )',
-                '        coeff_HS_32 = k_num * c.FeS * 1.0 * mp.hs_frac',
-                '        add_coupled_reaction(',
-                '            CROSS=CROSS, LHS=LHS, RATES=RATES, mp=mp,',
-                '            master_species={"TS2_32": 1}, reactants={}, products={"FeS2_32": 1},',
-                '            coeff_master=coeff_HS_32, rate_master=coeff_HS_32 * c.TS2_32,',
-                '            has_solid=has_solid, reaction_name="FeS2_precipitation_TS2_HS_32",',
-                '            ref_species="TS2", stoich_ref=1.0,',
-                '        )',
-                '',
-                'pyrite_formation_fes_ts2_new = FeS2_precipitation_TS2',
-                'pyrite_formation_FeS_TS2 = FeS2_precipitation_TS2',
-                '',
-            ])
-
-        if "elemental_sulfur_oxidation" in active_categories:
-            code.extend([
-                'def elemental_sulfur_oxidation(c, k_val, lim, LHS, RHS, RATES, CROSS, mp):',
-                '    """Reaction: 2 S0 + 3 O2 -> 2 SO4"""',
-                '    has_solid = True',
-                '    k_num = mp.k.get("S0_O2") if hasattr(mp, "k") else getattr(k_val, "S0_O2", 0.0)',
-                '    rate_base = k_num * c.O2 * c.S0',
-                '    coeff_master = k_num * c.O2 * 1.0',
-                '    add_coupled_reaction(',
-                '        CROSS=CROSS, LHS=LHS, RATES=RATES, mp=mp,',
-                '        master_species={"S0": 2}, reactants={}, products={"SO4": 2},',
-                '        coeff_master=coeff_master, rate_master=rate_base,',
-                '        has_solid=has_solid, reaction_name="elemental_sulfur_oxidation",',
-                '        ref_species="S0", stoich_ref=2.0,',
-                '    )',
-                '    coeff_O2 = 1.5 * k_num * 1.0 * c.S0',
-                '    add_implicit_sink(LHS, RATES, "O2", coeff_O2, 1.5 * rate_base, mp=mp, has_solid=has_solid, c=c)',
-                '    if getattr(mp, "isotopes", False):',
-                '        add_coupled_reaction(',
-                '            CROSS=CROSS, LHS=LHS, RATES=RATES, mp=mp,',
-                '            master_species={"S0_32": 2}, reactants={}, products={"SO4_32": 2},',
-                '            coeff_master=coeff_master, rate_master=coeff_master * c.S0_32,',
-                '            has_solid=has_solid, reaction_name="elemental_sulfur_oxidation_32",',
-                '            ref_species="S0", stoich_ref=2.0,',
-                '        )',
-                '',
-            ])
-
-        if "pyrite_formation_fes_s0" in active_categories:
-            code.extend([
-                'def pyrite_formation_fes_s0_new(c, k_val, lim, LHS, RHS, RATES, CROSS, mp):',
-                '    """Reaction: 1 FeS + 1 S0 -> 1 FeS2"""',
-                '    has_solid = True',
-                '    k_num = mp.k.get("FeS_S0") if hasattr(mp, "k") else getattr(k_val, "FeS_S0", 0.0)',
-                '    rate_base = k_num * c.FeS * c.S0',
-                '    coeff_master = k_num * 1.0 * c.S0',
-                '    add_coupled_reaction(',
-                '        CROSS=CROSS, LHS=LHS, RATES=RATES, mp=mp,',
-                '        master_species={"FeS": 1}, reactants={}, products={"FeS2": 1},',
-                '        coeff_master=coeff_master, rate_master=rate_base,',
-                '        has_solid=has_solid, reaction_name="pyrite_formation_fes_s0_new",',
-                '        ref_species="FeS", stoich_ref=1.0,',
-                '    )',
-                '    coeff_S0 = k_num * c.FeS * 1.0',
-                '    add_implicit_sink(LHS, RATES, "S0", coeff_S0, rate_base, mp=mp, has_solid=has_solid, c=c)',
-                '    if getattr(mp, "isotopes", False):',
-                '        add_coupled_reaction(',
-                '            CROSS=CROSS, LHS=LHS, RATES=RATES, mp=mp,',
-                '            master_species={"FeS_32": 1}, reactants={}, products={"FeS2_32": 1},',
-                '            coeff_master=k_num * 1.0 * c.S0, rate_master=k_num * 1.0 * c.S0 * c.FeS_32,',
-                '            has_solid=has_solid, reaction_name="pyrite_formation_fes_s0_new_FeS_32",',
-                '            ref_species="FeS", stoich_ref=1.0,',
-                '        )',
-                '        add_coupled_reaction(',
-                '            CROSS=CROSS, LHS=LHS, RATES=RATES, mp=mp,',
-                '            master_species={"S0_32": 1}, reactants={}, products={"FeS2_32": 1},',
-                '            coeff_master=k_num * c.FeS * 1.0, rate_master=k_num * c.FeS * 1.0 * c.S0_32,',
-                '            has_solid=has_solid, reaction_name="pyrite_formation_fes_s0_new_S0_32",',
-                '            ref_species="S0", stoich_ref=1.0,',
-                '        )',
-                '',
-                'pyrite_formation_S0 = pyrite_formation_fes_s0_new',
-                '',
-            ])
-
-        if "sulfide_mediated_iron_reduction" in active_categories:
-            code.extend([
-                'def sulfide_mediated_iron_reduction(c, k_val, lim, LHS, RHS, RATES, CROSS, mp):',
-                '    """Reaction: HS + 2 Fe3 -> S0 + 2 Fe2_total"""',
-                '    has_solid = True',
-                '    hs_conc = c.TS2 * mp.hs_frac',
-                '    k_num = mp.k.get("Fe3_hs") if hasattr(mp, "k") else getattr(k_val, "Fe3_hs", 0.0)',
-                '    lim_o2 = lim.get("O2_inhibit", 1.0)',
-                '    lim_fe3 = lim.get("Fe3_implicit", 1.0)',
-                '    rate_base = k_num * c.Fe3 * hs_conc * lim_o2 * lim_fe3',
-                '    coeff_master = k_num * c.Fe3 * 1.0 * mp.hs_frac * lim_o2 * lim_fe3',
-                '    add_coupled_reaction(',
-                '        CROSS=CROSS, LHS=LHS, RATES=RATES, mp=mp,',
-                '        master_species={"TS2": 1}, reactants={"Fe3": 2},',
-                '        products={"Fe2_total": 2, "S0": 1},',
-                '        coeff_master=coeff_master, rate_master=rate_base,',
-                '        has_solid=has_solid, reaction_name="sulfide_mediated_iron_reduction",',
-                '        ref_species="Fe3", stoich_ref=2.0,',
-                '    )',
-                '    if getattr(mp, "isotopes", False):',
-                '        add_coupled_reaction(',
-                '            CROSS=CROSS, LHS=LHS, RATES=RATES, mp=mp,',
-                '            master_species={"TS2_32": 1}, reactants={},',
-                '            products={"S0_32": 1},',
-                '            coeff_master=coeff_master, rate_master=coeff_master * c.TS2_32,',
-                '            has_solid=has_solid, reaction_name="sulfide_mediated_iron_reduction_32",',
-                '            ref_species="Fe3", stoich_ref=2.0,',
-                '        )',
-                '',
-            ])
-
-        if "elemental_sulfur_disproportionation" in active_categories:
-            code.extend([
-                'def elemental_sulfur_disproportionation(c, k_val, lim, LHS, RHS, RATES, CROSS, mp):',
-                '    """Reaction: 4 S0 + 4 H2O -> 3 TS2 + SO4 + 2 Hplus"""',
-                '    has_solid = True',
-                '    k_num = mp.k.get("S0_dispro") if hasattr(mp, "k") else getattr(k_val, "S0_dispro", 0.0)',
-                '    lim_ts2 = lim.get("TS2", 1.0)',
-                '    lim_o2 = lim.get("O2_inhibit", 1.0)',
-                '    coeff_s0 = np.maximum(k_num * lim_ts2 * lim_o2, 0.0)',
-                '    rate_master = coeff_s0 * np.maximum(c.S0, 0.0)',
-                '    add_coupled_reaction(',
-                '        CROSS=CROSS, LHS=LHS, RATES=RATES, mp=mp,',
-                '        master_species={"S0": 4}, reactants={}, products={"TS2": 3, "SO4": 1},',
-                '        coeff_master=coeff_s0, rate_master=rate_master,',
-                '        has_solid=has_solid, reaction_name="elemental_sulfur_disproportionation",',
-                '        ref_species="S0", stoich_ref=4.0,',
-                '    )',
-                '    if getattr(mp, "isotopes", False):',
-                '        add_coupled_reaction(',
-                '            CROSS=CROSS, LHS=LHS, RATES=RATES, mp=mp,',
-                '            master_species={"S0_32": 4}, reactants={}, products={"TS2_32": 3, "SO4_32": 1},',
-                '            coeff_master=coeff_s0, rate_master=coeff_s0 * c.S0_32,',
-                '            has_solid=has_solid, reaction_name="elemental_sulfur_disproportionation_32",',
-                '            ref_species="S0", stoich_ref=4.0,',
-                '        )',
-                '',
-                'S0_disproportionation = elemental_sulfur_disproportionation',
-                '',
-            ])
-
-        legacy_cats = {
-            "aerobic_respiration", "dissimilatory_iron_reduction", "sulfate_reduction",
-            "hs_oxidation", "Fe2_oxidation", "sulfide_mediated_iron_reduction_velde",
-            "sulfide_mediated_iron_reduction", "FeS_precipitation_dissolution",
-            "FeS_oxidation", "FeS2_oxidation", "FeS2_precipitation_TS2",
-            "elemental_sulfur_oxidation", "pyrite_formation_fes_s0",
-            "elemental_sulfur_disproportionation",
-        }
         for r in self.reactions:
             cat = self.classify_reaction(r, self.validator)
-            if cat not in legacy_cats:
-                code.extend(self._generate_custom_reaction_fn(r, cat))
+            if cat.mechanism == "reversible_saturation":
+                code.extend(self._generate_reversible_saturation_fn(r, cat))
+            else:
+                code.extend(self._generate_kinetic_reaction_fn(r, cat))
 
         code.extend([
             '# -----------------------------------------------------------------------------',
@@ -1484,50 +1348,10 @@ class EquationSystemGenerator:
             '',
             'DEFAULT_DIAGENETIC_REACTIONS = [',
         ])
-
         for r in self.reactions:
-            cat = self.classify_reaction(r, self.validator)
-            reactants, _ = ReactionSystemValidator.parse_reaction_species(r.get("reaction", ""))
-            k_name = r.get("k_value_name")
-
-            if cat == "aerobic_respiration":
-                poc_sp = next((sp for _, sp in reactants if "POC" in sp), "POC_fast")
-                poc_k = k_name if isinstance(k_name, str) else poc_sp
-                code.append(f'    [aerobic_respiration, {{"poc_species": "{poc_sp}", "poc_k": "{poc_k}"}}],')
-            elif cat == "dissimilatory_iron_reduction":
-                poc_sp = next((sp for _, sp in reactants if "POC" in sp), "POC_fast")
-                poc_k = k_name if isinstance(k_name, str) else poc_sp
-                code.append(f'    [dissimilatory_iron_reduction, {{"poc_species": "{poc_sp}", "poc_k": "{poc_k}"}}],')
-            elif cat == "sulfate_reduction":
-                poc_sp = next((sp for _, sp in reactants if "POC" in sp), "POC_fast")
-                poc_k = k_name if isinstance(k_name, str) else poc_sp
-                code.append(f'    [sulfate_reduction, {{"poc_species": "{poc_sp}", "poc_k": "{poc_k}"}}],')
-            elif cat == "hs_oxidation":
-                code.append('    [hs_oxidation_velde, None],')
-            elif cat == "Fe2_oxidation":
-                code.append('    [Fe2_oxidation, None],')
-            elif cat == "sulfide_mediated_iron_reduction_velde":
-                code.append('    [sulfide_mediated_iron_reduction_velde, None],')
-            elif cat == "sulfide_mediated_iron_reduction":
-                code.append('    [sulfide_mediated_iron_reduction, None],')
-            elif cat == "FeS_precipitation_dissolution":
-                code.append('    [FeS_precipitation_dissolution_smooth_transition, None],')
-            elif cat == "FeS_oxidation":
-                code.append('    [FeS_oxidation, None],')
-            elif cat == "FeS2_oxidation":
-                code.append('    [FeS2_oxidation, None],')
-            elif cat == "FeS2_precipitation_TS2":
-                code.append('    [FeS2_precipitation_TS2, None],')
-            elif cat == "elemental_sulfur_oxidation":
-                code.append('    [elemental_sulfur_oxidation, None],')
-            elif cat == "pyrite_formation_fes_s0":
-                code.append('    [pyrite_formation_fes_s0_new, None],')
-            elif cat == "elemental_sulfur_disproportionation":
-                code.append('    [elemental_sulfur_disproportionation, None],')
-            else:
-                r_name = r.get("reaction_name", "custom_rxn")
-                fn_name = f"rxn_{r_name}"
-                code.append(f'    [{fn_name}, None],')
+            r_name = r.get("reaction_name", "rxn")
+            fn_name = f"rxn_{r_name}"
+            code.append(f'    [{fn_name}, None],')
 
         code.extend([
             ']',
@@ -1600,535 +1424,12 @@ class EquationSystemGenerator:
             '',
         ])
 
-        active_categories = {self.classify_reaction(r) for r in self.reactions}
-
-        # Extract dynamic (poc_species, poc_k) pairs for each POC respiration pathway
-        ar_poc_pairs = []
-        dir_poc_pairs = []
-        sr_poc_pairs = []
-        for r in self.reactions:
-            cat = self.classify_reaction(r)
-            reactants, _ = ReactionSystemValidator.parse_reaction_species(r.get("reaction", ""))
-            poc_sp = next((sp for _, sp in reactants if "POC" in sp), None)
-            k_name = r.get("k_value_name")
-            poc_k = k_name if isinstance(k_name, str) else poc_sp
-            if poc_sp and poc_k:
-                pair = (poc_sp, poc_k)
-                if cat == "aerobic_respiration" and pair not in ar_poc_pairs:
-                    ar_poc_pairs.append(pair)
-                elif cat == "dissimilatory_iron_reduction" and pair not in dir_poc_pairs:
-                    dir_poc_pairs.append(pair)
-                elif cat == "sulfate_reduction" and pair not in sr_poc_pairs:
-                    sr_poc_pairs.append(pair)
-
-        if not ar_poc_pairs:
-            ar_poc_pairs = [("POC_fast", "POC_fast"), ("POC_slow", "POC_slow")]
-        if not dir_poc_pairs:
-            dir_poc_pairs = [("POC_fast", "POC_fast"), ("POC_slow", "POC_slow")]
-        if not sr_poc_pairs:
-            sr_poc_pairs = [("POC_fast", "POC_fast"), ("POC_slow", "POC_slow")]
-
-        if "aerobic_respiration" in active_categories:
-            code.append('    # 1. Aerobic respiration')
-            for poc_sp, poc_k in ar_poc_pairs:
-                code.extend([
-                    f'    if "{poc_sp}" in idx and "O2" in idx:',
-                    f'        i_poc = idx["{poc_sp}"]',
-                    '        i_o2 = idx["O2"]',
-                    f'        k_num = float(mp.k.get("{poc_k}") if hasattr(mp, "k") else getattr(k, "{poc_k}", 0.0))',
-                    f'        c_poc = np.asarray(c["{poc_sp}"].value if hasattr(c["{poc_sp}"], "value") else c["{poc_sp}"])',
-                    '        c_o2 = np.asarray(c["O2"].value if hasattr(c["O2"], "value") else c["O2"])',
-                    '        K_O2 = float(mp.K_O2) / phi',
-                    '        denom = c_o2 + K_O2',
-                    '        d_poc = -solid_fac * k_num * (c_o2 / denom)',
-                    '        d_o2 = -solid_fac * k_num * c_poc * (K_O2 / denom**2)',
-                    '        ratio = float(getattr(mp, "POC_O2_ratio", 1.0))',
-                    '        J[:, i_poc, i_poc] += d_poc',
-                    '        J[:, i_poc, i_o2] += d_o2',
-                    '        J[:, i_o2, i_poc] += ratio * d_poc',
-                    '        J[:, i_o2, i_o2] += ratio * d_o2',
-                    '',
-                ])
-
-        if "dissimilatory_iron_reduction" in active_categories:
-            code.append('    # 2. Dissimilatory iron reduction')
-            for poc_sp, poc_k in dir_poc_pairs:
-                code.extend([
-                    f'    if "{poc_sp}" in idx and "Fe3" in idx and "Fe2_total" in idx:',
-                    f'        i_poc = idx["{poc_sp}"]',
-                    '        i_fe3 = idx["Fe3"]',
-                    '        i_fe2 = idx["Fe2_total"]',
-                    f'        k_num = float(mp.k.get("{poc_k}") if hasattr(mp, "k") else getattr(k, "{poc_k}", 0.0))',
-                    f'        c_poc = np.asarray(c["{poc_sp}"].value if hasattr(c["{poc_sp}"], "value") else c["{poc_sp}"])',
-                    '        c_fe3 = np.asarray(c["Fe3"].value if hasattr(c["Fe3"], "value") else c["Fe3"])',
-                    '        K_Fe3_red = float(mp.K_Fe3_diss_red) / solid_fac',
-                    '        K_O2 = float(mp.K_O2) / phi',
-                    '        c_o2 = np.asarray(c["O2"].value if hasattr(c["O2"], "value") else c["O2"])',
-                    '        o2_inhib = K_O2 / (c_o2 + K_O2)',
-                    '        fe3_denom = c_fe3 + K_Fe3_red',
-                    '        rate_base = k_num * c_poc * (c_fe3 / fe3_denom) * o2_inhib',
-                    '        d_poc = -solid_fac * k_num * (c_fe3 / fe3_denom) * o2_inhib',
-                    '        d_fe3 = -solid_fac * k_num * c_poc * (K_Fe3_red / fe3_denom**2) * o2_inhib',
-                    '        d_o2 = solid_fac * k_num * c_poc * (c_fe3 / fe3_denom) * (K_O2 / (c_o2 + K_O2)**2)',
-                    '        J[:, i_poc, i_poc] += d_poc',
-                    '        J[:, i_poc, i_fe3] += d_fe3',
-                    '        J[:, i_fe3, i_poc] += 4.0 * d_poc',
-                    '        J[:, i_fe3, i_fe3] += 4.0 * d_fe3',
-                    '        J[:, i_fe2, i_poc] -= 4.0 * d_poc',
-                    '        J[:, i_fe2, i_fe3] -= 4.0 * d_fe3',
-                    '        if "O2" in idx:',
-                    '            J[:, i_poc, idx["O2"]] += d_o2',
-                    '            J[:, i_fe3, idx["O2"]] += 4.0 * d_o2',
-                    '            J[:, i_fe2, idx["O2"]] -= 4.0 * d_o2',
-                    '',
-                ])
-
-        if "sulfate_reduction" in active_categories:
-            code.append('    # 3. Sulfate reduction')
-            for poc_sp, poc_k in sr_poc_pairs:
-                code.extend([
-                    f'    if "{poc_sp}" in idx and "SO4" in idx and "TS2" in idx:',
-                    f'        i_poc = idx["{poc_sp}"]',
-                    '        i_so4 = idx["SO4"]',
-                    '        i_ts2 = idx["TS2"]',
-                    f'        k_num = float(mp.k.get("{poc_k}") if hasattr(mp, "k") else getattr(k, "{poc_k}", 0.0))',
-                    f'        c_poc = np.asarray(c["{poc_sp}"].value if hasattr(c["{poc_sp}"], "value") else c["{poc_sp}"])',
-                    '        c_so4 = np.asarray(c["SO4"].value if hasattr(c["SO4"], "value") else c["SO4"])',
-                    '        c_o2 = np.asarray(c["O2"].value if hasattr(c["O2"], "value") else c["O2"])',
-                    '        c_fe3 = np.asarray(c["Fe3"].value if hasattr(c["Fe3"], "value") else c["Fe3"])',
-                    '        K_SO4 = float(mp.K_SO4) / phi',
-                    '        K_O2 = float(mp.K_O2) / phi',
-                    '        K_Fe3_red = float(mp.K_Fe3_diss_red) / solid_fac',
-                    '        o2_inhib = K_O2 / (c_o2 + K_O2)',
-                    '        fe3_inhib = K_Fe3_red / (c_fe3 + K_Fe3_red)',
-                    '        so4_denom = c_so4 + K_SO4',
-                    '        R_sr = 0.5 * solid_fac * k_num * c_poc * (c_so4 / so4_denom) * o2_inhib * fe3_inhib',
-                    '        d_poc = -0.5 * solid_fac * k_num * (c_so4 / so4_denom) * o2_inhib * fe3_inhib',
-                    '        d_so4 = -0.5 * solid_fac * k_num * c_poc * (K_SO4 / so4_denom**2) * o2_inhib * fe3_inhib',
-                    '        J[:, i_poc, i_poc] += 2.0 * d_poc',
-                    '        J[:, i_poc, i_so4] += 2.0 * d_so4',
-                    '        J[:, i_so4, i_poc] += d_poc',
-                    '        J[:, i_so4, i_so4] += d_so4',
-                    '        J[:, i_ts2, i_poc] -= d_poc',
-                    '        J[:, i_ts2, i_so4] -= d_so4',
-                    '        denom_o2_sr = c_o2 + K_O2',
-                    '        d_o2_sr = 0.5 * solid_fac * k_num * c_poc * (c_so4 / so4_denom) * (K_O2 / denom_o2_sr**2) * fe3_inhib',
-                    '        denom_fe3_sr = c_fe3 + K_Fe3_red',
-                    '        d_fe3_sr = 0.5 * solid_fac * k_num * c_poc * (c_so4 / so4_denom) * o2_inhib * (K_Fe3_red / denom_fe3_sr**2)',
-                    '        if "O2" in idx:',
-                    '            J[:, i_poc, idx["O2"]] += 2.0 * d_o2_sr',
-                    '            J[:, i_so4, idx["O2"]] += d_o2_sr',
-                    '            J[:, i_ts2, idx["O2"]] -= d_o2_sr',
-                    '        if "Fe3" in idx:',
-                    '            J[:, i_poc, idx["Fe3"]] += 2.0 * d_fe3_sr',
-                    '            J[:, i_so4, idx["Fe3"]] += d_fe3_sr',
-                    '            J[:, i_ts2, idx["Fe3"]] -= d_fe3_sr',
-                    '        if "SO4_32" in idx and "TS2_32" in idx and getattr(mp, "isotopes", False):',
-                    '            i_so4_32 = idx["SO4_32"]',
-                    '            i_ts2_32 = idx["TS2_32"]',
-                    '            c_so4_32 = np.asarray(c["SO4_32"].value if hasattr(c["SO4_32"], "value") else c["SO4_32"])',
-                    '            alpha = 1.0 + (float(mp.msr_alpha) - 1.0) * (c_so4 / (c_so4 + float(getattr(mp, "K_epsilon_msr", 1e-3))))',
-                    '            d_so4_32 = -0.5 * solid_fac * k_num * c_poc * (alpha / so4_denom) * o2_inhib * fe3_inhib',
-                    '            frac_32 = np.where(c_so4 > 1e-20, c_so4_32 / (c_so4 + 1e-30), 1.0 / (1.0 + float(mp.VCDT)))',
-                    '            d_o2_sr_32 = d_o2_sr * frac_32 * alpha',
-                    '            d_fe3_sr_32 = d_fe3_sr * frac_32 * alpha',
-                    '            J[:, i_so4_32, i_so4_32] += d_so4_32',
-                    '            J[:, i_ts2_32, i_so4_32] -= d_so4_32',
-                    '            if "O2" in idx:',
-                    '                J[:, i_so4_32, idx["O2"]] += d_o2_sr_32',
-                    '                J[:, i_ts2_32, idx["O2"]] -= d_o2_sr_32',
-                    '            if "Fe3" in idx:',
-                    '                J[:, i_so4_32, idx["Fe3"]] += d_fe3_sr_32',
-                    '                J[:, i_ts2_32, idx["Fe3"]] -= d_fe3_sr_32',
-                    '',
-                ])
-
-        if "FeS_precipitation_dissolution" in active_categories:
-            code.extend([
-                '    # 4. FeS precipitation / dissolution (smooth transition)',
-                '    if "Fe2_total" in idx and "TS2" in idx and "FeS" in idx:',
-                '        i_fe2 = idx["Fe2_total"]',
-                '        i_ts2 = idx["TS2"]',
-                '        i_fes = idx["FeS"]',
-                '        Fe2_val = np.maximum(c["Fe2_total"].value if hasattr(c["Fe2_total"], "value") else c["Fe2_total"], 1e-20)',
-                '        TS2_val = np.maximum(c["TS2"].value if hasattr(c["TS2"], "value") else c["TS2"], 1e-20)',
-                '        FeS_val = np.maximum(c["FeS"].value if hasattr(c["FeS"], "value") else c["FeS"], 1e-20)',
-                '        Fe2_pw = Fe2_val * float(mp.Fe2_diss)',
-                '        hs_val = TS2_val * float(mp.hs_frac)',
-                '        k_Hplus = float(getattr(k, "Hplus", getattr(mp, "Hplus", 10**-7.5)))',
-                '        k_FeS_sp = float(getattr(k, "FeS_sp", getattr(mp, "FeS_sp", 10**-3.5)))',
-                '        k_FeS_isp = float(getattr(k, "FeS_isp", getattr(mp, "FeS_isp", 1.0)))',
-                '        k_FeS_isd = float(getattr(k, "FeS_isd", getattr(mp, "FeS_isd", 0.3)))',
-                '        omega = (Fe2_pw * hs_val) / (k_Hplus * k_FeS_sp + 1e-30)',
-                '        d_omega_dFe2 = (float(mp.Fe2_diss) * hs_val) / (k_Hplus * k_FeS_sp + 1e-30)',
-                '        d_omega_dTS2 = (Fe2_pw * float(mp.hs_frac)) / (k_Hplus * k_FeS_sp + 1e-30)',
-                '        eps_sm = float(getattr(mp, "fes_smooth_epsilon", 0.01))',
-                '        # Precipitation branch (Omega >= 1)',
-                '        is_prec = omega >= 1.0',
-                '        df_p = np.maximum(omega - 1.0, 0.0)',
-                '        u_p = np.clip(df_p / (eps_sm + 1e-30), 0.0, 1.0)',
-                '        S_p = 3.0 * u_p**2 - 2.0 * u_p**3',
-                '        dS_du = np.where((u_p > 0.0) & (u_p < 1.0), 6.0 * u_p * (1.0 - u_p), 0.0)',
-                '        dS_p_domega = dS_du / (eps_sm + 1e-30)',
-                '        dR_prec_domega = k_FeS_isp * (S_p + df_p * dS_p_domega) * is_prec',
-                '        R_prec = k_FeS_isp * df_p * S_p * is_prec',
-                '        # Bulk precipitation: factor is diss_fac (liquid)',
-                '        dRp_dFe2 = diss_fac * dR_prec_domega * d_omega_dFe2',
-                '        dRp_dTS2 = diss_fac * dR_prec_domega * d_omega_dTS2',
-                '        # Dissolution branch (Omega < 1)',
-                '        is_diss = omega < 1.0',
-                '        us_d = np.maximum(1.0 - omega, 0.0)',
-                '        u_d = np.clip(us_d / (eps_sm + 1e-30), 0.0, 1.0)',
-                '        S_d = 3.0 * u_d**2 - 2.0 * u_d**3',
-                '        dS_d_du = np.where((u_d > 0.0) & (u_d < 1.0), 6.0 * u_d * (1.0 - u_d), 0.0)',
-                '        dS_d_domega = -dS_d_du / (eps_sm + 1e-30)',
-                '        dR_diss_domega = -k_FeS_isd * (S_d + us_d * (dS_d_du / (eps_sm + 1e-30))) * FeS_val * is_diss',
-                '        dR_diss_dFeS = k_FeS_isd * us_d * S_d * is_diss',
-                '        R_diss = k_FeS_isd * us_d * S_d * FeS_val * is_diss',
-                '        dRd_dFe2 = solid_fac * dR_diss_domega * d_omega_dFe2',
-                '        dRd_dTS2 = solid_fac * dR_diss_domega * d_omega_dTS2',
-                '        dRd_dFeS = solid_fac * dR_diss_dFeS',
-                '        # Total derivatives for FeS, Fe2, TS2',
-                '        d_net_dFe2 = dRp_dFe2 - dRd_dFe2',
-                '        d_net_dTS2 = dRp_dTS2 - dRd_dTS2',
-                '        d_net_dFeS = -dRd_dFeS',
-                '        J[:, i_fes, i_fe2] += d_net_dFe2',
-                '        J[:, i_fes, i_ts2] += d_net_dTS2',
-                '        J[:, i_fes, i_fes] += d_net_dFeS',
-                '        J[:, i_fe2, i_fe2] -= d_net_dFe2',
-                '        J[:, i_fe2, i_ts2] -= d_net_dTS2',
-                '        J[:, i_fe2, i_fes] -= d_net_dFeS',
-                '        J[:, i_ts2, i_fe2] -= d_net_dFe2',
-                '        J[:, i_ts2, i_ts2] -= d_net_dTS2',
-                '        J[:, i_ts2, i_fes] -= d_net_dFeS',
-                '        if "FeS_32" in idx and "TS2_32" in idx and getattr(mp, "isotopes", False):',
-                '            i_fes_32 = idx["FeS_32"]',
-                '            i_ts2_32 = idx["TS2_32"]',
-                '            hs_32 = partition_equilibrium_isotope_32(',
-                '                c["TS2_32"].value if hasattr(c["TS2_32"], "value") else c["TS2_32"],',
-                '                mp.hs_frac, mp.h2s_frac, mp.h2s_hs_alpha,',
-                '            )',
-                '            f32_default = 1.0 / (1.0 + float(mp.VCDT))',
-                '            mask_hs = hs_val > 1e-6',
-                '            f32_hs = np.where(mask_hs, np.asarray(hs_32) / (hs_val + 1e-30), f32_default)',
-                '            f32_hs = np.clip(f32_hs, 0.5, 1.5)',
-                '            R_prec_bulk = diss_fac * R_prec',
-                '            dRp32_dFe2 = dRp_dFe2 * f32_hs',
-                '            dRp32_dTS2 = dRp_dTS2 * f32_hs - np.where(mask_hs, (R_prec_bulk / TS2_val) * f32_hs, 0.0)',
-                '            dRp32_dTS2_32 = np.where(is_prec & mask_hs, R_prec_bulk / TS2_val, 0.0)',
-                '            R_diss_bulk = solid_fac * R_diss',
-                '            mask_fes = FeS_val > 1e-3',
-                '            FeS_32_val = np.asarray(c["FeS_32"].value if hasattr(c["FeS_32"], "value") else c["FeS_32"])',
-                '            f32_FeS = np.where(mask_fes, FeS_32_val / (FeS_val + 1e-30), f32_hs)',
-                '            f32_FeS = np.clip(f32_FeS, 0.5, 1.5)',
-                '            dRd32_dFe2 = dRd_dFe2 * f32_FeS',
-                '            dRd32_dTS2 = dRd_dTS2 * f32_FeS',
-                '            dRd32_dFeS = np.where(~mask_fes, dRd_dFeS * f32_hs, 0.0)',
-                '            dRd32_dFeS_32 = np.where(is_diss & mask_fes, R_diss_bulk / FeS_val, 0.0)',
-                '            J[:, i_fes_32, i_fe2] += (dRp32_dFe2 - dRd32_dFe2)',
-                '            J[:, i_fes_32, i_ts2] += (dRp32_dTS2 - dRd32_dTS2)',
-                '            J[:, i_fes_32, i_fes] -= dRd32_dFeS',
-                '            J[:, i_fes_32, i_ts2_32] += dRp32_dTS2_32',
-                '            J[:, i_fes_32, i_fes_32] -= dRd32_dFeS_32',
-                '            J[:, i_ts2_32, i_fe2] -= (dRp32_dFe2 - dRd32_dFe2)',
-                '            J[:, i_ts2_32, i_ts2] -= (dRp32_dTS2 - dRd32_dTS2)',
-                '            J[:, i_ts2_32, i_fes] += dRd32_dFeS',
-                '            J[:, i_ts2_32, i_ts2_32] -= dRp32_dTS2_32',
-                '            J[:, i_ts2_32, i_fes_32] += dRd32_dFeS_32',
-                '',
-            ])
-
-        if "hs_oxidation" in active_categories:
-            code.extend([
-                '    # 5. HS oxidation (hs_oxidation_velde)',
-                '    if "TS2" in idx and "O2" in idx and "SO4" in idx:',
-                '        i_ts2 = idx["TS2"]',
-                '        i_o2 = idx["O2"]',
-                '        i_so4 = idx["SO4"]',
-                '        k_num = float(mp.k.get("TS2_O2") if hasattr(mp, "k") else getattr(k, "TS2_O2", 0.0))',
-                '        c_o2 = np.asarray(c["O2"].value if hasattr(c["O2"], "value") else c["O2"])',
-                '        c_ts2 = np.asarray(c["TS2"].value if hasattr(c["TS2"], "value") else c["TS2"])',
-                '        K_O2_TS2 = float(getattr(mp, "K_O2_TS2", 1e-4))',
-                '        denom_o2 = c_o2 + K_O2_TS2',
-                '        hs_frac = float(mp.hs_frac)',
-                '        d_ts2 = diss_fac * k_num * hs_frac * (c_o2 / denom_o2)',
-                '        d_o2 = diss_fac * k_num * (c_ts2 * hs_frac) * (K_O2_TS2 / denom_o2**2)',
-                '        J[:, i_ts2, i_ts2] -= d_ts2',
-                '        J[:, i_ts2, i_o2] -= d_o2',
-                '        J[:, i_so4, i_ts2] += d_ts2',
-                '        J[:, i_so4, i_o2] += d_o2',
-                '        J[:, i_o2, i_ts2] -= 2.0 * d_ts2',
-                '        J[:, i_o2, i_o2] -= 2.0 * d_o2',
-                '        if "TS2_32" in idx and "SO4_32" in idx and getattr(mp, "isotopes", False):',
-                '            i_ts2_32 = idx["TS2_32"]',
-                '            i_so4_32 = idx["SO4_32"]',
-                '            c_ts2_32 = np.asarray(c["TS2_32"].value if hasattr(c["TS2_32"], "value") else c["TS2_32"])',
-                '            alpha = 1.0 + (float(getattr(mp, "TS2_O2_alpha", 0.995)) - 1.0) * (c_ts2 / (c_ts2 + float(getattr(mp, "K_epsilon_TS2_O2", 1e-3))))',
-                '            d_ts2_32 = diss_fac * k_num * hs_frac * (c_o2 / denom_o2) * alpha',
-                '            d_ts2_32_o2 = diss_fac * k_num * (c_ts2_32 * hs_frac) * (K_O2_TS2 / denom_o2**2) * alpha',
-                '            J[:, i_ts2_32, i_ts2_32] -= d_ts2_32',
-                '            J[:, i_so4_32, i_ts2_32] += d_ts2_32',
-                '            J[:, i_ts2_32, i_o2] -= d_ts2_32_o2',
-                '            J[:, i_so4_32, i_o2] += d_ts2_32_o2',
-                '',
-            ])
-
-        if "Fe2_oxidation" in active_categories:
-            code.extend([
-                '    # 6. Fe2 oxidation (Fe2_oxidation)',
-                '    if "Fe2_total" in idx and "O2" in idx and "Fe3" in idx:',
-                '        i_fe2 = idx["Fe2_total"]',
-                '        i_o2 = idx["O2"]',
-                '        i_fe3 = idx["Fe3"]',
-                '        k_num = float(mp.k.get("Fe2_O2") if hasattr(mp, "k") else getattr(k, "Fe2_O2", 0.0))',
-                '        c_fe2 = np.asarray(c["Fe2_total"].value if hasattr(c["Fe2_total"], "value") else c["Fe2_total"])',
-                '        c_o2 = np.asarray(c["O2"].value if hasattr(c["O2"], "value") else c["O2"])',
-                '        d_fe2 = diss_fac * k_num * c_o2',
-                '        d_o2 = diss_fac * k_num * c_fe2',
-                '        J[:, i_fe2, i_fe2] -= d_fe2',
-                '        J[:, i_fe2, i_o2] -= d_o2',
-                '        J[:, i_fe3, i_fe2] += d_fe2',
-                '        J[:, i_fe3, i_o2] += d_o2',
-                '        J[:, i_o2, i_fe2] -= 0.25 * d_fe2',
-                '        J[:, i_o2, i_o2] -= 0.25 * d_o2',
-                '',
-            ])
-
-        if any(cat in active_categories for cat in ("sulfide_mediated_iron_reduction", "sulfide_mediated_iron_reduction_velde")):
-            code.extend([
-                '    # 7. Sulfide-mediated iron reduction (sulfide_mediated_iron_reduction_velde)',
-                '    if "TS2" in idx and "Fe3" in idx and "Fe2_total" in idx and "SO4" in idx:',
-                '        i_ts2 = idx["TS2"]',
-                '        i_fe3 = idx["Fe3"]',
-                '        i_fe2 = idx["Fe2_total"]',
-                '        i_so4 = idx["SO4"]',
-                '        k_num = float(mp.k.get("Fe3_hs") if hasattr(mp, "k") else getattr(k, "Fe3_hs", 0.0))',
-                '        c_fe3 = np.asarray(c["Fe3"].value if hasattr(c["Fe3"], "value") else c["Fe3"])',
-                '        c_ts2 = np.asarray(c["TS2"].value if hasattr(c["TS2"], "value") else c["TS2"])',
-                '        c_o2 = np.asarray(c["O2"].value if hasattr(c["O2"], "value") else c["O2"])',
-                '        K_O2 = float(mp.K_O2) / phi',
-                '        K_Fe3 = float(getattr(mp, "K_Fe3", 1e-3))',
-                '        o2_inhibit = K_O2 / (c_o2 + K_O2)',
-                '        fe3_lim = 1.0 / (c_fe3 + K_Fe3)',
-                '        hs = c_ts2 * float(mp.hs_frac)',
-                '        d_ts2 = (k_num * c_fe3 * float(mp.hs_frac) * o2_inhibit * fe3_lim / 8.0) * solid_fac',
-                '        d_fe3 = (k_num * hs * o2_inhibit * (K_Fe3 / (c_fe3 + K_Fe3)**2) / 8.0) * solid_fac',
-                '        denom_o2_sir = c_o2 + K_O2',
-                '        d_o2_sir = (k_num * c_fe3 * hs * (K_O2 / denom_o2_sir**2) * fe3_lim / 8.0) * solid_fac',
-                '        J[:, i_ts2, i_ts2] -= d_ts2',
-                '        J[:, i_ts2, i_fe3] -= d_fe3',
-                '        J[:, i_so4, i_ts2] += d_ts2',
-                '        J[:, i_so4, i_fe3] += d_fe3',
-                '        J[:, i_fe3, i_ts2] -= 8.0 * d_ts2',
-                '        J[:, i_fe3, i_fe3] -= 8.0 * d_fe3',
-                '        J[:, i_fe2, i_ts2] += 8.0 * d_ts2',
-                '        J[:, i_fe2, i_fe3] += 8.0 * d_fe3',
-                '        if "O2" in idx:',
-                '            J[:, i_ts2, idx["O2"]] += d_o2_sir',
-                '            J[:, i_so4, idx["O2"]] -= d_o2_sir',
-                '            J[:, i_fe3, idx["O2"]] += 8.0 * d_o2_sir',
-                '            J[:, i_fe2, idx["O2"]] -= 8.0 * d_o2_sir',
-                '        if "TS2_32" in idx and "SO4_32" in idx and getattr(mp, "isotopes", False):',
-                '            i_ts2_32 = idx["TS2_32"]',
-                '            i_so4_32 = idx["SO4_32"]',
-                '            c_ts2_32 = np.asarray(c["TS2_32"].value if hasattr(c["TS2_32"], "value") else c["TS2_32"])',
-                '            hs_32 = c_ts2_32 * float(mp.hs_frac)',
-                '            d_fe3_32 = (k_num * hs_32 * o2_inhibit * (K_Fe3 / (c_fe3 + K_Fe3)**2) / 8.0) * solid_fac',
-                '            d_o2_sir_32 = (k_num * c_fe3 * hs_32 * (K_O2 / denom_o2_sir**2) * fe3_lim / 8.0) * solid_fac',
-                '            J[:, i_ts2_32, i_ts2_32] -= d_ts2',
-                '            J[:, i_so4_32, i_ts2_32] += d_ts2',
-                '            J[:, i_ts2_32, i_fe3] -= d_fe3_32',
-                '            J[:, i_so4_32, i_fe3] += d_fe3_32',
-                '            if "O2" in idx:',
-                '                J[:, i_ts2_32, idx["O2"]] += d_o2_sir_32',
-                '                J[:, i_so4_32, idx["O2"]] -= d_o2_sir_32',
-                '',
-            ])
-
-        if "FeS_oxidation" in active_categories:
-            code.extend([
-                '    # 8. FeS oxidation (FeS_oxidation)',
-                '    if "FeS" in idx and "O2" in idx and "Fe3" in idx and "SO4" in idx:',
-                '        i_fes = idx["FeS"]',
-                '        i_o2 = idx["O2"]',
-                '        i_fe3 = idx["Fe3"]',
-                '        i_so4 = idx["SO4"]',
-                '        k_num = float(mp.k.get("FeS_O2") if hasattr(mp, "k") else getattr(k, "FeS_O2", 0.0))',
-                '        c_fes = np.asarray(c["FeS"].value if hasattr(c["FeS"], "value") else c["FeS"])',
-                '        c_o2 = np.asarray(c["O2"].value if hasattr(c["O2"], "value") else c["O2"])',
-                '        d_fes = solid_fac * k_num * c_o2',
-                '        d_o2 = solid_fac * k_num * c_fes',
-                '        J[:, i_fes, i_fes] -= d_fes',
-                '        J[:, i_fes, i_o2] -= d_o2',
-                '        J[:, i_fe3, i_fes] += d_fes',
-                '        J[:, i_fe3, i_o2] += d_o2',
-                '        J[:, i_so4, i_fes] += d_fes',
-                '        J[:, i_so4, i_o2] += d_o2',
-                '        J[:, i_o2, i_fes] -= 2.25 * d_fes',
-                '        J[:, i_o2, i_o2] -= 2.25 * d_o2',
-                '        if "FeS_32" in idx and "SO4_32" in idx and getattr(mp, "isotopes", False):',
-                '            i_fes_32 = idx["FeS_32"]',
-                '            i_so4_32 = idx["SO4_32"]',
-                '            c_fes_32 = np.asarray(c["FeS_32"].value if hasattr(c["FeS_32"], "value") else c["FeS_32"])',
-                '            d_o2_32 = solid_fac * k_num * c_fes_32',
-                '            J[:, i_fes_32, i_fes_32] -= d_fes',
-                '            J[:, i_so4_32, i_fes_32] += d_fes',
-                '            J[:, i_fes_32, i_o2] -= d_o2_32',
-                '            J[:, i_so4_32, i_o2] += d_o2_32',
-                '',
-            ])
-
-        if "FeS2_oxidation" in active_categories:
-            code.extend([
-                '    # 9. FeS2 oxidation (FeS2_oxidation)',
-                '    if "FeS2" in idx and "O2" in idx and "Fe3" in idx and "SO4" in idx:',
-                '        i_fes2 = idx["FeS2"]',
-                '        i_o2 = idx["O2"]',
-                '        i_fe3 = idx["Fe3"]',
-                '        i_so4 = idx["SO4"]',
-                '        k_num = float(mp.k.get("FeS2_O2") if hasattr(mp, "k") else getattr(k, "FeS2_O2", 0.0))',
-                '        c_fes2 = np.asarray(c["FeS2"].value if hasattr(c["FeS2"], "value") else c["FeS2"])',
-                '        c_o2 = np.asarray(c["O2"].value if hasattr(c["O2"], "value") else c["O2"])',
-                '        d_fes2 = solid_fac * k_num * c_o2',
-                '        d_o2 = solid_fac * k_num * c_fes2',
-                '        J[:, i_fes2, i_fes2] -= d_fes2',
-                '        J[:, i_fes2, i_o2] -= d_o2',
-                '        J[:, i_fe3, i_fes2] += d_fes2',
-                '        J[:, i_fe3, i_o2] += d_o2',
-                '        J[:, i_so4, i_fes2] += 2.0 * d_fes2',
-                '        J[:, i_so4, i_o2] += 2.0 * d_o2',
-                '        J[:, i_o2, i_fes2] -= 3.5 * d_fes2',
-                '        J[:, i_o2, i_o2] -= 3.5 * d_o2',
-                '        if "FeS2_32" in idx and "SO4_32" in idx and getattr(mp, "isotopes", False):',
-                '            i_fes2_32 = idx["FeS2_32"]',
-                '            i_so4_32 = idx["SO4_32"]',
-                '            c_fes2_32 = np.asarray(c["FeS2_32"].value if hasattr(c["FeS2_32"], "value") else c["FeS2_32"])',
-                '            d_o2_32 = solid_fac * k_num * c_fes2_32',
-                '            J[:, i_fes2_32, i_fes2_32] -= d_fes2',
-                '            J[:, i_so4_32, i_fes2_32] += 2.0 * d_fes2',
-                '            J[:, i_fes2_32, i_o2] -= d_o2_32',
-                '            J[:, i_so4_32, i_o2] += 2.0 * d_o2_32',
-                '',
-            ])
-
-        if "FeS2_precipitation_TS2" in active_categories:
-            code.extend([
-                '    # 10. FeS2 precipitation via TS2 (FeS2_precipitation_TS2)',
-                '    if "FeS" in idx and "TS2" in idx and "FeS2" in idx:',
-                '        i_fes = idx["FeS"]',
-                '        i_ts2 = idx["TS2"]',
-                '        i_fes2 = idx["FeS2"]',
-                '        k_num = float(mp.k.get("FeS_TS2") if hasattr(mp, "k") else getattr(k, "FeS_TS2", 0.0))',
-                '        c_fes = np.asarray(c["FeS"].value if hasattr(c["FeS"], "value") else c["FeS"])',
-                '        c_ts2 = np.asarray(c["TS2"].value if hasattr(c["TS2"], "value") else c["TS2"])',
-                '        hs_frac = float(mp.hs_frac)',
-                '        d_fes = solid_fac * k_num * c_ts2 * hs_frac',
-                '        d_ts2 = solid_fac * k_num * c_fes * hs_frac',
-                '        J[:, i_fes, i_fes] -= d_fes',
-                '        J[:, i_fes, i_ts2] -= d_ts2',
-                '        J[:, i_ts2, i_fes] -= d_fes',
-                '        J[:, i_ts2, i_ts2] -= d_ts2',
-                '        J[:, i_fes2, i_fes] += d_fes',
-                '        J[:, i_fes2, i_ts2] += d_ts2',
-                '        if "FeS_32" in idx and "TS2_32" in idx and "FeS2_32" in idx and getattr(mp, "isotopes", False):',
-                '            i_fes_32 = idx["FeS_32"]',
-                '            i_ts2_32 = idx["TS2_32"]',
-                '            i_fes2_32 = idx["FeS2_32"]',
-                '            J[:, i_fes_32, i_fes_32] -= d_fes',
-                '            J[:, i_ts2_32, i_ts2_32] -= d_ts2',
-                '            J[:, i_fes2_32, i_fes2_32] += d_fes',
-                '            J[:, i_fes2_32, i_ts2_32] += d_ts2',
-                '',
-            ])
-
-        if "elemental_sulfur_oxidation" in active_categories:
-            code.extend([
-                '    # 11. Elemental sulfur oxidation (elemental_sulfur_oxidation)',
-                '    if "S0" in idx and "O2" in idx and "SO4" in idx:',
-                '        i_s0 = idx["S0"]',
-                '        i_o2 = idx["O2"]',
-                '        i_so4 = idx["SO4"]',
-                '        k_num = float(mp.k.get("S0_O2") if hasattr(mp, "k") else getattr(k, "S0_O2", 0.0))',
-                '        c_s0 = np.asarray(c["S0"].value if hasattr(c["S0"], "value") else c["S0"])',
-                '        c_o2 = np.asarray(c["O2"].value if hasattr(c["O2"], "value") else c["O2"])',
-                '        d_s0 = solid_fac * k_num * c_o2',
-                '        d_o2 = solid_fac * k_num * c_s0',
-                '        J[:, i_s0, i_s0] -= d_s0',
-                '        J[:, i_s0, i_o2] -= d_o2',
-                '        J[:, i_o2, i_s0] -= 1.5 * d_s0',
-                '        J[:, i_o2, i_o2] -= 1.5 * d_o2',
-                '        J[:, i_so4, i_s0] += d_s0',
-                '        J[:, i_so4, i_o2] += d_o2',
-                '        if "S0_32" in idx and "SO4_32" in idx and getattr(mp, "isotopes", False):',
-                '            i_s0_32 = idx["S0_32"]',
-                '            i_so4_32 = idx["SO4_32"]',
-                '            c_s0_32 = np.asarray(c["S0_32"].value if hasattr(c["S0_32"], "value") else c["S0_32"])',
-                '            d_o2_32 = solid_fac * k_num * c_s0_32',
-                '            J[:, i_s0_32, i_s0_32] -= d_s0',
-                '            J[:, i_so4_32, i_s0_32] += d_s0',
-                '            J[:, i_s0_32, i_o2] -= d_o2_32',
-                '            J[:, i_so4_32, i_o2] += d_o2_32',
-                '',
-            ])
-
-        if "pyrite_formation_fes_s0" in active_categories:
-            code.extend([
-                '    # 12. Pyrite formation via S0 (pyrite_formation_fes_s0_new)',
-                '    if "FeS" in idx and "S0" in idx and "FeS2" in idx:',
-                '        i_fes = idx["FeS"]',
-                '        i_s0 = idx["S0"]',
-                '        i_fes2 = idx["FeS2"]',
-                '        k_num = float(mp.k.get("FeS_S0") if hasattr(mp, "k") else getattr(k, "FeS_S0", 0.0))',
-                '        c_fes = np.asarray(c["FeS"].value if hasattr(c["FeS"], "value") else c["FeS"])',
-                '        c_s0 = np.asarray(c["S0"].value if hasattr(c["S0"], "value") else c["S0"])',
-                '        d_fes = solid_fac * k_num * c_s0',
-                '        d_s0 = solid_fac * k_num * c_fes',
-                '        J[:, i_fes, i_fes] -= d_fes',
-                '        J[:, i_fes, i_s0] -= d_s0',
-                '        J[:, i_s0, i_fes] -= d_fes',
-                '        J[:, i_s0, i_s0] -= d_s0',
-                '        J[:, i_fes2, i_fes] += d_fes',
-                '        J[:, i_fes2, i_s0] += d_s0',
-                '        if "FeS_32" in idx and "S0_32" in idx and "FeS2_32" in idx and getattr(mp, "isotopes", False):',
-                '            i_fes_32 = idx["FeS_32"]',
-                '            i_s0_32 = idx["S0_32"]',
-                '            i_fes2_32 = idx["FeS2_32"]',
-                '            J[:, i_fes_32, i_fes_32] -= d_fes',
-                '            J[:, i_s0_32, i_s0_32] -= d_s0',
-                '            J[:, i_fes2_32, i_fes2_32] += d_fes',
-                '            J[:, i_fes2_32, i_s0_32] += d_s0',
-                '',
-            ])
-
-        if "elemental_sulfur_disproportionation" in active_categories:
-            code.extend([
-                '    # 13. Elemental sulfur disproportionation',
-                '    if "S0" in idx and "TS2" in idx and "SO4" in idx:',
-                '        i_s0 = idx["S0"]',
-                '        i_ts2 = idx["TS2"]',
-                '        i_so4 = idx["SO4"]',
-                '        k_num = float(mp.k.get("S0_dispro") if hasattr(mp, "k") else getattr(k, "S0_dispro", 0.0))',
-                '        lim_ts2 = lim.get("TS2", 1.0)',
-                '        lim_o2 = lim.get("O2_inhibit", 1.0)',
-                '        coeff_s0 = np.maximum(k_num * lim_ts2 * lim_o2, 0.0)',
-                '        d_s0 = solid_fac * coeff_s0',
-                '        J[:, i_s0, i_s0] -= d_s0',
-                '        J[:, i_ts2, i_s0] += 0.75 * d_s0',
-                '        J[:, i_so4, i_s0] += 0.25 * d_s0',
-                '        if "S0_32" in idx and "TS2_32" in idx and "SO4_32" in idx and getattr(mp, "isotopes", False):',
-                '            i_s0_32 = idx["S0_32"]',
-                '            i_ts2_32 = idx["TS2_32"]',
-                '            i_so4_32 = idx["SO4_32"]',
-                '            J[:, i_s0_32, i_s0_32] -= d_s0',
-                '            J[:, i_ts2_32, i_s0_32] += 0.75 * d_s0',
-                '            J[:, i_so4_32, i_s0_32] += 0.25 * d_s0',
-                '',
-            ])
-
         for r in self.reactions:
             cat = self.classify_reaction(r, self.validator)
-            if cat not in legacy_cats:
-                code.extend(self._generate_custom_reaction_jacobian(r, cat))
+            if cat.mechanism == "reversible_saturation":
+                code.extend(self._generate_reversible_saturation_jacobian(r, cat))
+            else:
+                code.extend(self._generate_kinetic_reaction_jacobian(r, cat))
 
         code.extend([
             '    return J',
