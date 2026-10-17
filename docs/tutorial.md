@@ -425,6 +425,31 @@ reaction_parameters = {
 fractionation_factors = reaction_parameters
 ```
 
+### How MANTIS Classifies Reactions (Species-Agnostic Engine)
+
+Historically, reaction-transport codes often relied on hardcoded species names (e.g., checking explicitly for `"POC"` and `"O2"`). In MANTIS, the equation compiler is **fully species-agnostic**. You can invent and model arbitrary reaction pathways (such as denitrification, manganese reduction, carbonate precipitation, or methane oxidation) without modifying any internal solver code.
+
+The compiler determines how to assemble the PDE transport coupling and Jacobian using two primary properties:
+
+1. **Phase Permutations** (derived directly from `species.py`):
+   - **`liquid_to_liquid`**: All reactants and products are dissolved porewater solutes (e.g., $\text{HS}^- + 2\,\text{O}_2 \to \text{SO}_4^{2-}$). Reaction rates are scaled by porosity $\phi$.
+   - **`solid_to_liquid`**: One or more reactants are solid minerals or particulate organic carbon, and all products are dissolved (e.g., $\text{POC} + \text{O}_2 \to \text{CO}_2$). Reaction rates are scaled by the solid sediment fraction $(1 - \phi)$.
+   - **`liquid_to_solid`**: Dissolved porewater reactants precipitate into solid minerals (e.g., $\text{Fe}^{2+} + \text{HS}^- \to \text{FeS}$).
+   - **`solid_transformation`**: Solid reactants react to form solid products (e.g., $\text{FeS} + \text{S}^0 \to \text{FeS}_2$ or dissimilatory iron reduction $\text{POC} + 4\,\text{FeOOH} \to 4\,\text{Fe}^{2+}$).
+
+2. **Thermodynamic / Kinetic Mechanisms**:
+   - **`general_kinetic`**: Standard single- or multi-reactant irreversible kinetics with arbitrary Monod limiters and inhibition factors. Automatically coupled via `add_coupled_reaction()`.
+   - **`reversible_saturation`**: Dynamic mineral precipitation/dissolution driven by the saturation state $\Omega = Q / K_{sp}$. Uses a $C^1$ cubic Hermite spline transition around equilibrium ($\Omega = 1$) to eliminate discontinuities.
+   - **`disproportionation`**: A single reactant splits into multiple redox products (e.g., $4\,\text{S}^0 + 4\,\text{H}_2\text{O} \to 3\,\text{H}_2\text{S} + \text{SO}_4^{2-} + 2\,\text{H}^+$).
+
+#### Automated SymPy Chemical Jacobian
+Whenever reaction equations are compiled, MANTIS uses `SymPy` to algebraically differentiate the rate laws with respect to every participating state variable:
+$$\mathbf{J}_{s, m} = \frac{\partial R_s}{\partial C_m}$$
+Because differentiation is performed symbolically:
+- Exact machine-precision Jacobians are generated for any arbitrary reaction network.
+- Speciation chain rules (such as $\frac{\partial R}{\partial [\text{TS}_2]} = \frac{\partial R}{\partial [\text{HS}^-]} \cdot \alpha_{\text{HS}^-}$) are applied automatically.
+- The monolithic Newton solver achieves quadratic convergence without human derivative derivation errors.
+
 
 
 ## Step 4: The Master Run Script (`run_velde_model_fast.py`)

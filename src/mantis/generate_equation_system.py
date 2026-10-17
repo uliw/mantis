@@ -205,6 +205,76 @@ class ReactionSystemValidator:
 
         return _parse_side(left), _parse_side(right)
 
+    def get_species_phase(self, sp: str) -> str:
+        """Returns 'liquid', 'solid', or 'mixed' for the given species.
+
+        Resolves aliases and equilibrium species back to their parent phase.
+        """
+        meta = getattr(self, "species_defs", {}).get(sp)
+        if not meta or not isinstance(meta, dict):
+            parent = self.get_parent_species(sp)
+            if parent != sp and parent in getattr(self, "species_defs", {}):
+                return self.get_species_phase(parent)
+            # Heuristic fallback for undeclared intermediate species
+            if any(term in sp for term in ("POC", "TOC", "Fe3", "FeOOH", "FeS", "FeS2", "S0", "MnO2", "CaCO3")):
+                return "solid"
+            return "liquid"
+
+        if "phase" in meta:
+            return meta["phase"]
+        if "alias_of" in meta:
+            parent = meta["alias_of"].split(".")[0]
+            return self.get_species_phase(parent)
+        if "equilibrium_of" in meta:
+            return self.get_species_phase(meta["equilibrium_of"])
+        if "isotope_of" in meta:
+            return self.get_species_phase(meta["isotope_of"])
+        return "liquid"
+
+    def get_parent_species(self, sp: str) -> str:
+        """Returns the primary transport state variable name for a given species.
+
+        E.g. HS -> TS2, Fe2_liq -> Fe2_total, SO4 -> SO4.
+        """
+        meta = getattr(self, "species_defs", {}).get(sp)
+        if isinstance(meta, dict):
+            if "equilibrium_of" in meta:
+                return meta["equilibrium_of"]
+            if "alias_of" in meta:
+                return meta["alias_of"].split(".")[0]
+            if "isotope_of" in meta and not meta.get("include", True):
+                return meta["isotope_of"]
+        return sp
+
+    def get_speciation_factor_expr(self, sp: str) -> Optional[str]:
+        """Returns python code expression for the fraction of parent species, or None if 1.0."""
+        meta = getattr(self, "species_defs", {}).get(sp)
+        if isinstance(meta, dict):
+            if sp in ("HS", "HS_32"):
+                return "mp.hs_frac"
+            if sp in ("H2S", "H2S_32"):
+                return "mp.h2s_frac"
+            if sp == "Fe2_liq" or meta.get("alias_of") == "Fe2_total.dissolved":
+                return "mp.Fe2_diss"
+            if sp == "Fe2_sorbed" or meta.get("alias_of") == "Fe2_total.sorbed":
+                return "(1.0 - mp.Fe2_diss)"
+            if "fraction" in meta and isinstance(meta["fraction"], str):
+                return meta["fraction"]
+        if sp in ("HS", "HS_32"):
+            return "mp.hs_frac"
+        if sp in ("H2S", "H2S_32"):
+            return "mp.h2s_frac"
+        if sp == "Fe2_liq":
+            return "mp.Fe2_diss"
+        return None
+
+    def is_transport_species(self, sp: str) -> bool:
+        """Returns True if the species is an active transport PDE variable (include: True)."""
+        meta = getattr(self, "species_defs", {}).get(sp)
+        if isinstance(meta, dict):
+            return bool(meta.get("include", True))
+        return sp in self.valid_species
+
     def validate_reaction(self, rxn_dict: Dict[str, Any]) -> List[str]:
         """Validates a single reaction dictionary. Returns a list of error messages (empty if valid)."""
         errors = []
@@ -681,6 +751,32 @@ def resolve_and_prepare_equations(
     return eq_mod, reactions_path, equations_path
 
 
+class ReactionCategory(str):
+    """Encapsulates classification metadata for a reaction while acting as a string for backward compatibility."""
+
+    def __new__(
+        cls,
+        value: str,
+        *,
+        mechanism: str = "general_kinetic",
+        phase_archetype: str = "liquid_to_liquid",
+        has_solid_reactant: bool = False,
+        has_solid_product: bool = False,
+        reactants: Optional[List[Tuple[float, str]]] = None,
+        products: Optional[List[Tuple[float, str]]] = None,
+        canonical_name: str = "",
+    ):
+        obj = super().__new__(cls, value)
+        obj.mechanism = mechanism
+        obj.phase_archetype = phase_archetype
+        obj.has_solid_reactant = has_solid_reactant
+        obj.has_solid_product = has_solid_product
+        obj.reactants = reactants or []
+        obj.products = products or []
+        obj.canonical_name = canonical_name or value
+        return obj
+
+
 class EquationSystemGenerator:
     """Generates an assembled equations.py module with SymPy analytical Jacobian."""
 
@@ -688,78 +784,215 @@ class EquationSystemGenerator:
         self.reactions = reactions
         self.validator = validator
 
-    @staticmethod
-    def classify_reaction(r: Dict[str, Any]) -> str:
-        """Classifies a chemical reaction based on its stoichiometry, reactants, and products,
-        completely independent of the user-assigned reaction name.
+    @classmethod
+    def classify_reaction(cls, r: Dict[str, Any], validator: Optional[ReactionSystemValidator] = None) -> ReactionCategory:
+        """Classifies a chemical reaction based on reactant/product phases and mechanism type,
+        completely independent of chemical symbols or species names.
         """
         r_str = r.get("reaction", "")
         if "->" not in r_str:
-            return "unknown"
+            raise ValueError(f"Reaction string missing '->' delimiter: '{r_str}'")
+
         try:
             reactants, products = ReactionSystemValidator.parse_reaction_species(r_str)
-        except Exception:
-            return "unknown"
+        except Exception as e:
+            raise ValueError(f"Could not parse reaction '{r_str}': {e}")
 
         r_sp = [sp for _, sp in reactants]
         p_sp = [sp for _, sp in products]
         k_val = r.get("k_value_name")
 
-        # 1. Reversible precipitation / dissolution (e.g. FeS)
-        if isinstance(k_val, dict) and "precipitation" in k_val:
-            return "FeS_precipitation_dissolution"
+        # 1. Mechanism detection
+        if isinstance(k_val, dict) and any(k in k_val for k in ("precipitation", "dissolution", "equilibrium")):
+            mechanism = "reversible_saturation"
+        elif len(reactants) == 1 and len(products) >= 2:
+            mechanism = "disproportionation"
+        else:
+            mechanism = "general_kinetic"
 
-        # 2. Elemental sulfur disproportionation (S0 -> TS2 + SO4)
-        if "S0" in r_sp and "TS2" in p_sp and "SO4" in p_sp:
-            return "elemental_sulfur_disproportionation"
+        # 2. Reactant and product phase detection
+        if validator is not None:
+            r_phases = [validator.get_species_phase(sp) for _, sp in reactants]
+            p_phases = [validator.get_species_phase(sp) for _, sp in products]
+        else:
+            def _heuristic_phase(sp: str) -> str:
+                if any(t in sp for t in ("POC", "TOC", "Fe3", "FeOOH", "FeS", "FeS2", "S0", "MnO2", "CaCO3", "OM")):
+                    return "solid"
+                if "Fe2" in sp:
+                    return "mixed"
+                return "liquid"
+            r_phases = [_heuristic_phase(sp) for _, sp in reactants]
+            p_phases = [_heuristic_phase(sp) for _, sp in products]
 
-        # 3. Aerobic respiration (POC + O2 -> CO2)
-        if "O2" in r_sp and any("POC" in sp for sp in r_sp):
-            return "aerobic_respiration"
+        has_solid_r = any(p in ("solid", "mixed") for p in r_phases)
+        has_solid_p = any(p in ("solid", "mixed") for p in p_phases)
 
-        # 4. Dissimilatory iron reduction (POC + Fe3 -> Fe2_total)
-        if "Fe3" in r_sp and any("POC" in sp for sp in r_sp):
-            return "dissimilatory_iron_reduction"
+        # 3. Phase archetype assignment
+        if not has_solid_r and not has_solid_p:
+            phase_archetype = "liquid_to_liquid"
+        elif has_solid_r and not has_solid_p:
+            phase_archetype = "solid_to_liquid"
+        elif not has_solid_r and has_solid_p:
+            phase_archetype = "liquid_to_solid"
+        else:
+            phase_archetype = "solid_transformation"
 
-        # 5. Sulfate reduction (POC + SO4 -> TS2)
-        if "SO4" in r_sp and any("POC" in sp for sp in r_sp):
-            return "sulfate_reduction"
+        # 4. Canonical archetype matching for backward compatibility
+        r_name = r.get("reaction_name", "")
+        canonical_name = ""
 
-        # 6. Sulfide oxidation (HS + O2 -> SO4)
-        if any(sp in ("HS", "TS2") for sp in r_sp) and "O2" in r_sp and "SO4" in p_sp:
-            return "hs_oxidation"
+        if mechanism == "reversible_saturation":
+            canonical_name = "FeS_precipitation_dissolution"
+        elif mechanism == "disproportionation":
+            canonical_name = "elemental_sulfur_disproportionation"
+        elif "O2" in r_sp and any("POC" in sp or "TOC" in sp or "OM" in sp or "CH2O" in sp for sp in r_sp):
+            canonical_name = "aerobic_respiration"
+        elif any("Fe3" in sp or "FeOOH" in sp for sp in r_sp) and any("POC" in sp or "TOC" in sp or "OM" in sp or "CH2O" in sp for sp in r_sp):
+            canonical_name = "dissimilatory_iron_reduction"
+        elif any("SO4" in sp for sp in r_sp) and any("POC" in sp or "TOC" in sp or "OM" in sp or "CH2O" in sp for sp in r_sp):
+            canonical_name = "sulfate_reduction"
+        elif any(sp in ("HS", "TS2", "H2S") for sp in r_sp) and "O2" in r_sp and "SO4" in p_sp:
+            canonical_name = "hs_oxidation"
+        elif any("Fe2" in sp for sp in r_sp) and "O2" in r_sp and any("Fe3" in sp for sp in p_sp):
+            canonical_name = "Fe2_oxidation"
+        elif any(sp in ("HS", "TS2", "H2S") for sp in r_sp) and any("Fe3" in sp for sp in r_sp) and "SO4" in p_sp:
+            canonical_name = "sulfide_mediated_iron_reduction_velde"
+        elif any(sp in ("HS", "TS2", "H2S") for sp in r_sp) and any("Fe3" in sp for sp in r_sp) and "S0" in p_sp:
+            canonical_name = "sulfide_mediated_iron_reduction"
+        elif any(sp == "FeS" for sp in r_sp) and "O2" in r_sp and ("Fe3" in p_sp or "SO4" in p_sp):
+            canonical_name = "FeS_oxidation"
+        elif any(sp == "FeS2" for sp in r_sp) and "O2" in r_sp:
+            canonical_name = "FeS2_oxidation"
+        elif any(sp == "FeS" for sp in r_sp) and any(sp in ("HS", "TS2", "H2S") for sp in r_sp) and any("FeS2" in sp for sp in p_sp):
+            canonical_name = "FeS2_precipitation_TS2"
+        elif any(sp == "FeS" for sp in r_sp) and any("S0" in sp for sp in r_sp) and any("FeS2" in sp for sp in p_sp):
+            canonical_name = "pyrite_formation_fes_s0"
+        elif any("S0" in sp for sp in r_sp) and "O2" in r_sp and "SO4" in p_sp:
+            canonical_name = "elemental_sulfur_oxidation"
+        else:
+            canonical_name = r_name or f"{phase_archetype}_{mechanism}"
 
-        # 7. Sulfide-mediated iron reduction
-        if any(sp in ("HS", "TS2") for sp in r_sp) and "Fe3" in r_sp:
-            if "SO4" in p_sp:
-                return "sulfide_mediated_iron_reduction_velde"
-            return "sulfide_mediated_iron_reduction"
+        return ReactionCategory(
+            canonical_name,
+            mechanism=mechanism,
+            phase_archetype=phase_archetype,
+            has_solid_reactant=has_solid_r,
+            has_solid_product=has_solid_p,
+            reactants=reactants,
+            products=products,
+            canonical_name=canonical_name,
+        )
 
-        # 8. Fe2 oxidation (Fe2 + O2 -> Fe3)
-        if any("Fe2" in sp for sp in r_sp) and "O2" in r_sp and "Fe3" in p_sp:
-            return "Fe2_oxidation"
+    def _generate_custom_reaction_fn(self, r: Dict[str, Any], cat: ReactionCategory) -> List[str]:
+        r_name = r.get("reaction_name", "custom_rxn")
+        fn_name = f"rxn_{r_name}"
+        reactants = cat.reactants
+        products = cat.products
+        has_solid = cat.has_solid_reactant
+        k_name = r.get("k_value_name")
 
-        # 9. FeS oxidation (FeS + O2 -> Fe3 + SO4)
-        if "FeS" in r_sp and "O2" in r_sp and ("Fe3" in p_sp or "SO4" in p_sp):
-            return "FeS_oxidation"
+        transport_r = [
+            (coeff, sp) for coeff, sp in reactants
+            if self.validator.is_transport_species(self.validator.get_parent_species(sp))
+        ]
+        if not transport_r:
+            transport_r = reactants
+        master_coeff, master_sp = transport_r[0]
+        for coeff, sp in transport_r:
+            if self.validator.get_species_phase(sp) in ("solid", "mixed"):
+                master_coeff, master_sp = coeff, sp
+                break
 
-        # 10. FeS2 oxidation (FeS2 + O2 -> Fe3 + SO4)
-        if "FeS2" in r_sp and "O2" in r_sp:
-            return "FeS2_oxidation"
+        master_parent = self.validator.get_parent_species(master_sp)
+        other_reactants = {
+            self.validator.get_parent_species(sp): coeff
+            for coeff, sp in reactants
+            if self.validator.get_parent_species(sp) != master_parent
+        }
+        transport_products = {
+            self.validator.get_parent_species(sp): coeff
+            for coeff, sp in products
+            if self.validator.is_transport_species(self.validator.get_parent_species(sp))
+        }
 
-        # 11. Pyrite precipitation via HS/TS2 (FeS + HS -> FeS2)
-        if "FeS" in r_sp and any(sp in ("HS", "TS2") for sp in r_sp) and "FeS2" in p_sp:
-            return "FeS2_precipitation_TS2"
+        lines = [
+            f'def {fn_name}(c, k_val, lim, LHS, RHS, RATES, CROSS, mp):',
+            f'    """Reaction: {r.get("reaction", "")}"""',
+            f'    has_solid = {has_solid}',
+            f'    k_num = mp.k.get("{k_name}") if hasattr(mp, "k") else getattr(k_val, "{k_name}", 0.0)',
+        ]
+        coeff_expr = 'k_num'
+        master_spec = self.validator.get_speciation_factor_expr(master_sp)
+        if master_spec:
+            coeff_expr += f' * {master_spec}'
 
-        # 12. Pyrite formation via S0 (FeS + S0 -> FeS2)
-        if "FeS" in r_sp and "S0" in r_sp and "FeS2" in p_sp:
-            return "pyrite_formation_fes_s0"
+        for coeff, sp in reactants:
+            p_sp = self.validator.get_parent_species(sp)
+            if p_sp != master_parent:
+                spec = self.validator.get_speciation_factor_expr(sp)
+                term = f'getattr(c, "{p_sp}")' if not spec else f'(getattr(c, "{p_sp}") * {spec})'
+                coeff_expr += f' * {term}'
 
-        # 13. Elemental sulfur oxidation (S0 + O2 -> SO4)
-        if "S0" in r_sp and "O2" in r_sp and "SO4" in p_sp:
-            return "elemental_sulfur_oxidation"
+        for l_name in (r.get("limiters") or []):
+            lines.append(f'    _lim_{l_name} = lim.get("{l_name}_implicit", lim.get("{l_name}", 1.0))')
+            coeff_expr += f' * _lim_{l_name}'
+        for i_name in (r.get("inhibitors") or []):
+            lines.append(f'    _inh_{i_name} = lim.get("{i_name}_inhibit", lim.get("{i_name}_inhib", 1.0))')
+            coeff_expr += f' * _inh_{i_name}'
 
-        return "unknown"
+        lines.extend([
+            f'    coeff_master = {coeff_expr}',
+            f'    rate_master = coeff_master * getattr(c, "{master_parent}")',
+            '    add_coupled_reaction(',
+            '        CROSS=CROSS, LHS=LHS, RATES=RATES, mp=mp,',
+            f'        master_species={{"{master_parent}": {master_coeff}}},',
+            f'        reactants={other_reactants},',
+            f'        products={transport_products},',
+            '        coeff_master=coeff_master, rate_master=rate_master,',
+            f'        has_solid=has_solid, reaction_name="{r_name}",',
+            f'        ref_species="{master_parent}", stoich_ref={master_coeff},',
+            '    )',
+        ])
+        if r_name != fn_name:
+            lines.append(f'{r_name} = {fn_name}')
+        lines.append('')
+        return lines
+
+    def _generate_custom_reaction_jacobian(self, r: Dict[str, Any], cat: ReactionCategory) -> List[str]:
+        r_name = r.get("reaction_name", "custom_rxn")
+        k_name = r.get("k_value_name")
+        reactants = cat.reactants
+        products = cat.products
+        has_solid = cat.has_solid_reactant
+        fac_var = "solid_fac" if has_solid else "diss_fac"
+
+        r_parents = [(coeff, self.validator.get_parent_species(sp)) for coeff, sp in reactants]
+        p_parents = [
+            (coeff, self.validator.get_parent_species(sp)) for coeff, sp in products
+            if self.validator.is_transport_species(self.validator.get_parent_species(sp))
+        ]
+
+        ref_coeff, ref_sp = r_parents[0]
+        conds = [f'"{sp}" in idx' for _, sp in r_parents]
+        lines = [
+            f'    # Custom Reaction: {r_name} ({r.get("reaction", "")})',
+            f'    if {" and ".join(conds)}:',
+            f'        k_num_{r_name} = float(mp.k.get("{k_name}") if hasattr(mp, "k") else getattr(k, "{k_name}", 0.0))',
+        ]
+        for coeff, r_sp in r_parents:
+            lines.append(f'        c_{r_sp} = np.asarray(c["{r_sp}"].value if hasattr(c["{r_sp}"], "value") else c["{r_sp}"])')
+
+        for _, diff_sp in r_parents:
+            other_c = [f'c_{s}' for _, s in r_parents if s != diff_sp]
+            other_prod = " * ".join(other_c) if other_c else "1.0"
+            d_var = f"d_{diff_sp}_{r_name}"
+            lines.append(f'        {d_var} = {fac_var} * k_num_{r_name} * {other_prod} / {ref_coeff}')
+            for coeff_r, r_tgt in r_parents:
+                lines.append(f'        J[:, idx["{r_tgt}"], idx["{diff_sp}"]] -= {coeff_r} * {d_var}')
+            for coeff_p, p_tgt in p_parents:
+                lines.append(f'        J[:, idx["{p_tgt}"], idx["{diff_sp}"]] += {coeff_p} * {d_var}')
+        lines.append('')
+        return lines
 
     def generate_code(self) -> str:
         """Generates complete Python source for equations.py."""
@@ -1231,6 +1464,19 @@ class EquationSystemGenerator:
                 '',
             ])
 
+        legacy_cats = {
+            "aerobic_respiration", "dissimilatory_iron_reduction", "sulfate_reduction",
+            "hs_oxidation", "Fe2_oxidation", "sulfide_mediated_iron_reduction_velde",
+            "sulfide_mediated_iron_reduction", "FeS_precipitation_dissolution",
+            "FeS_oxidation", "FeS2_oxidation", "FeS2_precipitation_TS2",
+            "elemental_sulfur_oxidation", "pyrite_formation_fes_s0",
+            "elemental_sulfur_disproportionation",
+        }
+        for r in self.reactions:
+            cat = self.classify_reaction(r, self.validator)
+            if cat not in legacy_cats:
+                code.extend(self._generate_custom_reaction_fn(r, cat))
+
         code.extend([
             '# -----------------------------------------------------------------------------',
             '# Main Diagenetic Reactions Dispatcher',
@@ -1240,7 +1486,7 @@ class EquationSystemGenerator:
         ])
 
         for r in self.reactions:
-            cat = self.classify_reaction(r)
+            cat = self.classify_reaction(r, self.validator)
             reactants, _ = ReactionSystemValidator.parse_reaction_species(r.get("reaction", ""))
             k_name = r.get("k_value_name")
 
@@ -1279,12 +1525,9 @@ class EquationSystemGenerator:
             elif cat == "elemental_sulfur_disproportionation":
                 code.append('    [elemental_sulfur_disproportionation, None],')
             else:
-                r_name = r.get("reaction_name", "unnamed")
-                raise ValueError(
-                    f"Unable to generate reaction '{r_name}' ('{r.get('reaction', '')}'): "
-                    f"reaction stoichiometry is not recognized by the equation system generator. "
-                    f"Please check the chemical reaction equation or implement its generation rule."
-                )
+                r_name = r.get("reaction_name", "custom_rxn")
+                fn_name = f"rxn_{r_name}"
+                code.append(f'    [{fn_name}, None],')
 
         code.extend([
             ']',
@@ -1881,6 +2124,11 @@ class EquationSystemGenerator:
                 '            J[:, i_so4_32, i_s0_32] += 0.25 * d_s0',
                 '',
             ])
+
+        for r in self.reactions:
+            cat = self.classify_reaction(r, self.validator)
+            if cat not in legacy_cats:
+                code.extend(self._generate_custom_reaction_jacobian(r, cat))
 
         code.extend([
             '    return J',

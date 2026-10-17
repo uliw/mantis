@@ -298,8 +298,8 @@ def test_fes2_precipitation_ts2_generation():
     assert "10. FeS2 precipitation via TS2" in jacobian_code
 
 
-def test_unrecognized_reaction_raises_value_error():
-    """Verify that an unrecognized reaction stoichiometry raises a ValueError."""
+def test_invalid_reaction_syntax_raises_value_error():
+    """Verify that an invalid reaction equation string raises ValueError."""
     from mantis.generate_equation_system import EquationSystemGenerator
 
     validator = ReactionSystemValidator(
@@ -309,15 +309,47 @@ def test_unrecognized_reaction_raises_value_error():
     )
     reactions = [
         {
-            "reaction_name": "unknown_typo_reaction",
-            "reaction": "POC_fast + Fe2_total -> CO2",
+            "reaction_name": "malformed_reaction",
+            "reaction": "POC_fast + Fe2_total == CO2",
             "k_value_name": "POC_fast",
         },
     ]
 
     generator = EquationSystemGenerator(reactions=reactions, validator=validator)
-    with pytest.raises(ValueError, match="Unable to generate reaction 'unknown_typo_reaction'"):
+    with pytest.raises(ValueError, match="missing '->' delimiter"):
         generator.generate_code()
+
+
+def test_arbitrary_species_and_reactions_generated():
+    """Verify that arbitrary novel species and reactions are classified and generated without error."""
+    from mantis.generate_equation_system import EquationSystemGenerator
+
+    validator = ReactionSystemValidator(
+        species_path=SPECIES_FILE,
+        constants_path=CONSTANTS_FILE,
+        limiters_path=LIMITERS_FILE,
+    )
+    reactions = [
+        {
+            "reaction_name": "custom_poc_fe2_reaction",
+            "reaction": "POC_fast + Fe2_total -> CO2",
+            "k_value_name": "POC_fast",
+        },
+        {
+            "reaction_name": "denitrification_custom",
+            "reaction": "2 TOC + NO3 -> N2 + CO2",
+            "k_value_name": "POC_fast",
+        },
+    ]
+
+    generator = EquationSystemGenerator(reactions=reactions, validator=validator)
+    code = generator.generate_code()
+    assert "def rxn_custom_poc_fe2_reaction" in code
+    assert "def rxn_denitrification_custom" in code
+    assert "rxn_custom_poc_fe2_reaction" in code
+    assert "rxn_denitrification_custom" in code
+    assert "Custom Reaction: custom_poc_fe2_reaction" in code
+    assert "Custom Reaction: denitrification_custom" in code
 
 
 def test_arbitrary_reaction_name_classified_and_generated():
