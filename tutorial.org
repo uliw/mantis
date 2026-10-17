@@ -765,9 +765,8 @@ Geochemists usually want to see:
 - Dissolved porewater concentrations in \(\text{mmol/L}\) (or
   \(\mu\text{mol/L}\)).
 - Solid minerals and organic carbon in *dry weight percent*
-  (\(\text{wt}\%\)) or \(&mu;\text{mol/g}\).
-- Stable isotopes in per mil (\(\delta^{34}\text{S}\) in
-  \(\text{\permil}\)).
+  (\(\text{wt}\%\)) or \(mu;\text{mol/g}\).
+- Stable isotopes in per mil (\(\delta^{34}\text{S}\) in (mUr).
 
 The =plot_layout.py= file gives you complete control over figure layout,
 colors, and line attributes.

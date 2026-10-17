@@ -952,28 +952,47 @@ class EquationSystemGenerator:
         if iso_sp_map:
             # Find the reactant that participates in isotope tracking
             iso_r_candidates = [
-                (coeff, self.validator.get_parent_species(sp))
+                (coeff, sp, self.validator.get_parent_species(sp))
                 for coeff, sp in reactants
                 if self.validator.get_parent_species(sp) in iso_sp_map
             ]
             if iso_r_candidates:
-                iso_master_coeff, iso_master_parent = iso_r_candidates[0]
+                iso_master_coeff, iso_orig_sp, iso_master_parent = iso_r_candidates[0]
                 iso_master_32 = iso_sp_map[iso_master_parent]
                 lines.append('    if getattr(mp, "isotopes", False):')
+
+                # Build rate coefficient for the isotope reaction w.r.t iso_master_parent
+                iso_coeff_expr = 'k_num'
+                iso_spec = self.validator.get_speciation_factor_expr(iso_orig_sp)
+                if iso_spec:
+                    iso_coeff_expr += f' * {iso_spec}'
+                for coeff, sp in reactants:
+                    p_sp = self.validator.get_parent_species(sp)
+                    if p_sp != iso_master_parent:
+                        spec = self.validator.get_speciation_factor_expr(sp)
+                        term = f'getattr(c, "{p_sp}")' if not spec else f'(getattr(c, "{p_sp}") * {spec})'
+                        iso_coeff_expr += f' * {term}'
+                for l_name in (r.get("limiters") or []):
+                    iso_coeff_expr += f' * _lim_{l_name}'
+                for i_name in (r.get("inhibitors") or []):
+                    iso_coeff_expr += f' * _inh_{i_name}'
+
                 iso_frac = r.get("isotope_fractionation")
                 if iso_frac:
                     frac_key, frac_val = next(iter(iso_frac.items()))
                     alpha_name, lim_name = frac_val[0], frac_val[1]
-                    src_sp = frac_key.split(" ")[0].replace("_32", "")
+                    raw_src = frac_key.split(" ")[0].replace("_32", "")
+                    src_sp = self.validator.get_parent_species(raw_src)
                     src_sp_32 = iso_sp_map.get(src_sp, f"{src_sp}_32")
                     lines.extend([
+                        f'        _coeff_base_32 = {iso_coeff_expr}',
                         f'        _alpha = 1.0 + (getattr(mp, "{alpha_name}", 1.0) - 1.0) * lim.get("{lim_name}", 1.0)',
                         f'        coeff_master_32 = calculate_fractionated_coeff_32(',
-                        f'            coeff_master, getattr(c, "{src_sp}"), getattr(c, "{src_sp_32}"), _alpha, eps=1e-30',
+                        f'            _coeff_base_32, getattr(c, "{src_sp}"), getattr(c, "{src_sp_32}"), _alpha, eps=1e-30',
                         '        )',
                     ])
                 else:
-                    lines.append('        coeff_master_32 = coeff_master')
+                    lines.append(f'        coeff_master_32 = {iso_coeff_expr}')
 
                 iso_other_reactants = {}
                 for coeff, sp in reactants:
