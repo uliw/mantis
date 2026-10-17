@@ -303,6 +303,17 @@ def rxn_FeS_oxidation(c, k_val, lim, LHS, RHS, RATES, CROSS, mp):
         has_solid=has_solid, reaction_name="FeS_oxidation",
         ref_species="FeS", stoich_ref=4.0,
     )
+    if getattr(mp, "isotopes", False):
+        coeff_master_32 = k_num * getattr(c, "O2")
+        add_coupled_reaction(
+            CROSS=CROSS, LHS=LHS, RATES=RATES, mp=mp,
+            master_species={"FeS_32": 4.0},
+            reactants={},
+            products={'SO4_32': 4.0},
+            coeff_master=coeff_master_32, rate_master=coeff_master_32 * getattr(c, "FeS_32"),
+            has_solid=has_solid, reaction_name="FeS_oxidation_32",
+            ref_species="FeS", stoich_ref=4.0,
+        )
 FeS_oxidation = rxn_FeS_oxidation
 
 def rxn_FeS_precipitation_dissolution(c, k_val, lim, LHS, RHS, RATES, CROSS, mp):
@@ -664,6 +675,9 @@ def compute_chemical_jacobian(c, mp, k, species_names):
         J[:, idx["O2"], idx["FeS"]] -= 9.0 * d_FeS_FeS_oxidation
         J[:, idx["Fe3"], idx["FeS"]] += 4.0 * d_FeS_FeS_oxidation
         J[:, idx["SO4"], idx["FeS"]] += 4.0 * d_FeS_FeS_oxidation
+        if "FeS_32" in idx and getattr(mp, "isotopes", False):
+            J[:, idx["FeS_32"], idx["FeS_32"]] -= 4.0 * d_FeS_FeS_oxidation
+            J[:, idx["SO4_32"], idx["FeS_32"]] += 4.0 * d_FeS_FeS_oxidation
         d_O2_FeS_oxidation = solid_fac * (k_num_FeS_oxidation / 4.0) * c_FeS
         J[:, idx["FeS"], idx["O2"]] -= 4.0 * d_O2_FeS_oxidation
         J[:, idx["O2"], idx["O2"]] -= 9.0 * d_O2_FeS_oxidation

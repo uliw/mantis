@@ -141,6 +141,7 @@ reactions = [
         "reaction_name": "FeS_oxidation",
         "reaction": "4 FeS + 9 O2 -> 4 Fe3 + 4 SO4",
         "k_value_name": "FeS_O2",
+        "isotope_species": {"FeS": "FeS_32", "SO4": "SO4_32"},
     },
 
     # -------------------------------------------------------------------------
