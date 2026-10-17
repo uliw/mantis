@@ -1976,28 +1976,34 @@ def add_coupled_reaction(
         couple_species(spec, stoich_norm, sign=1.0)
 
 
-def calculate_fractionated_coeff_32(coeff_total, c_total, c_32, alpha, eps=1e-20):
+def calculate_fractionated_rate_coeff(coeff_total, c_total, c_iso, alpha, eps=1e-20):
     """
-    Calculate the fractionated isotope rate coefficient for 32S.
+    Calculate the fractionated isotope rate coefficient for any light/bulk isotope pair.
     """
     c_tot_np = np.asarray(c_total)
-    c_32_np = np.asarray(c_32)
+    c_iso_np = np.asarray(c_iso)
     valid = c_tot_np > 1e-12
     alpha_eff = np.where(valid, alpha, 1.0)
     safe_tot = np.where(valid, c_tot_np, 1.0)
-    safe_32 = np.where(valid, c_32_np, 1.0)
-    ratio_32 = np.where(valid, safe_32 / safe_tot, 1.0)
-    ratio_32 = np.clip(ratio_32, 0.5, 1.5)
-    denom_ratio = 1.0 + (alpha_eff - 1.0) * ratio_32
+    safe_iso = np.where(valid, c_iso_np, 1.0)
+    ratio_iso = np.where(valid, safe_iso / safe_tot, 1.0)
+    ratio_iso = np.clip(ratio_iso, 0.5, 1.5)
+    denom_ratio = 1.0 + (alpha_eff - 1.0) * ratio_iso
     return coeff_total * alpha_eff / denom_ratio
 
 
-def partition_equilibrium_isotope_32(
-    c_32, frac_target, frac_other, alpha_eq_32, eps=1e-30
+calculate_fractionated_coeff_32 = calculate_fractionated_rate_coeff
+
+
+def partition_equilibrium_isotope(
+    c_iso, frac_target, frac_other, alpha_eq, eps=1e-30
 ):
     """
-    Calculate the concentration of the 32S isotope in a partitioned species
+    Calculate the concentration of the isotope in a partitioned species
     under equilibrium fractionation.
     """
-    denom = frac_target + alpha_eq_32 * frac_other + eps
-    return c_32 * frac_target / denom
+    denom = frac_target + alpha_eq * frac_other + eps
+    return c_iso * frac_target / denom
+
+
+partition_equilibrium_isotope_32 = partition_equilibrium_isotope

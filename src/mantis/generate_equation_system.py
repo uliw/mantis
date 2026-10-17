@@ -64,6 +64,7 @@ class ReactionSystemValidator:
         if hasattr(mod_species, "species") and isinstance(mod_species.species, dict):
             self.valid_species = set(mod_species.species.keys())
             self.species_defs = mod_species.species
+            self.isotope_standards = getattr(mod_species, "isotope_standards", {})
             # Also register dynamic/alias species if defined with equilibrium_of or alias_of
             for sp_k, sp_meta in mod_species.species.items():
                 if isinstance(sp_meta, dict):
@@ -208,16 +209,13 @@ class ReactionSystemValidator:
     def get_species_phase(self, sp: str) -> str:
         """Returns 'liquid', 'solid', or 'mixed' for the given species.
 
-        Resolves aliases and equilibrium species back to their parent phase.
+        Resolves aliases, isotopes, and equilibrium species back to their parent phase.
         """
         meta = getattr(self, "species_defs", {}).get(sp)
         if not meta or not isinstance(meta, dict):
             parent = self.get_parent_species(sp)
             if parent != sp and parent in getattr(self, "species_defs", {}):
                 return self.get_species_phase(parent)
-            # Heuristic fallback for undeclared intermediate species
-            if any(term in sp for term in ("POC", "TOC", "Fe3", "FeOOH", "FeS", "FeS2", "S0", "MnO2", "CaCO3")):
-                return "solid"
             return "liquid"
 
         if "phase" in meta:
@@ -247,25 +245,35 @@ class ReactionSystemValidator:
         return sp
 
     def get_speciation_factor_expr(self, sp: str) -> Optional[str]:
-        """Returns python code expression for the fraction of parent species, or None if 1.0."""
+        """Returns python code expression for the fraction of parent species, or None if 1.0.
+        
+        Derives the fraction expression dynamically from species_defs:
+        - If 'fraction' is defined, returns 'mp.<species_name.lower()>_frac' or the analytical string.
+        - If 'alias_of' is defined as '<parent>.<subphase>', returns 'mp.<parent>_<subphase>'.
+        - If 'isotope_of' is defined, inherits the base species' speciation factor expression.
+        """
         meta = getattr(self, "species_defs", {}).get(sp)
         if isinstance(meta, dict):
-            if sp in ("HS", "HS_32"):
-                return "mp.hs_frac"
-            if sp in ("H2S", "H2S_32"):
-                return "mp.h2s_frac"
-            if sp == "Fe2_liq" or meta.get("alias_of") == "Fe2_total.dissolved":
-                return "mp.Fe2_diss"
-            if sp == "Fe2_sorbed" or meta.get("alias_of") == "Fe2_total.sorbed":
-                return "(1.0 - mp.Fe2_diss)"
-            if "fraction" in meta and isinstance(meta["fraction"], str):
-                return meta["fraction"]
-        if sp in ("HS", "HS_32"):
-            return "mp.hs_frac"
-        if sp in ("H2S", "H2S_32"):
-            return "mp.h2s_frac"
-        if sp == "Fe2_liq":
-            return "mp.Fe2_diss"
+            # 1. Direct equilibrium speciation fraction
+            if "fraction" in meta:
+                return f"mp.{sp.lower()}_frac"
+
+            # 2. Subphase alias of partitioned parent (e.g. Fe2_total.dissolved -> mp.Fe2_total_dissolved)
+            if "alias_of" in meta and isinstance(meta["alias_of"], str):
+                parts = meta["alias_of"].split(".", 1)
+                parent_name = parts[0]
+                subphase = parts[1] if len(parts) > 1 else "dissolved"
+                parent_meta = getattr(self, "species_defs", {}).get(parent_name, {})
+                if isinstance(parent_meta, dict) and "partition" in parent_meta:
+                    return f"getattr(mp, '{parent_name}_{subphase}', getattr(mp, '{sp}', 1.0))"
+
+            # 3. Isotopic companion inheriting base species speciation factor
+            if "isotope_of" in meta and isinstance(meta["isotope_of"], str):
+                base_sp = meta["isotope_of"]
+                base_spec = self.get_speciation_factor_expr(base_sp)
+                if base_spec:
+                    return base_spec
+
         return None
 
     def is_transport_species(self, sp: str) -> bool:
@@ -815,14 +823,8 @@ class EquationSystemGenerator:
             r_phases = [validator.get_species_phase(sp) for _, sp in reactants]
             p_phases = [validator.get_species_phase(sp) for _, sp in products]
         else:
-            def _heuristic_phase(sp: str) -> str:
-                if any(t in sp for t in ("POC", "TOC", "Fe3", "FeOOH", "FeS", "FeS2", "S0", "MnO2", "CaCO3", "OM")):
-                    return "solid"
-                if "Fe2" in sp:
-                    return "mixed"
-                return "liquid"
-            r_phases = [_heuristic_phase(sp) for _, sp in reactants]
-            p_phases = [_heuristic_phase(sp) for _, sp in products]
+            r_phases = ["liquid" for _ in reactants]
+            p_phases = ["liquid" for _ in products]
 
         has_solid_r = any(p in ("solid", "mixed") for p in r_phases)
         has_solid_p = any(p in ("solid", "mixed") for p in p_phases)
@@ -925,10 +927,7 @@ class EquationSystemGenerator:
                 coeff_expr += f' * {term}'
 
         for l_name in (r.get("limiters") or []):
-            if l_name == "O2_TS2":
-                lines.append(f'    _lim_{l_name} = lim.get("O2_implicit_TS2", lim.get("O2_TS2_implicit", lim.get("O2_TS2", 1.0)))')
-            else:
-                lines.append(f'    _lim_{l_name} = lim.get("{l_name}_implicit", lim.get("{l_name}", 1.0))')
+            lines.append(f'    _lim_{l_name} = lim.get("{l_name}_implicit", lim.get("{l_name}", 1.0))')
             coeff_expr += f' * _lim_{l_name}'
         for i_name in (r.get("inhibitors") or []):
             lines.append(f'    _inh_{i_name} = lim.get("{i_name}_inhibit", lim.get("{i_name}_inhib", 1.0))')
@@ -958,7 +957,7 @@ class EquationSystemGenerator:
             ]
             if iso_r_candidates:
                 iso_master_coeff, iso_orig_sp, iso_master_parent = iso_r_candidates[0]
-                iso_master_32 = iso_sp_map[iso_master_parent]
+                iso_master = iso_sp_map[iso_master_parent]
                 lines.append('    if getattr(mp, "isotopes", False):')
 
                 # Build rate coefficient for the isotope reaction w.r.t iso_master_parent
@@ -981,18 +980,24 @@ class EquationSystemGenerator:
                 if iso_frac:
                     frac_key, frac_val = next(iter(iso_frac.items()))
                     alpha_name, lim_name = frac_val[0], frac_val[1]
-                    raw_src = frac_key.split(" ")[0].replace("_32", "")
-                    src_sp = self.validator.get_parent_species(raw_src)
-                    src_sp_32 = iso_sp_map.get(src_sp, f"{src_sp}_32")
+                    raw_src = frac_key.split(" ")[0]
+                    # Map raw_src back to its base parent if raw_src is an isotope companion
+                    src_sp = raw_src
+                    for b_sp, i_sp in iso_sp_map.items():
+                        if raw_src in (b_sp, i_sp):
+                            src_sp = b_sp
+                            break
+                    src_sp = self.validator.get_parent_species(src_sp)
+                    src_iso_sp = iso_sp_map.get(src_sp)
                     lines.extend([
-                        f'        _coeff_base_32 = {iso_coeff_expr}',
+                        f'        _coeff_base_iso = {iso_coeff_expr}',
                         f'        _alpha = 1.0 + (getattr(mp, "{alpha_name}", 1.0) - 1.0) * lim.get("{lim_name}", 1.0)',
-                        f'        coeff_master_32 = calculate_fractionated_coeff_32(',
-                        f'            _coeff_base_32, getattr(c, "{src_sp}"), getattr(c, "{src_sp_32}"), _alpha, eps=1e-30',
+                        f'        coeff_master_iso = calculate_fractionated_rate_coeff(',
+                        f'            _coeff_base_iso, getattr(c, "{src_sp}"), getattr(c, "{src_iso_sp}"), _alpha, eps=1e-30',
                         '        )',
                     ])
                 else:
-                    lines.append(f'        coeff_master_32 = {iso_coeff_expr}')
+                    lines.append(f'        coeff_master_iso = {iso_coeff_expr}')
 
                 iso_other_reactants = {}
                 for coeff, sp in reactants:
@@ -1005,14 +1010,15 @@ class EquationSystemGenerator:
                     if p_sp in iso_sp_map:
                         iso_products[iso_sp_map[p_sp]] = coeff
 
+                iso_rxn_name = f"{r_name}_iso"
                 lines.extend([
                     '        add_coupled_reaction(',
                     '            CROSS=CROSS, LHS=LHS, RATES=RATES, mp=mp,',
-                    f'            master_species={{"{iso_master_32}": {iso_master_coeff}}},',
+                    f'            master_species={{"{iso_master}": {iso_master_coeff}}},',
                     f'            reactants={iso_other_reactants},',
                     f'            products={iso_products},',
-                    f'            coeff_master=coeff_master_32, rate_master=coeff_master_32 * getattr(c, "{iso_master_32}"),',
-                    f'            has_solid=has_solid, reaction_name="{r_name}_32",',
+                    f'            coeff_master=coeff_master_iso, rate_master=coeff_master_iso * getattr(c, "{iso_master}"),',
+                    f'            has_solid=has_solid, reaction_name="{iso_rxn_name}",',
                     f'            ref_species="{ref_sp}", stoich_ref={ref_coeff},',
                     '        )',
                 ])
@@ -1035,21 +1041,55 @@ class EquationSystemGenerator:
             k_diss_name = f"{k_name}_isd"
             k_sp_name = f"{k_name}_sp"
 
+        # Identify mineral product (solid) and dissolved reactants
+        mineral_candidates = [
+            (coeff, sp) for coeff, sp in cat.products
+            if self.validator.get_species_phase(sp) == "solid"
+        ]
+        if not mineral_candidates:
+            mineral_coeff, mineral_sp = cat.products[0]
+        else:
+            mineral_coeff, mineral_sp = mineral_candidates[0]
+        mineral_parent = self.validator.get_parent_species(mineral_sp)
+
+        reactants_info = []
+        for coeff, sp in cat.reactants:
+            p_sp = self.validator.get_parent_species(sp)
+            spec = self.validator.get_speciation_factor_expr(sp)
+            reactants_info.append((coeff, sp, p_sp, spec))
+
         lines = [
             f'def {fn_name}(c, k_val, lim, LHS, RHS, RATES, CROSS, mp):',
             f'    """Reaction: {r.get("reaction", "")} (reversible saturation with C1 smooth transition)"""',
             '    phi = mp.phi',
-            '    Fe2_val = np.maximum(np.asarray(c.Fe2_total.value if hasattr(c.Fe2_total, "value") else c.Fe2_total), 1e-20)',
-            '    TS2_val = np.maximum(np.asarray(c.TS2.value if hasattr(c.TS2, "value") else c.TS2), 1e-20)',
-            '    FeS_val = np.maximum(np.asarray(c.FeS.value if hasattr(c.FeS, "value") else c.FeS), 1e-20)',
-            '    Fe2_pw = Fe2_val * mp.Fe2_diss',
-            '    hs_val = TS2_val * mp.hs_frac',
+        ]
+
+        # Extract reactant concentration variables
+        omega_num_terms = []
+        c_val_names = []
+        for coeff, sp, p_sp, spec in reactants_info:
+            v_name = f"{p_sp}_val"
+            pw_name = f"{sp}_pw"
+            lines.append(f'    {v_name} = np.maximum(np.asarray(c.{p_sp}.value if hasattr(c.{p_sp}, "value") else c.{p_sp}), 1e-20)')
+            if spec:
+                lines.append(f'    {pw_name} = {v_name} * {spec}')
+            else:
+                lines.append(f'    {pw_name} = {v_name}')
+            term = pw_name if coeff == 1.0 else f"({pw_name}**{coeff})"
+            omega_num_terms.append(term)
+            c_val_names.append((p_sp, v_name))
+
+        # Mineral solid concentration
+        lines.append(f'    {mineral_parent}_val = np.maximum(np.asarray(c.{mineral_parent}.value if hasattr(c.{mineral_parent}, "value") else c.{mineral_parent}), 1e-20)')
+
+        # Equilibrium constants and saturation state omega
+        lines.extend([
             '    k_Hplus = getattr(k_val, "Hplus", getattr(mp, "Hplus", 10**-7.5))',
             f'    k_sp = getattr(k_val, "{k_sp_name}", getattr(mp, "{k_sp_name}", 10**-3.5))',
             f'    k_isp = getattr(k_val, "{k_prec_name}", getattr(mp, "{k_prec_name}", 1.0))',
             f'    k_isd = getattr(k_val, "{k_diss_name}", getattr(mp, "{k_diss_name}", 0.3))',
             '    omega_den = k_Hplus * k_sp + 1e-30',
-            '    omega = Fe2_pw * hs_val / omega_den',
+            f'    omega = ({" * ".join(omega_num_terms)}) / omega_den',
             '    is_prec = np.where(omega >= 1.0, 1.0, 0.0)',
             '    is_diss = np.where(omega < 1.0, 1.0, 0.0)',
             '    epsilon = float(getattr(mp, "fes_smooth_epsilon", getattr(mp, "saturation_smooth_epsilon", 0.01)))',
@@ -1058,87 +1098,176 @@ class EquationSystemGenerator:
             '    u_prec = np.minimum(df / (epsilon + 1e-30), 1.0)',
             '    smooth_ramp_prec = (3.0 * u_prec**2 - 2.0 * u_prec**3)',
             '    R_prec = k_prec_eff * df * smooth_ramp_prec',
-            '    w_Fe = TS2_val**2 / (Fe2_val**2 + TS2_val**2 + 1e-30)',
-            '    w_TS2 = 1.0 - w_Fe',
-            '    prec_coeff_Fe2 = (w_Fe * R_prec) / Fe2_val',
-            '    prec_rate_Fe2 = prec_coeff_Fe2 * Fe2_val',
-            '    prec_coeff_TS2 = (w_TS2 * R_prec) / TS2_val',
-            '    prec_rate_TS2 = prec_coeff_TS2 * TS2_val',
-            '    add_implicit_coupling_new(',
-            '        CROSS, RATES, LHS, target_species="FeS", source_species="Fe2_total",',
-            '        coeff=prec_coeff_Fe2, rate=prec_rate_Fe2, mp=mp, has_solid=False,',
-            '        add_lhs_sink=False, stoich_ratio=1.0,',
-            '    )',
-            '    add_implicit_coupling_new(',
-            '        CROSS, RATES, LHS, target_species="FeS", source_species="TS2",',
-            '        coeff=prec_coeff_TS2, rate=prec_rate_TS2, mp=mp, has_solid=False,',
-            '        add_lhs_sink=False, stoich_ratio=1.0,',
-            '    )',
-            '    add_implicit_sink(LHS, RATES, "Fe2_total", prec_coeff_Fe2, prec_rate_Fe2, mp=mp, has_solid=False)',
-            '    add_implicit_sink(LHS, RATES, "TS2", prec_coeff_TS2, prec_rate_TS2, mp=mp, has_solid=False)',
-            '    CROSS["Fe2_total"].append(("TS2", -prec_coeff_TS2 * phi))',
-            '    RATES["Fe2_total"] -= prec_rate_TS2 * phi',
-            '    CROSS["TS2"].append(("Fe2_total", -prec_coeff_Fe2 * phi))',
-            '    RATES["TS2"] -= prec_rate_Fe2 * phi',
+        ])
+
+        # Dynamic symmetric weighting for precipitation across reactants
+        if len(reactants_info) == 2:
+            p1, v1 = c_val_names[0]
+            p2, v2 = c_val_names[1]
+            lines.extend([
+                f'    w_{p1} = {v2}**2 / ({v1}**2 + {v2}**2 + 1e-30)',
+                f'    w_{p2} = 1.0 - w_{p1}',
+                f'    prec_coeff_{p1} = (w_{p1} * R_prec) / {v1}',
+                f'    prec_rate_{p1} = prec_coeff_{p1} * {v1}',
+                f'    prec_coeff_{p2} = (w_{p2} * R_prec) / {v2}',
+                f'    prec_rate_{p2} = prec_coeff_{p2} * {v2}',
+            ])
+            for p_curr, v_curr in [(p1, v1), (p2, v2)]:
+                lines.extend([
+                    '    add_implicit_coupling_new(',
+                    f'        CROSS, RATES, LHS, target_species="{mineral_parent}", source_species="{p_curr}",',
+                    f'        coeff=prec_coeff_{p_curr}, rate=prec_rate_{p_curr}, mp=mp, has_solid=False,',
+                    '        add_lhs_sink=False, stoich_ratio=1.0,',
+                    '    )',
+                ])
+            lines.extend([
+                f'    add_implicit_sink(LHS, RATES, "{p1}", prec_coeff_{p1}, prec_rate_{p1}, mp=mp, has_solid=False)',
+                f'    add_implicit_sink(LHS, RATES, "{p2}", prec_coeff_{p2}, prec_rate_{p2}, mp=mp, has_solid=False)',
+                f'    CROSS["{p1}"].append(("{p2}", -prec_coeff_{p2} * phi))',
+                f'    RATES["{p1}"] -= prec_rate_{p2} * phi',
+                f'    CROSS["{p2}"].append(("{p1}", -prec_coeff_{p1} * phi))',
+                f'    RATES["{p2}"] -= prec_rate_{p1} * phi',
+            ])
+        else:
+            p1, v1 = c_val_names[0]
+            lines.extend([
+                f'    prec_coeff_{p1} = R_prec / {v1}',
+                f'    prec_rate_{p1} = prec_coeff_{p1} * {v1}',
+                '    add_implicit_coupling_new(',
+                f'        CROSS, RATES, LHS, target_species="{mineral_parent}", source_species="{p1}",',
+                f'        coeff=prec_coeff_{p1}, rate=prec_rate_{p1}, mp=mp, has_solid=False,',
+                '        add_lhs_sink=False, stoich_ratio=1.0,',
+                '    )',
+                f'    add_implicit_sink(LHS, RATES, "{p1}", prec_coeff_{p1}, prec_rate_{p1}, mp=mp, has_solid=False)',
+            ])
+
+        # Dissolution of solid mineral
+        lines.extend([
             '    k_diss_eff = k_isd * is_diss',
             '    us = np.maximum(1.0 - omega, 0.0)',
             '    u_diss = np.minimum(us / (epsilon + 1e-30), 1.0)',
             '    smooth_ramp_diss = (3.0 * u_diss**2 - 2.0 * u_diss**3)',
-            '    diss_coeff_FeS = k_diss_eff * us * smooth_ramp_diss',
-            '    diss_rate_FeS = diss_coeff_FeS * FeS_val',
-            '    add_implicit_coupling_new(',
-            '        CROSS, RATES, LHS, target_species="Fe2_total", source_species="FeS",',
-            '        coeff=diss_coeff_FeS, rate=diss_rate_FeS, mp=mp, has_solid=True,',
-            '        add_lhs_sink=True, stoich_ratio=1.0,',
-            '    )',
-            '    add_implicit_coupling_new(',
-            '        CROSS, RATES, LHS, target_species="TS2", source_species="FeS",',
-            '        coeff=diss_coeff_FeS, rate=diss_rate_FeS, mp=mp, has_solid=True,',
-            '        add_lhs_sink=False, stoich_ratio=1.0,',
-            '    )',
-            '    if getattr(mp, "isotopes", False):',
-            '        hs_32 = partition_equilibrium_isotope_32(',
-            '            c.TS2_32, mp.hs_frac, mp.h2s_frac, mp.h2s_hs_alpha',
-            '        )',
-            '        hs_val_np = np.asarray(hs_val)',
-            '        hs_32_val = np.asarray(hs_32)',
-            '        TS2_val_np = np.asarray(c.TS2.value if hasattr(c.TS2, "value") else c.TS2)',
-            '        TS2_32_val = np.asarray(c.TS2_32.value if hasattr(c.TS2_32, "value") else c.TS2_32)',
-            '        f32_default = 1.0 / (1.0 + float(mp.VCDT))',
-            '        f32_hs = np.where(hs_val_np > 1e-6, hs_32_val / (hs_val_np + 1e-30), f32_default)',
-            '        f32_hs = np.clip(f32_hs, 0.5, 1.5)',
-            '        f32_TS2 = np.where(TS2_val_np > 1e-6, TS2_32_val / (TS2_val_np + 1e-30), f32_default)',
-            '        f32_TS2 = np.clip(f32_TS2, 0.5, 1.5)',
-            '        ratio_hs_ts2 = np.where(f32_TS2 > 1e-10, f32_hs / f32_TS2, 1.0)',
-            '        prec_coeff_TS2_32 = prec_coeff_TS2 * ratio_hs_ts2',
-            '        add_implicit_coupling_new(',
-            '            CROSS, RATES, LHS, target_species="FeS_32", source_species="TS2_32",',
-            '            coeff=prec_coeff_TS2_32, rate=prec_rate_TS2 * f32_hs, mp=mp, has_solid=False,',
-            '            add_lhs_sink=False, stoich_ratio=1.0,',
-            '        )',
-            '        add_implicit_coupling_new(',
-            '            CROSS, RATES, LHS, target_species="FeS_32", source_species="Fe2_total",',
-            '            coeff=prec_coeff_Fe2 * f32_hs, rate=prec_rate_Fe2 * f32_hs, mp=mp, has_solid=False,',
-            '            add_lhs_sink=False, stoich_ratio=1.0,',
-            '        )',
-            '        add_implicit_sink(LHS, RATES, "TS2_32", prec_coeff_TS2_32, prec_rate_TS2 * f32_hs, mp=mp, has_solid=False)',
-            '        CROSS["TS2_32"].append(("Fe2_total", -prec_coeff_Fe2 * f32_hs * phi))',
-            '        RATES["TS2_32"] -= prec_rate_Fe2 * f32_hs * phi',
-            '        FeS_val_np = np.asarray(c.FeS.value if hasattr(c.FeS, "value") else c.FeS)',
-            '        FeS_32_val = np.asarray(c.FeS_32.value if hasattr(c.FeS_32, "value") else c.FeS_32)',
-            '        f32_FeS = np.where(FeS_val_np > 1e-3, FeS_32_val / (FeS_val_np + 1e-30), f32_hs)',
-            '        f32_FeS = np.clip(f32_FeS, 0.5, 1.5)',
-            '        add_implicit_coupling_new(',
-            '            CROSS, RATES, LHS, target_species="TS2_32", source_species="FeS_32",',
-            '            coeff=diss_coeff_FeS, rate=diss_rate_FeS * f32_FeS, mp=mp, has_solid=True,',
-            '            add_lhs_sink=True, stoich_ratio=1.0,',
-            '        )',
-            '        add_implicit_coupling_new(',
-            '            CROSS, RATES, LHS, target_species="Fe2_total", source_species="FeS_32",',
-            '            coeff=diss_coeff_FeS, rate=diss_rate_FeS * f32_FeS, mp=mp, has_solid=True,',
-            '            add_lhs_sink=False, stoich_ratio=1.0,',
-            '        )',
-        ]
+            f'    diss_coeff_{mineral_parent} = k_diss_eff * us * smooth_ramp_diss',
+            f'    diss_rate_{mineral_parent} = diss_coeff_{mineral_parent} * {mineral_parent}_val',
+        ])
+        for idx, (p_curr, v_curr) in enumerate(c_val_names):
+            lines.extend([
+                '    add_implicit_coupling_new(',
+                f'        CROSS, RATES, LHS, target_species="{p_curr}", source_species="{mineral_parent}",',
+                f'        coeff=diss_coeff_{mineral_parent}, rate=diss_rate_{mineral_parent}, mp=mp, has_solid=True,',
+                f'        add_lhs_sink={idx == 0}, stoich_ratio=1.0,',
+                '    )',
+            ])
+
+        # Isotope handling for reversible saturation
+        iso_sp_map = r.get("isotope_species", {})
+        if iso_sp_map:
+            # Find reactant that tracks isotopes
+            iso_r = [
+                (coeff, sp, p_sp) for coeff, sp, p_sp, _ in reactants_info
+                if p_sp in iso_sp_map
+            ]
+            if iso_r and mineral_parent in iso_sp_map:
+                r_coeff, r_sp, r_parent = iso_r[0]
+                r_iso = iso_sp_map[r_parent]
+                m_iso = iso_sp_map[mineral_parent]
+
+                # Determine isotope standard ratio dynamically
+                std_name = self.validator.species_defs.get(r_parent, {}).get("isotope_standard", "S")
+                std_info = getattr(self.validator, "isotope_standards", {}).get(std_name, {})
+                std_key = std_info.get("standard", "VCDT")
+                std_ratio = std_info.get("ratio", 0.044162589)
+
+                lines.extend([
+                    '    if getattr(mp, "isotopes", False):',
+                    f'        std_ratio = getattr(mp, "{std_key}", getattr(mp, "{std_name}_ratio", {std_ratio}))',
+                    f'        f_iso_default = 1.0 / (1.0 + float(std_ratio))',
+                ])
+                r_spec = self.validator.get_speciation_factor_expr(r_sp)
+                if r_spec:
+                    other_eq_species = [
+                        s for s, m in getattr(self.validator, "species_defs", {}).items()
+                        if isinstance(m, dict) and m.get("equilibrium_of") == r_parent and s != r_sp and not m.get("isotope_of")
+                    ]
+                    if other_eq_species:
+                        other_sp = other_eq_species[0]
+                        other_frac = self.validator.get_speciation_factor_expr(other_sp) or f"mp.{other_sp.lower()}_frac"
+                        alpha_var = f"{other_sp.lower()}_{r_sp.lower()}_alpha"
+                    else:
+                        other_frac = f"(1.0 - {r_spec})"
+                        alpha_var = f"{r_sp.lower()}_alpha"
+
+                    lines.extend([
+                        f'        eq_alpha = getattr(mp, "{alpha_var}", getattr(mp, "h2s_hs_alpha", 1.0))',
+                        f'        {r_sp}_iso = partition_equilibrium_isotope(',
+                        f'            c.{r_iso}, {r_spec}, {other_frac}, eq_alpha',
+                        '        )',
+                        f'        {r_sp}_val_np = np.asarray({r_sp}_pw)',
+                        f'        {r_sp}_iso_val = np.asarray({r_sp}_iso)',
+                        f'        {r_parent}_val_np = np.asarray(c.{r_parent}.value if hasattr(c.{r_parent}, "value") else c.{r_parent})',
+                        f'        {r_parent}_iso_val = np.asarray(c.{r_iso}.value if hasattr(c.{r_iso}, "value") else c.{r_iso})',
+                        f'        f_iso_{r_sp} = np.where({r_sp}_val_np > 1e-6, {r_sp}_iso_val / ({r_sp}_val_np + 1e-30), f_iso_default)',
+                        f'        f_iso_{r_sp} = np.clip(f_iso_{r_sp}, 0.5, 1.5)',
+                        f'        f_iso_{r_parent} = np.where({r_parent}_val_np > 1e-6, {r_parent}_iso_val / ({r_parent}_val_np + 1e-30), f_iso_default)',
+                        f'        f_iso_{r_parent} = np.clip(f_iso_{r_parent}, 0.5, 1.5)',
+                        f'        ratio_iso = np.where(f_iso_{r_parent} > 1e-10, f_iso_{r_sp} / f_iso_{r_parent}, 1.0)',
+                        f'        prec_coeff_{r_parent}_iso = prec_coeff_{r_parent} * ratio_iso',
+                    ])
+                    f_iso_r = f"f_iso_{r_sp}"
+                else:
+                    lines.extend([
+                        f'        {r_parent}_val_np = np.asarray(c.{r_parent}.value if hasattr(c.{r_parent}, "value") else c.{r_parent})',
+                        f'        {r_parent}_iso_val = np.asarray(c.{r_iso}.value if hasattr(c.{r_iso}, "value") else c.{r_iso})',
+                        f'        f_iso_{r_parent} = np.where({r_parent}_val_np > 1e-6, {r_parent}_iso_val / ({r_parent}_val_np + 1e-30), f_iso_default)',
+                        f'        f_iso_{r_parent} = np.clip(f_iso_{r_parent}, 0.5, 1.5)',
+                        f'        prec_coeff_{r_parent}_iso = prec_coeff_{r_parent}',
+                    ])
+                    f_iso_r = f"f_iso_{r_parent}"
+
+                # Couple isotope precipitation
+                lines.extend([
+                    '        add_implicit_coupling_new(',
+                    f'            CROSS, RATES, LHS, target_species="{m_iso}", source_species="{r_iso}",',
+                    f'            coeff=prec_coeff_{r_parent}_iso, rate=prec_rate_{r_parent} * {f_iso_r}, mp=mp, has_solid=False,',
+                    '            add_lhs_sink=False, stoich_ratio=1.0,',
+                    '        )',
+                ])
+                for p_curr, _ in c_val_names:
+                    if p_curr != r_parent:
+                        lines.extend([
+                            '        add_implicit_coupling_new(',
+                            f'            CROSS, RATES, LHS, target_species="{m_iso}", source_species="{p_curr}",',
+                            f'            coeff=prec_coeff_{p_curr} * {f_iso_r}, rate=prec_rate_{p_curr} * {f_iso_r}, mp=mp, has_solid=False,',
+                            '            add_lhs_sink=False, stoich_ratio=1.0,',
+                            '        )',
+                            f'        CROSS["{r_iso}"].append(("{p_curr}", -prec_coeff_{p_curr} * {f_iso_r} * phi))',
+                            f'        RATES["{r_iso}"] -= prec_rate_{p_curr} * {f_iso_r} * phi',
+                        ])
+
+                lines.append(f'        add_implicit_sink(LHS, RATES, "{r_iso}", prec_coeff_{r_parent}_iso, prec_rate_{r_parent} * {f_iso_r}, mp=mp, has_solid=False)')
+
+                # Couple isotope dissolution
+                lines.extend([
+                    f'        {mineral_parent}_val_np = np.asarray(c.{mineral_parent}.value if hasattr(c.{mineral_parent}, "value") else c.{mineral_parent})',
+                    f'        {m_iso}_val = np.asarray(c.{m_iso}.value if hasattr(c.{m_iso}, "value") else c.{m_iso})',
+                    f'        f_iso_{mineral_parent} = np.where({mineral_parent}_val_np > 1e-3, {m_iso}_val / ({mineral_parent}_val_np + 1e-30), {f_iso_r})',
+                    f'        f_iso_{mineral_parent} = np.clip(f_iso_{mineral_parent}, 0.5, 1.5)',
+                    '        add_implicit_coupling_new(',
+                    f'            CROSS, RATES, LHS, target_species="{r_iso}", source_species="{m_iso}",',
+                    f'            coeff=diss_coeff_{mineral_parent}, rate=diss_rate_{mineral_parent} * f_iso_{mineral_parent}, mp=mp, has_solid=True,',
+                    '            add_lhs_sink=True, stoich_ratio=1.0,',
+                    '        )',
+                ])
+                for p_curr, _ in c_val_names:
+                    if p_curr != r_parent:
+                        lines.extend([
+                            '        add_implicit_coupling_new(',
+                            f'            CROSS, RATES, LHS, target_species="{p_curr}", source_species="{m_iso}",',
+                            f'            coeff=diss_coeff_{mineral_parent}, rate=diss_rate_{mineral_parent} * f_iso_{mineral_parent}, mp=mp, has_solid=True,',
+                            '            add_lhs_sink=False, stoich_ratio=1.0,',
+                            '        )',
+                        ])
+
         if r_name != fn_name:
             lines.append(f'{r_name} = {fn_name}')
         lines.append('')
@@ -1156,24 +1285,57 @@ class EquationSystemGenerator:
             k_diss_name = f"{k_name}_isd"
             k_sp_name = f"{k_name}_sp"
 
+        # Identify mineral product (solid) and dissolved reactants
+        mineral_candidates = [
+            (coeff, sp) for coeff, sp in cat.products
+            if self.validator.get_species_phase(sp) == "solid"
+        ]
+        mineral_parent = self.validator.get_parent_species(mineral_candidates[0][1]) if mineral_candidates else self.validator.get_parent_species(cat.products[0][1])
+
+        reactants_info = []
+        for coeff, sp in cat.reactants:
+            p_sp = self.validator.get_parent_species(sp)
+            spec = self.validator.get_speciation_factor_expr(sp)
+            reactants_info.append((coeff, sp, p_sp, spec))
+
+        all_species_needed = [p for _, _, p, _ in reactants_info] + [mineral_parent]
+        conds = [f'"{p}" in idx' for p in all_species_needed]
+
         lines = [
             f'    # Reversible Saturation: {r_name}',
-            '    if "Fe2_total" in idx and "TS2" in idx and "FeS" in idx:',
-            '        i_fe2 = idx["Fe2_total"]',
-            '        i_ts2 = idx["TS2"]',
-            '        i_fes = idx["FeS"]',
-            '        Fe2_val = np.maximum(c["Fe2_total"].value if hasattr(c["Fe2_total"], "value") else c["Fe2_total"], 1e-20)',
-            '        TS2_val = np.maximum(c["TS2"].value if hasattr(c["TS2"], "value") else c["TS2"], 1e-20)',
-            '        FeS_val = np.maximum(c["FeS"].value if hasattr(c["FeS"], "value") else c["FeS"], 1e-20)',
-            '        Fe2_pw = Fe2_val * float(mp.Fe2_diss)',
-            '        hs_val = TS2_val * float(mp.hs_frac)',
+            f'    if {" and ".join(conds)}:',
+        ]
+        for p in all_species_needed:
+            lines.append(f'        i_{p.lower()} = idx["{p}"]')
+
+        for _, sp, p_sp, spec in reactants_info:
+            v_name = f"{p_sp}_val"
+            pw_name = f"{sp}_pw"
+            lines.append(f'        {v_name} = np.maximum(c["{p_sp}"].value if hasattr(c["{p_sp}"], "value") else c["{p_sp}"], 1e-20)')
+            if spec:
+                lines.append(f'        {pw_name} = {v_name} * float({spec})')
+            else:
+                lines.append(f'        {pw_name} = {v_name}')
+
+        lines.append(f'        {mineral_parent}_val = np.maximum(c["{mineral_parent}"].value if hasattr(c["{mineral_parent}"], "value") else c["{mineral_parent}"], 1e-20)')
+
+        omega_num = " * ".join([f"{sp}_pw" for _, sp, _, _ in reactants_info])
+        lines.extend([
             '        k_Hplus = float(getattr(k, "Hplus", getattr(mp, "Hplus", 10**-7.5)))',
-            f'        k_FeS_sp = float(getattr(k, "{k_sp_name}", getattr(mp, "{k_sp_name}", 10**-3.5)))',
-            f'        k_FeS_isp = float(getattr(k, "{k_prec_name}", getattr(mp, "{k_prec_name}", 1.0)))',
-            f'        k_FeS_isd = float(getattr(k, "{k_diss_name}", getattr(mp, "{k_diss_name}", 0.3)))',
-            '        omega = (Fe2_pw * hs_val) / (k_Hplus * k_FeS_sp + 1e-30)',
-            '        d_omega_dFe2 = (float(mp.Fe2_diss) * hs_val) / (k_Hplus * k_FeS_sp + 1e-30)',
-            '        d_omega_dTS2 = (Fe2_pw * float(mp.hs_frac)) / (k_Hplus * k_FeS_sp + 1e-30)',
+            f'        k_min_sp = float(getattr(k, "{k_sp_name}", getattr(mp, "{k_sp_name}", 10**-3.5)))',
+            f'        k_min_isp = float(getattr(k, "{k_prec_name}", getattr(mp, "{k_prec_name}", 1.0)))',
+            f'        k_min_isd = float(getattr(k, "{k_diss_name}", getattr(mp, "{k_diss_name}", 0.3)))',
+            f'        omega = ({omega_num}) / (k_Hplus * k_min_sp + 1e-30)',
+        ])
+
+        # Derivatives of omega w.r.t reactants
+        for coeff_i, sp_i, p_i, spec_i in reactants_info:
+            other_pw = [f"{sp}_pw" for _, sp, p_other, _ in reactants_info if p_other != p_i]
+            fac_i = f"float({spec_i})" if spec_i else "1.0"
+            term_num = f"{fac_i} * " + " * ".join(other_pw) if other_pw else fac_i
+            lines.append(f'        d_omega_d{p_i} = ({term_num}) / (k_Hplus * k_min_sp + 1e-30)')
+
+        lines.extend([
             '        eps_sm = float(getattr(mp, "fes_smooth_epsilon", getattr(mp, "saturation_smooth_epsilon", 0.01)))',
             '        is_prec = omega >= 1.0',
             '        df_p = np.maximum(omega - 1.0, 0.0)',
@@ -1181,70 +1343,135 @@ class EquationSystemGenerator:
             '        S_p = 3.0 * u_p**2 - 2.0 * u_p**3',
             '        dS_du = np.where((u_p > 0.0) & (u_p < 1.0), 6.0 * u_p * (1.0 - u_p), 0.0)',
             '        dS_p_domega = dS_du / (eps_sm + 1e-30)',
-            '        dR_prec_domega = k_FeS_isp * (S_p + df_p * dS_p_domega) * is_prec',
-            '        R_prec = k_FeS_isp * df_p * S_p * is_prec',
-            '        dRp_dFe2 = diss_fac * dR_prec_domega * d_omega_dFe2',
-            '        dRp_dTS2 = diss_fac * dR_prec_domega * d_omega_dTS2',
+            '        dR_prec_domega = k_min_isp * (S_p + df_p * dS_p_domega) * is_prec',
+            '        R_prec = k_min_isp * df_p * S_p * is_prec',
+        ])
+
+        for _, _, p_i, _ in reactants_info:
+            lines.append(f'        dRp_d{p_i} = diss_fac * dR_prec_domega * d_omega_d{p_i}')
+
+        lines.extend([
             '        is_diss = omega < 1.0',
             '        us_d = np.maximum(1.0 - omega, 0.0)',
             '        u_d = np.clip(us_d / (eps_sm + 1e-30), 0.0, 1.0)',
             '        S_d = 3.0 * u_d**2 - 2.0 * u_d**3',
             '        dS_d_du = np.where((u_d > 0.0) & (u_d < 1.0), 6.0 * u_d * (1.0 - u_d), 0.0)',
             '        dS_d_domega = -dS_d_du / (eps_sm + 1e-30)',
-            '        dR_diss_domega = -k_FeS_isd * (S_d + us_d * (dS_d_du / (eps_sm + 1e-30))) * FeS_val * is_diss',
-            '        dR_diss_dFeS = k_FeS_isd * us_d * S_d * is_diss',
-            '        R_diss = k_FeS_isd * us_d * S_d * FeS_val * is_diss',
-            '        dRd_dFe2 = solid_fac * dR_diss_domega * d_omega_dFe2',
-            '        dRd_dTS2 = solid_fac * dR_diss_domega * d_omega_dTS2',
-            '        dRd_dFeS = solid_fac * dR_diss_dFeS',
-            '        d_net_dFe2 = dRp_dFe2 - dRd_dFe2',
-            '        d_net_dTS2 = dRp_dTS2 - dRd_dTS2',
-            '        d_net_dFeS = -dRd_dFeS',
-            '        J[:, i_fes, i_fe2] += d_net_dFe2',
-            '        J[:, i_fes, i_ts2] += d_net_dTS2',
-            '        J[:, i_fes, i_fes] += d_net_dFeS',
-            '        J[:, i_fe2, i_fe2] -= d_net_dFe2',
-            '        J[:, i_fe2, i_ts2] -= d_net_dTS2',
-            '        J[:, i_fe2, i_fes] -= d_net_dFeS',
-            '        J[:, i_ts2, i_fe2] -= d_net_dFe2',
-            '        J[:, i_ts2, i_ts2] -= d_net_dTS2',
-            '        J[:, i_ts2, i_fes] -= d_net_dFeS',
-            '        if "FeS_32" in idx and "TS2_32" in idx and getattr(mp, "isotopes", False):',
-            '            i_fes_32 = idx["FeS_32"]',
-            '            i_ts2_32 = idx["TS2_32"]',
-            '            hs_32 = partition_equilibrium_isotope_32(',
-            '                c["TS2_32"].value if hasattr(c["TS2_32"], "value") else c["TS2_32"],',
-            '                mp.hs_frac, mp.h2s_frac, mp.h2s_hs_alpha,',
-            '            )',
-            '            f32_default = 1.0 / (1.0 + float(mp.VCDT))',
-            '            mask_hs = hs_val > 1e-6',
-            '            f32_hs = np.where(mask_hs, np.asarray(hs_32) / (hs_val + 1e-30), f32_default)',
-            '            f32_hs = np.clip(f32_hs, 0.5, 1.5)',
-            '            R_prec_bulk = diss_fac * R_prec',
-            '            dRp32_dFe2 = dRp_dFe2 * f32_hs',
-            '            dRp32_dTS2 = dRp_dTS2 * f32_hs - np.where(mask_hs, (R_prec_bulk / TS2_val) * f32_hs, 0.0)',
-            '            dRp32_dTS2_32 = np.where(is_prec & mask_hs, R_prec_bulk / TS2_val, 0.0)',
-            '            R_diss_bulk = solid_fac * R_diss',
-            '            mask_fes = FeS_val > 1e-3',
-            '            FeS_32_val = np.asarray(c["FeS_32"].value if hasattr(c["FeS_32"], "value") else c["FeS_32"])',
-            '            f32_FeS = np.where(mask_fes, FeS_32_val / (FeS_val + 1e-30), f32_hs)',
-            '            f32_FeS = np.clip(f32_FeS, 0.5, 1.5)',
-            '            dRd32_dFe2 = dRd_dFe2 * f32_FeS',
-            '            dRd32_dTS2 = dRd_dTS2 * f32_FeS',
-            '            dRd32_dFeS = np.where(~mask_fes, dRd_dFeS * f32_hs, 0.0)',
-            '            dRd32_dFeS_32 = np.where(is_diss & mask_fes, R_diss_bulk / FeS_val, 0.0)',
-            '            J[:, i_fes_32, i_fe2] += (dRp32_dFe2 - dRd32_dFe2)',
-            '            J[:, i_fes_32, i_ts2] += (dRp32_dTS2 - dRd32_dTS2)',
-            '            J[:, i_fes_32, i_fes] -= dRd32_dFeS',
-            '            J[:, i_fes_32, i_ts2_32] += dRp32_dTS2_32',
-            '            J[:, i_fes_32, i_fes_32] -= dRd32_dFeS_32',
-            '            J[:, i_ts2_32, i_fe2] -= (dRp32_dFe2 - dRd32_dFe2)',
-            '            J[:, i_ts2_32, i_ts2] -= (dRp32_dTS2 - dRd32_dTS2)',
-            '            J[:, i_ts2_32, i_fes] += dRd32_dFeS',
-            '            J[:, i_ts2_32, i_ts2_32] -= dRp32_dTS2_32',
-            '            J[:, i_ts2_32, i_fes_32] += dRd32_dFeS_32',
-            '',
-        ]
+            f'        dR_diss_domega = -k_min_isd * (S_d + us_d * (dS_d_du / (eps_sm + 1e-30))) * {mineral_parent}_val * is_diss',
+            f'        dR_diss_d{mineral_parent} = k_min_isd * us_d * S_d * is_diss',
+            f'        R_diss = k_min_isd * us_d * S_d * {mineral_parent}_val * is_diss',
+        ])
+
+        for _, _, p_i, _ in reactants_info:
+            lines.append(f'        dRd_d{p_i} = solid_fac * dR_diss_domega * d_omega_d{p_i}')
+        lines.append(f'        dRd_d{mineral_parent} = solid_fac * dR_diss_d{mineral_parent}')
+
+        for _, _, p_i, _ in reactants_info:
+            lines.append(f'        d_net_d{p_i} = dRp_d{p_i} - dRd_d{p_i}')
+        lines.append(f'        d_net_d{mineral_parent} = -dRd_d{mineral_parent}')
+
+        # Populate Jacobian entries
+        m_idx = f"i_{mineral_parent.lower()}"
+        for _, _, p_i, _ in reactants_info:
+            p_idx = f"i_{p_i.lower()}"
+            lines.append(f'        J[:, {m_idx}, {p_idx}] += d_net_d{p_i}')
+            for _, _, p_target, _ in reactants_info:
+                p_tgt_idx = f"i_{p_target.lower()}"
+                lines.append(f'        J[:, {p_tgt_idx}, {p_idx}] -= d_net_d{p_i}')
+
+        lines.append(f'        J[:, {m_idx}, {m_idx}] += d_net_d{mineral_parent}')
+        for _, _, p_target, _ in reactants_info:
+            p_tgt_idx = f"i_{p_target.lower()}"
+            lines.append(f'        J[:, {p_tgt_idx}, {m_idx}] -= d_net_d{mineral_parent}')
+
+        # Isotope Jacobian entries
+        iso_sp_map = r.get("isotope_species", {})
+        if iso_sp_map:
+            iso_r = [
+                (coeff, sp, p_sp) for coeff, sp, p_sp, _ in reactants_info
+                if p_sp in iso_sp_map
+            ]
+            if iso_r and mineral_parent in iso_sp_map:
+                r_coeff, r_sp, r_parent = iso_r[0]
+                r_iso = iso_sp_map[r_parent]
+                m_iso = iso_sp_map[mineral_parent]
+                std_name = self.validator.species_defs.get(r_parent, {}).get("isotope_standard", "S")
+                std_info = getattr(self.validator, "isotope_standards", {}).get(std_name, {})
+                std_key = std_info.get("standard", "VCDT")
+                std_ratio = std_info.get("ratio", 0.044162589)
+
+                r_spec = self.validator.get_speciation_factor_expr(r_sp)
+                other_eq_species = [
+                    s for s, m in getattr(self.validator, "species_defs", {}).items()
+                    if isinstance(m, dict) and m.get("equilibrium_of") == r_parent and s != r_sp and not m.get("isotope_of")
+                ]
+                if other_eq_species:
+                    other_sp = other_eq_species[0]
+                    other_frac = self.validator.get_speciation_factor_expr(other_sp) or f"mp.{other_sp.lower()}_frac"
+                    alpha_var = f"{other_sp.lower()}_{r_sp.lower()}_alpha"
+                else:
+                    other_frac = f"(1.0 - {r_spec})" if r_spec else "1.0"
+                    alpha_var = f"{r_sp.lower()}_alpha"
+                target_frac = r_spec if r_spec else "1.0"
+
+                lines.extend([
+                    f'        if "{m_iso}" in idx and "{r_iso}" in idx and getattr(mp, "isotopes", False):',
+                    f'            i_{m_iso.lower()} = idx["{m_iso}"]',
+                    f'            i_{r_iso.lower()} = idx["{r_iso}"]',
+                    f'            eq_alpha = getattr(mp, "{alpha_var}", getattr(mp, "h2s_hs_alpha", 1.0))',
+                    f'            {r_sp}_iso = partition_equilibrium_isotope(',
+                    f'                c["{r_iso}"].value if hasattr(c["{r_iso}"], "value") else c["{r_iso}"],',
+                    f'                {target_frac}, {other_frac}, eq_alpha,',
+                    '            )',
+                    f'            std_ratio = getattr(mp, "{std_key}", getattr(mp, "{std_name}_ratio", {std_ratio}))',
+                    '            f_iso_default = 1.0 / (1.0 + float(std_ratio))',
+                    f'            mask_r = {r_sp}_pw > 1e-6',
+                    f'            f_iso_r = np.where(mask_r, np.asarray({r_sp}_iso) / ({r_sp}_pw + 1e-30), f_iso_default)',
+                    '            f_iso_r = np.clip(f_iso_r, 0.5, 1.5)',
+                    '            R_prec_bulk = diss_fac * R_prec',
+                ])
+                for _, _, p_i, _ in reactants_info:
+                    if p_i == r_parent:
+                        lines.extend([
+                            f'            dRp_iso_d{p_i} = dRp_d{p_i} * f_iso_r - np.where(mask_r, (R_prec_bulk / {p_i}_val) * f_iso_r, 0.0)',
+                            f'            dRp_iso_d{r_iso} = np.where(is_prec & mask_r, R_prec_bulk / {p_i}_val, 0.0)',
+                        ])
+                    else:
+                        lines.append(f'            dRp_iso_d{p_i} = dRp_d{p_i} * f_iso_r')
+
+                lines.extend([
+                    '            R_diss_bulk = solid_fac * R_diss',
+                    f'            mask_m = {mineral_parent}_val > 1e-3',
+                    f'            {m_iso}_val = np.asarray(c["{m_iso}"].value if hasattr(c["{m_iso}"], "value") else c["{m_iso}"])',
+                    f'            f_iso_m = np.where(mask_m, {m_iso}_val / ({mineral_parent}_val + 1e-30), f_iso_r)',
+                    '            f_iso_m = np.clip(f_iso_m, 0.5, 1.5)',
+                ])
+                for _, _, p_i, _ in reactants_info:
+                    lines.append(f'            dRd_iso_d{p_i} = dRd_d{p_i} * f_iso_m')
+                lines.extend([
+                    f'            dRd_iso_d{mineral_parent} = np.where(~mask_m, dRd_d{mineral_parent} * f_iso_r, 0.0)',
+                    f'            dRd_iso_d{m_iso} = np.where(is_diss & mask_m, R_diss_bulk / {mineral_parent}_val, 0.0)',
+                ])
+
+                # Assign isotope cross derivatives
+                m_iso_idx = f"i_{m_iso.lower()}"
+                r_iso_idx = f"i_{r_iso.lower()}"
+                for _, _, p_i, _ in reactants_info:
+                    p_idx = f"i_{p_i.lower()}"
+                    lines.extend([
+                        f'            J[:, {m_iso_idx}, {p_idx}] += (dRp_iso_d{p_i} - dRd_iso_d{p_i})',
+                        f'            J[:, {r_iso_idx}, {p_idx}] -= (dRp_iso_d{p_i} - dRd_iso_d{p_i})',
+                    ])
+                lines.extend([
+                    f'            J[:, {m_iso_idx}, i_{mineral_parent.lower()}] -= dRd_iso_d{mineral_parent}',
+                    f'            J[:, {m_iso_idx}, {r_iso_idx}] += dRp_iso_d{r_iso}',
+                    f'            J[:, {m_iso_idx}, {m_iso_idx}] -= dRd_iso_d{m_iso}',
+                    f'            J[:, {r_iso_idx}, i_{mineral_parent.lower()}] += dRd_iso_d{mineral_parent}',
+                    f'            J[:, {r_iso_idx}, {r_iso_idx}] -= dRp_iso_d{r_iso}',
+                    f'            J[:, {r_iso_idx}, {m_iso_idx}] += dRd_iso_d{m_iso}',
+                ])
+
+        lines.append('')
         return lines
 
     def _generate_kinetic_reaction_jacobian(self, r: Dict[str, Any], cat: ReactionCategory) -> List[str]:
@@ -1290,10 +1517,7 @@ class EquationSystemGenerator:
         # Limiters & Inhibitors terms
         lim_terms = []
         for l_name in (r.get("limiters") or []):
-            if l_name == "O2_TS2":
-                lines.append(f'        _lim_{l_name} = lim.get("O2_implicit_TS2", lim.get("O2_TS2_implicit", lim.get("O2_TS2", 1.0)))')
-            else:
-                lines.append(f'        _lim_{l_name} = lim.get("{l_name}_implicit", lim.get("{l_name}", 1.0))')
+            lines.append(f'        _lim_{l_name} = lim.get("{l_name}_implicit", lim.get("{l_name}", 1.0))')
             lim_terms.append(f'_lim_{l_name}')
 
         for i_name in (r.get("inhibitors") or []):
@@ -1487,7 +1711,9 @@ class EquationSystemGenerator:
             '    add_coupled_reaction,',
             '    add_implicit_sink,',
             '    add_implicit_coupling_new,',
+            '    calculate_fractionated_rate_coeff,',
             '    calculate_fractionated_coeff_32,',
+            '    partition_equilibrium_isotope,',
             '    partition_equilibrium_isotope_32,',
             '    data_container,',
             ')',
