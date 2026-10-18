@@ -1083,12 +1083,20 @@ class EquationSystemGenerator:
         lines.append(f'    {mineral_parent}_val = np.maximum(np.asarray(c.{mineral_parent}.value if hasattr(c.{mineral_parent}, "value") else c.{mineral_parent}), 1e-20)')
 
         # Equilibrium constants and saturation state omega
+        has_hplus = any("HS" in sp or "H2S" in sp for _, sp, _, _ in reactants_info)
         lines.extend([
-            '    k_Hplus = getattr(k_val, "Hplus", getattr(mp, "Hplus", 10**-7.5))',
             f'    k_sp = getattr(k_val, "{k_sp_name}", getattr(mp, "{k_sp_name}", 10**-3.5))',
             f'    k_isp = getattr(k_val, "{k_prec_name}", getattr(mp, "{k_prec_name}", 1.0))',
             f'    k_isd = getattr(k_val, "{k_diss_name}", getattr(mp, "{k_diss_name}", 0.3))',
-            '    omega_den = k_Hplus * k_sp + 1e-30',
+        ])
+        if has_hplus:
+            lines.extend([
+                '    k_Hplus = getattr(c, "Hplus", getattr(k_val, "Hplus", getattr(mp, "Hplus", 10**-7.5 * 1000.0)))',
+                '    omega_den = k_Hplus * k_sp + 1e-30',
+            ])
+        else:
+            lines.append('    omega_den = k_sp + 1e-30')
+        lines.extend([
             f'    omega = ({" * ".join(omega_num_terms)}) / omega_den',
             '    is_prec = np.where(omega >= 1.0, 1.0, 0.0)',
             '    is_diss = np.where(omega < 1.0, 1.0, 0.0)',
@@ -1324,20 +1332,27 @@ class EquationSystemGenerator:
         lines.append(f'        {mineral_parent}_val = np.maximum(c["{mineral_parent}"].value if hasattr(c["{mineral_parent}"], "value") else c["{mineral_parent}"], 1e-20)')
 
         omega_num = " * ".join([f"{sp}_pw" for _, sp, _, _ in reactants_info])
+        has_hplus = any("HS" in sp or "H2S" in sp for _, sp, _, _ in reactants_info)
         lines.extend([
-            '        k_Hplus = float(getattr(k, "Hplus", getattr(mp, "Hplus", 10**-7.5)))',
             f'        k_min_sp = float(getattr(k, "{k_sp_name}", getattr(mp, "{k_sp_name}", 10**-3.5)))',
             f'        k_min_isp = float(getattr(k, "{k_prec_name}", getattr(mp, "{k_prec_name}", 1.0)))',
             f'        k_min_isd = float(getattr(k, "{k_diss_name}", getattr(mp, "{k_diss_name}", 0.3)))',
-            f'        omega = ({omega_num}) / (k_Hplus * k_min_sp + 1e-30)',
         ])
+        if has_hplus:
+            lines.extend([
+                '        k_Hplus = getattr(c, "Hplus", getattr(k, "Hplus", getattr(mp, "Hplus", 10**-7.5 * 1000.0)))',
+                f'        omega = ({omega_num}) / (k_Hplus * k_min_sp + 1e-30)',
+            ])
+        else:
+            lines.append(f'        omega = ({omega_num}) / (k_min_sp + 1e-30)')
 
         # Derivatives of omega w.r.t reactants
         for coeff_i, sp_i, p_i, spec_i in reactants_info:
             other_pw = [f"{sp}_pw" for _, sp, p_other, _ in reactants_info if p_other != p_i]
             fac_i = f"({spec_i})" if spec_i else "1.0"
             term_num = f"{fac_i} * " + " * ".join(other_pw) if other_pw else fac_i
-            lines.append(f'        d_omega_d{p_i} = ({term_num}) / (k_Hplus * k_min_sp + 1e-30)')
+            den_str = "(k_Hplus * k_min_sp + 1e-30)" if has_hplus else "(k_min_sp + 1e-30)"
+            lines.append(f'        d_omega_d{p_i} = ({term_num}) / {den_str}')
 
         lines.extend([
             '        eps_sm = float(getattr(mp, "fes_smooth_epsilon", getattr(mp, "saturation_smooth_epsilon", 0.01)))',
@@ -1387,6 +1402,24 @@ class EquationSystemGenerator:
         for _, _, p_target, _ in reactants_info:
             p_tgt_idx = f"i_{p_target.lower()}"
             lines.append(f'        J[:, {p_tgt_idx}, {m_idx}] -= d_net_d{mineral_parent}')
+
+        if has_hplus:
+            lines.extend([
+                '        if has_carb:',
+                '            _Ka1_h2s = float(getattr(mp, "K_a1_h2s", 10.0 ** (-7.0)))',
+                '            _domega_dh_m3 = -omega * (1.0 / (k_Hplus + 1e-30) + 1.0 / (_h * 1000.0 + _Ka1_h2s + 1e-30))',
+                '            _domega_dh = _domega_dh_m3 * 1000.0',
+                '            _d_net_dTA = (dR_prec_domega * diss_fac - dR_diss_domega * solid_fac) * _domega_dh * _dh_dta',
+                '            _d_net_dDIC = (dR_prec_domega * diss_fac - dR_diss_domega * solid_fac) * _domega_dh * _dh_ddic',
+                f'            J[:, {m_idx}, idx["TA"]] += _d_net_dTA',
+                f'            J[:, {m_idx}, idx["DIC"]] += _d_net_dDIC',
+            ])
+            for _, _, p_target, _ in reactants_info:
+                p_tgt_idx = f"i_{p_target.lower()}"
+                lines.extend([
+                    f'            J[:, {p_tgt_idx}, idx["TA"]] -= _d_net_dTA',
+                    f'            J[:, {p_tgt_idx}, idx["DIC"]] -= _d_net_dDIC',
+                ])
 
         # Isotope Jacobian entries
         iso_sp_map = r.get("isotope_species", {})
@@ -1532,6 +1565,56 @@ class EquationSystemGenerator:
             lines.append(f'        _inh_{i_name} = lim.get("{i_name}_inhibit", lim.get("{i_name}_inhib", 1.0))')
             lim_terms.append(f'_inh_{i_name}')
 
+        is_calcite_precip = ("calcite" in r_name.lower() or "caco3" in r_name.lower()) and "CaCO3" in [p for _, _, p in p_parents] and "TA" in all_needed_parents and "DIC" in all_needed_parents and "Ca2" in all_needed_parents
+        is_calcite_diss = ("calcite" in r_name.lower() or "caco3" in r_name.lower()) and "CaCO3" in [p for _, _, p in r_parents] and "TA" in all_needed_parents and "DIC" in all_needed_parents and "Ca2" in all_needed_parents
+
+        if is_calcite_precip:
+            lines.extend([
+                '        _Ksp = float(mp.k.get("Ksp_calcite") if hasattr(mp, "k") else getattr(k, "Ksp_calcite", 0.4266))',
+                '        _omega = (c_Ca2 * _co3) / (_Ksp + 1e-30)',
+                '        _eps_sm = float(getattr(mp, "saturation_smooth_epsilon", 0.01))',
+                '        _df_p = np.maximum(_omega - 1.0, 0.0)',
+                '        _u_p = np.clip(_df_p / (_eps_sm + 1e-30), 0.0, 1.0)',
+                '        _S_p = 3.0 * _u_p**2 - 2.0 * _u_p**3',
+                '        _dS_p_du = np.where((_u_p > 0.0) & (_u_p < 1.0), 6.0 * _u_p * (1.0 - _u_p), 0.0)',
+                '        _dS_p_domega = _dS_p_du / (_eps_sm + 1e-30)',
+                f'        _dR_prec_domega = diss_fac * k_num_{r_name} * (_S_p + _df_p * _dS_p_domega) * (_omega >= 1.0)',
+                '        _dr_dCa2 = _dR_prec_domega * (_co3 / (_Ksp + 1e-30))',
+                '        _dr_dTA = _dR_prec_domega * (c_Ca2 / (_Ksp + 1e-30)) * _dco3_dta',
+                '        _dr_dDIC = _dR_prec_domega * (c_Ca2 / (_Ksp + 1e-30)) * _dco3_ddic',
+                '        for _vname, _dr in [("Ca2", _dr_dCa2), ("TA", _dr_dTA), ("DIC", _dr_dDIC)]:',
+                '            J[:, idx["Ca2"], idx[_vname]] -= 1.0 * _dr',
+                '            J[:, idx["DIC"], idx[_vname]] -= 1.0 * _dr',
+                '            J[:, idx["TA"], idx[_vname]] -= 2.0 * _dr',
+                '            J[:, idx["CaCO3"], idx[_vname]] += 1.0 * _dr',
+            ])
+            lines.append('')
+            return lines
+
+        if is_calcite_diss:
+            lines.extend([
+                '        _Ksp = float(mp.k.get("Ksp_calcite") if hasattr(mp, "k") else getattr(k, "Ksp_calcite", 0.4266))',
+                '        _omega = (c_Ca2 * _co3) / (_Ksp + 1e-30)',
+                '        _eps_sm = float(getattr(mp, "saturation_smooth_epsilon", 0.01))',
+                '        _us_d = np.maximum(1.0 - _omega, 0.0)',
+                '        _u_d = np.clip(_us_d / (_eps_sm + 1e-30), 0.0, 1.0)',
+                '        _S_d = 3.0 * _u_d**2 - 2.0 * _u_d**3',
+                '        _dS_d_du = np.where((_u_d > 0.0) & (_u_d < 1.0), 6.0 * _u_d * (1.0 - _u_d), 0.0)',
+                '        _dS_d_domega = -_dS_d_du / (_eps_sm + 1e-30)',
+                f'        _dR_diss_domega = -solid_fac * k_num_{r_name} * c_CaCO3 * (_S_d + _us_d * _dS_d_domega) * (_omega < 1.0)',
+                '        _dr_dCa2 = _dR_diss_domega * (_co3 / (_Ksp + 1e-30))',
+                '        _dr_dTA = _dR_diss_domega * (c_Ca2 / (_Ksp + 1e-30)) * _dco3_dta',
+                '        _dr_dDIC = _dR_diss_domega * (c_Ca2 / (_Ksp + 1e-30)) * _dco3_ddic',
+                f'        _dr_dCaCO3 = solid_fac * k_num_{r_name} * _us_d * _S_d * (_omega < 1.0)',
+                '        for _vname, _dr in [("Ca2", _dr_dCa2), ("TA", _dr_dTA), ("DIC", _dr_dDIC), ("CaCO3", _dr_dCaCO3)]:',
+                '            J[:, idx["CaCO3"], idx[_vname]] -= 1.0 * _dr',
+                '            J[:, idx["Ca2"], idx[_vname]] += 1.0 * _dr',
+                '            J[:, idx["DIC"], idx[_vname]] += 1.0 * _dr',
+                '            J[:, idx["TA"], idx[_vname]] += 2.0 * _dr',
+            ])
+            lines.append('')
+            return lines
+
         for coeff_diff, orig_sp_diff, diff_p in r_parents:
             other_r = [
                 (c, sp, p) for c, sp, p in r_parents if p != diff_p
@@ -1672,6 +1755,29 @@ class EquationSystemGenerator:
             '        lim = mp.get_limiters(c, mp)',
             '    else:',
             '        lim = getattr(mp, "limiters", {})',
+            '    has_carb = "TA" in idx and "DIC" in idx',
+            '    if has_carb:',
+            '        _ta_val = np.maximum(np.asarray(c["TA"].value if hasattr(c["TA"], "value") else c["TA"]), 1e-12)',
+            '        _dic_val = np.maximum(np.asarray(c["DIC"].value if hasattr(c["DIC"], "value") else c["DIC"]), 1e-12)',
+            '        _pK1 = getattr(mp, "pK1_carb", 5.86)',
+            '        _pK2 = getattr(mp, "pK2_carb", 8.92)',
+            '        _K1 = 10.0 ** (-float(_pK1))',
+            '        _K2 = 10.0 ** (-float(_pK2))',
+            '        _b = _K1 * (_ta_val - _dic_val)',
+            '        _c_term = _K1 * _K2 * (_ta_val - 2.0 * _dic_val)',
+            '        _disc = np.maximum(_b**2 - 4.0 * _ta_val * _c_term, 0.0)',
+            '        _h = (-_b + np.sqrt(_disc)) / (2.0 * _ta_val)',
+            '        _h = np.maximum(_h, 1e-14)',
+            '        _denom = _h**2 + _K1 * _h + _K1 * _K2',
+            '        _co3 = _dic_val * (_K1 * _K2) / _denom',
+            '        _dF_dh = 2.0 * _ta_val * _h + _b',
+            '        _dF_dta = _h**2 + _K1 * _h + _K1 * _K2',
+            '        _dF_ddic = -(_K1 * _h + 2.0 * _K1 * _K2)',
+            '        _dh_dta = -_dF_dta / (_dF_dh + 1e-30)',
+            '        _dh_ddic = -_dF_ddic / (_dF_dh + 1e-30)',
+            '        _dD_dh = 2.0 * _h + _K1',
+            '        _dco3_dta = - (_dic_val * _K1 * _K2 / _denom**2) * _dD_dh * _dh_dta',
+            '        _dco3_ddic = (_K1 * _K2 / _denom) - (_dic_val * _K1 * _K2 / _denom**2) * _dD_dh * _dh_ddic',
             '',
         ])
 

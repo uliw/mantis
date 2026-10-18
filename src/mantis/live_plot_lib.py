@@ -571,6 +571,18 @@ def capture_state(
                         )
                     data[f"d_{base}"] = diff_lib.get_delta(tot, c_iso, r_std, threshold=thresh)
 
+    # 4. Carbonate system speciation diagnostics
+    if hasattr(c, "TA") and hasattr(c, "DIC"):
+        diff_lib.compute_carbonate_speciation(c, mp_params)
+        _gv = lambda x: x.value if hasattr(x, "value") else x
+        data["pH"] = _gv(c.pH)
+        data["c_CO3"] = _gv(c.CO3)
+        data["c_HCO3"] = _gv(c.HCO3)
+        data["c_CO2"] = _gv(c.CO2)
+        if "c_Ca2" in data and hasattr(mp_params, "Ksp_calcite"):
+            ksp_val = float(mp_params.Ksp_calcite)
+            data["Omega_calcite"] = (data["c_Ca2"] * data["c_CO3"]) / (ksp_val + 1e-30)
+
     data["w"] = np.ones(len(z)) * mp_params.w
     data["phi"] = np.ones(len(z)) * (
         mp_params.phi.value if hasattr(mp_params.phi, "value") else mp_params.phi

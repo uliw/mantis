@@ -2313,7 +2313,7 @@ def compute_carbonate_speciation(c: Any, mp: Any) -> None:
                 return
         setattr(c, attr_name, arr_val)
 
-    _set_c_field("Hplus", h_plus)
+    _set_c_field("Hplus", h_plus * 1000.0)
     _set_c_field("pH", -np.log10(h_plus))
     _set_c_field("CO3", co3)
     _set_c_field("HCO3", hco3)
