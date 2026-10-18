@@ -288,11 +288,11 @@ class DiageneticModel:
             "dt_tolerance": 1e-5,
 
             # Monolithic Newton Settings
-            "max_newton_iters": 8,
+            "max_newton_iters": 12,
             "newton_tol": 1e-3,
             "newton_norm": "linf",
             "newton_target_optimal": 4,
-            "newton_max_acceptable": 6,
+            "newton_max_acceptable": 8,
             "use_numerical_jacobian": False,
         })
 
@@ -728,7 +728,14 @@ class DiageneticModel:
         self.mp.isotope_standards = iso_stds
         # Backwards compatibility: if S in isotope_standards, expose VCDT
         if "S" in iso_stds and isinstance(iso_stds["S"], dict):
-            self.mp.VCDT = float(iso_stds["S"].get("ratio", 0.044162589))
+            if "ratio" in iso_stds["S"]:
+                self.mp.VCDT = float(iso_stds["S"]["ratio"])
+            else:
+                print(
+                    "\n[MANTIS ERROR] 'ratio' is missing for isotope standard 'S' in isotope_standards in species.py.\n",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
 
         # 2. Extract pH from species definitions (e.g. Hplus or any species defining 'pH' under 'bc')
         if "pH" not in self.p_dict:
@@ -808,10 +815,10 @@ class DiageneticModel:
         _k1, k = get_rc_fn(self.mp.pH, self.mp.phi, k_values=k)
         self.mp.k = k
 
-        # Propagate Monod half-saturation constants (K_*) from k to self.mp if not already configured
+        # Propagate reaction and equilibrium constants from k to self.mp if not already configured
         k_items = k.items() if hasattr(k, "items") else k.__dict__.items()
         for k_name, k_val in k_items:
-            if k_name.startswith("K_") and not hasattr(self.mp, k_name):
+            if not hasattr(self.mp, k_name):
                 setattr(self.mp, k_name, k_val)
 
         # 7. Species lists & phase classification
@@ -907,6 +914,20 @@ class DiageneticModel:
                 else:
                     bc_map[sp_k]["top"] = float(ov)
 
+        # Carbonate system boundary condition consistency:
+        # Treat pH and DIC as primary controls and calculate TA boundary condition
+        if "DIC" in bc_map and "TA" in bc_map:
+            from mantis.diff_lib import compute_carbonate_speciation_from_ph_dic
+            dic_top = bc_map["DIC"]["top"]
+            ta_calc, co3_calc, hco3_calc, _ = compute_carbonate_speciation_from_ph_dic(
+                self.mp.pH, dic_top, self.mp
+            )
+            bc_map["TA"]["top"] = ta_calc
+            if "CO3" in bc_map:
+                bc_map["CO3"]["top"] = co3_calc
+            if "HCO3" in bc_map:
+                bc_map["HCO3"]["top"] = hco3_calc
+
         # 8. Compute molecular diffusion coefficients from species recipes
         # Import diff_lib module for diff_coeff functions
         import mantis.diff_lib as diff_lib_mod
@@ -997,14 +1018,18 @@ class DiageneticModel:
 
                 # Standard ratio resolution
                 std_key = meta.get("isotope_standard", "S")
-                if std_key in self.mp.isotope_standards and isinstance(self.mp.isotope_standards[std_key], dict):
-                    std_ratio = float(self.mp.isotope_standards[std_key].get("ratio", 0.044162589))
-                elif hasattr(self.mp, "VCDT"):
+                if (
+                    std_key in self.mp.isotope_standards
+                    and isinstance(self.mp.isotope_standards[std_key], dict)
+                    and "ratio" in self.mp.isotope_standards[std_key]
+                ):
+                    std_ratio = float(self.mp.isotope_standards[std_key]["ratio"])
+                elif hasattr(self.mp, "VCDT") and std_key == "S":
                     std_ratio = float(self.mp.VCDT)
                 else:
                     print(
                         f"\n[MANTIS ERROR] Species '{sp_name}' defines isotope companion '{iso_target}', "
-                        f"but standard '{std_key}' is not defined in isotope_standards in species.py.\n",
+                        f"but standard '{std_key}' with a valid 'ratio' is not defined in isotope_standards in species.py.\n",
                         file=sys.stderr,
                     )
                     sys.exit(1)
@@ -1024,9 +1049,25 @@ class DiageneticModel:
         for sp_name in species_transport:
             var = getattr(c, sp_name)
             props = bc_map.get(sp_name, {"top": 0.0, "type": "dissolved"})
+            meta = species_defs.get(sp_name, {})
+
+            # Determine prefill flag (default: False)
+            if "isotope_of" in meta:
+                parent_name = meta["isotope_of"]
+                parent_meta = species_defs.get(parent_name, {})
+                prefill = meta.get("prefill", parent_meta.get("prefill", False))
+            else:
+                prefill = meta.get("prefill", False)
+
             if props["type"] == "particulate":
                 # Convert bulk surface flux J_bulk to solid-phase flux: J_solid = J_bulk / (1 - phi)
                 J_solid = props["top"] / (1.0 - phi_top)
+                val = J_solid / self.mp.w if self.mp.w > 0 else 0.0
+
+                if prefill:
+                    var.setValue(val)
+                else:
+                    var.setValue(0.0)
 
                 D_total = getattr(D_mol, sp_name, 0.0) + D_mol.D_bio
                 if not isinstance(D_total, CellVariable):
@@ -1040,14 +1081,21 @@ class DiageneticModel:
                         mesh.facesLeft,
                     )
                 else:
-                    val = J_solid / self.mp.w if self.mp.w > 0 else 0.0
-                    var.setValue(val)
                     var.constrain(val, mesh.facesLeft)
             else:
-                var.setValue(props["top"])
-                var.constrain(props["top"], mesh.facesLeft)
+                val = props["top"]
+                if prefill:
+                    var.setValue(val)
+                else:
+                    var.setValue(0.0)
+                var.constrain(val, mesh.facesLeft)
 
             var.faceGrad.constrain([0.0], mesh.facesRight)
+
+        # Initialize carbonate speciation diagnostics across cells if carbonate system is active
+        if hasattr(c, "TA") and hasattr(c, "DIC"):
+            from mantis.diff_lib import compute_carbonate_speciation
+            compute_carbonate_speciation(c, self.mp)
 
         # Restore state if specified
         if self.mp.state_data:

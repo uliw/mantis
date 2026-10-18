@@ -1176,7 +1176,11 @@ class EquationSystemGenerator:
                 std_name = self.validator.species_defs.get(r_parent, {}).get("isotope_standard", "S")
                 std_info = getattr(self.validator, "isotope_standards", {}).get(std_name, {})
                 std_key = std_info.get("standard", "VCDT")
-                std_ratio = std_info.get("ratio", 0.044162589)
+                if "ratio" not in std_info:
+                    raise ValueError(
+                        f"[MANTIS ERROR] Isotope standard '{std_name}' is missing 'ratio' in species.py."
+                    )
+                std_ratio = float(std_info["ratio"])
 
                 lines.extend([
                     '    if getattr(mp, "isotopes", False):',
@@ -1313,7 +1317,7 @@ class EquationSystemGenerator:
             pw_name = f"{sp}_pw"
             lines.append(f'        {v_name} = np.maximum(c["{p_sp}"].value if hasattr(c["{p_sp}"], "value") else c["{p_sp}"], 1e-20)')
             if spec:
-                lines.append(f'        {pw_name} = {v_name} * float({spec})')
+                lines.append(f'        {pw_name} = {v_name} * ({spec})')
             else:
                 lines.append(f'        {pw_name} = {v_name}')
 
@@ -1331,7 +1335,7 @@ class EquationSystemGenerator:
         # Derivatives of omega w.r.t reactants
         for coeff_i, sp_i, p_i, spec_i in reactants_info:
             other_pw = [f"{sp}_pw" for _, sp, p_other, _ in reactants_info if p_other != p_i]
-            fac_i = f"float({spec_i})" if spec_i else "1.0"
+            fac_i = f"({spec_i})" if spec_i else "1.0"
             term_num = f"{fac_i} * " + " * ".join(other_pw) if other_pw else fac_i
             lines.append(f'        d_omega_d{p_i} = ({term_num}) / (k_Hplus * k_min_sp + 1e-30)')
 
@@ -1398,7 +1402,11 @@ class EquationSystemGenerator:
                 std_name = self.validator.species_defs.get(r_parent, {}).get("isotope_standard", "S")
                 std_info = getattr(self.validator, "isotope_standards", {}).get(std_name, {})
                 std_key = std_info.get("standard", "VCDT")
-                std_ratio = std_info.get("ratio", 0.044162589)
+                if "ratio" not in std_info:
+                    raise ValueError(
+                        f"[MANTIS ERROR] Isotope standard '{std_name}' is missing 'ratio' in species.py."
+                    )
+                std_ratio = float(std_info["ratio"])
 
                 r_spec = self.validator.get_speciation_factor_expr(r_sp)
                 other_eq_species = [
@@ -1531,11 +1539,11 @@ class EquationSystemGenerator:
             other_terms = []
             for c, sp, p in other_r:
                 spec = self.validator.get_speciation_factor_expr(sp)
-                term = f'c_{p}' if not spec else f'(c_{p} * float({spec}))'
+                term = f'c_{p}' if not spec else f'(c_{p} * ({spec}))'
                 other_terms.append(term)
             
             diff_spec = self.validator.get_speciation_factor_expr(orig_sp_diff)
-            spec_factor = f' * float({diff_spec})' if diff_spec else ''
+            spec_factor = f' * ({diff_spec})' if diff_spec else ''
             
             all_prod = " * ".join(other_terms + lim_terms) if (other_terms or lim_terms) else "1.0"
             d_var = f"d_{diff_p}_{r_name}"
@@ -1715,6 +1723,7 @@ class EquationSystemGenerator:
             '    calculate_fractionated_coeff_32,',
             '    partition_equilibrium_isotope,',
             '    partition_equilibrium_isotope_32,',
+            '    compute_carbonate_speciation,',
             '    data_container,',
             ')',
             'try:',
@@ -1726,6 +1735,8 @@ class EquationSystemGenerator:
             '    """Calculates phase-corrected Monod and inhibition limiters dynamically."""',
             '    if _external_get_limiters is not None:',
             '        return _external_get_limiters(c, mp)',
+            '    if hasattr(c, "TA") and hasattr(c, "DIC"):',
+            '        compute_carbonate_speciation(c, mp)',
             '    phi = np.asarray(mp.phi.value if hasattr(mp.phi, "value") else mp.phi)',
             '    solid_phi = 1.0 - phi',
             '    limiters = {}',

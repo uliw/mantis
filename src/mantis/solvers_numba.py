@@ -48,7 +48,7 @@ def solve_tridiagonal_thomas(
         out[i] -= c_prime[i] * out[i + 1]
 
 
-@nb.njit(fastmath=True)
+@nb.njit
 def compute_species_residual_wrms(
     curr_val: np.ndarray,
     prev_val: np.ndarray,
@@ -63,8 +63,13 @@ def compute_species_residual_wrms(
     sum_sq = 0.0
     for i in range(n):
         c = curr_val[i]
-        diff = abs(c - prev_val[i])
+        p = prev_val[i]
+        if np.isnan(c) or np.isnan(p) or np.isinf(c) or np.isinf(p):
+            return np.inf
+        diff = abs(c - p)
         scale = inner_tol * abs(c) + atol
+        if scale <= 0.0:
+            return np.inf
         ratio = diff / scale
         if np.isnan(ratio) or np.isinf(ratio):
             return np.inf
@@ -72,7 +77,7 @@ def compute_species_residual_wrms(
     return np.sqrt(sum_sq / n)
 
 
-@nb.njit(fastmath=True)
+@nb.njit
 def compute_species_residual_linf(
     curr_val: np.ndarray,
     prev_val: np.ndarray,
@@ -87,8 +92,13 @@ def compute_species_residual_linf(
     max_ratio = 0.0
     for i in range(n):
         c = curr_val[i]
-        diff = abs(c - prev_val[i])
+        p = prev_val[i]
+        if np.isnan(c) or np.isnan(p) or np.isinf(c) or np.isinf(p):
+            return np.inf
+        diff = abs(c - p)
         scale = inner_tol * abs(c) + atol
+        if scale <= 0.0:
+            return np.inf
         ratio = diff / scale
         if np.isnan(ratio) or np.isinf(ratio):
             return np.inf

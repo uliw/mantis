@@ -42,6 +42,8 @@ Here is how common species are declared inside the `species` dictionary in `spec
 # -----------------------------------------------------------------------------
 # Isotope Reference Standards (milli Urey, mUr)
 # -----------------------------------------------------------------------------
+# Standard ratios must be explicitly defined under 'ratio'. MANTIS strictly looks
+# up ratios from isotope_standards without arbitrary numerical fallbacks.
 isotope_standards: dict = {
     "S": {
         "standard": "VCDT",
@@ -71,6 +73,7 @@ species = {
         "isotope": "SO4_32",           # Companion light-sulfur isotope species
         "isotope_standard": "S",       # Reference standard key in isotope_standards
         "delta_name": "d34S_SO4",      # Explicit output column name in CSV / df
+        "prefill": True,               # True: prefill initial profile with top boundary concentration (28.2 mM)
     },
 
     "SO4_32": {
@@ -79,7 +82,7 @@ species = {
         "formula": "SO4_32",
         "diff_coeff_function": "diff_coeff",
         "diffusion": "SO4",            # Inherits the molecular diffusion of parent SO4
-        "isotope_of": "SO4",
+        "isotope_of": "SO4",           # Automatically inherits prefill=True from parent SO4
     },
 
     # -------------------------------------------------------------------------
@@ -90,7 +93,8 @@ species = {
         "include": True,
         "formula": "Fe3",
         "diffusion": None,             # Solids do not have molecular diffusion!
-        "bc": {"top": 120.0, "type": "particulate"}, # Solid input at sediment-water interface
+        "bc": {"top": "12 umol/(cm^2 * yr)", "type": "particulate"}, # Solid depositional flux
+        "prefill": False,              # False (default): initial column starts at 0.0 mmol/L
     },
 
     "FeS2": {
@@ -103,6 +107,7 @@ species = {
         "stoichiometry": 2.0,          # 2 moles of S per mole of FeS2
         "isotope_standard": "S",
         "delta_name": "d34S_FeS2",
+        "prefill": False,
     },
 
     "FeS2_32": {
@@ -121,9 +126,48 @@ species = {
         "include": False,              # Fixed background parameter, not an active transport PDE
         "formula": "H",
         "bc": {"pH": 7.5},             # Set porewater pH as the single source of truth!
+        "prefill": True,
     },
 }
 ```
+
+
+### Initial Conditions and the `prefill` Keyword
+
+When starting a simulation, each active transport variable must have an initial spatial concentration vector across the sediment grid:
+
+- **`prefill: False` (Default)**:
+  The concentration vector is initialized with zeros (`0.0`). This is typical for authigenic minerals (e.g. $\text{FeS}_2$, $\text{FeS}$), metabolic intermediates (e.g. $\text{HS}^-$, $\text{Fe}^{2+}$), and solid phases deposited incrementally at the sediment-water interface.
+- **`prefill: True`**:
+  The entire column is prefilled with the concentration at the upper boundary:
+  - **For dissolved solutes (`type: "dissolved"`)**: The initial concentration is set directly to the top Dirichlet boundary value: $C(z, t=0) = C_{\text{top}}$ (e.g. $28.2\ \text{mmol/L}$ for seawater $\text{SO}_4^{2-}$).
+  - **For particulate species (`type: "particulate"`)**: The upper boundary flux $J_{\text{bulk}}$ is converted to the solid-phase advective equilibrium concentration:
+    $$C_{\text{top}} = \frac{J_{\text{solid}}}{w} = \frac{J_{\text{bulk}}}{(1 - \phi_{\text{top}}) \cdot w}$$
+    If `prefill: True`, $C(z, t=0)$ is set to $C_{\text{top}}$.
+- **Isotope Companions**:
+  Isotope species (defined with `isotope_of`) automatically inherit the `prefill` setting of their parent species unless explicitly overridden. If `prefill: True`, the companion isotope vector is prefilled with the calculated isotopic mass abundance at the upper boundary.
+
+
+### Carbonate System Modeling & Upper Boundary Consistency
+
+Modeling the dissolved inorganic carbon (DIC) and total alkalinity (TA) system in porewaters involves coupled acid-base equilibria:
+$$\text{CO}_2 + \text{H}_2\text{O} \rightleftharpoons \text{HCO}_3^- + \text{H}^+ \quad (K_1^*)$$
+$$\text{HCO}_3^- \rightleftharpoons \text{CO}_3^{2-} + \text{H}^+ \quad (K_2^*)$$
+
+#### 1. Primary Boundary Controls: pH and DIC
+Because porewater $\text{pH}$, $\text{DIC}$, and $\text{TA}$ are thermodynamically interdependent:
+$$\text{DIC} = [\text{CO}_2] + [\text{HCO}_3^-] + [\text{CO}_3^{2-}]$$
+$$\text{TA} = [\text{HCO}_3^-] + 2[\text{CO}_3^{2-}]$$
+specifying all three independently at the upper boundary would overdefine the chemical system.
+
+MANTIS enforces thermodynamic consistency by treating **$\text{pH}$** (declared via `Hplus: {'bc': {'pH': ...}}` in `species.py`) and **$\text{DIC}$** (`DIC: {'bc': {'top': ...}}`) as the primary independent controls. MANTIS automatically calculates the upper boundary condition for $\text{TA}$ (as well as diagnostic species $\text{CO}_3^{2-}$ and $\text{HCO}_3^-$) using the apparent equilibrium constants ($pK_{1,\text{carb}}^*$, $pK_{2,\text{carb}}^*$):
+$$[\text{H}^+] = 10^{-\text{pH}}$$
+$$[\text{CO}_3^{2-}] = \text{DIC} \cdot \frac{K_1^* K_2^*}{[\text{H}^+]^2 + K_1^* [\text{H}^+] + K_1^* K_2^*}$$
+$$[\text{HCO}_3^-] = \text{DIC} \cdot \frac{K_1^* [\text{H}^+]}{[\text{H}^+]^2 + K_1^* [\text{H}^+] + K_1^* K_2^*}$$
+$$\text{TA}_{\text{top}} = [\text{HCO}_3^-] + 2[\text{CO}_3^{2-}]$$
+
+#### 2. Vectorized Speciation & Dynamic pH Evolution
+During the time-stepping loop, reactions like organic matter degradation, iron reduction, and calcite dissolution/precipitation produce or consume $\text{DIC}$ and $\text{TA}$. At each timestep, MANTIS solves the exact quadratic relationship for carbonate alkalinity in a fully vectorized manner across all grid cells via `compute_carbonate_speciation`, updating porewater $[\text{H}^+]$, dynamic $\text{pH}$, $[\text{CO}_3^{2-}]$, and $[\text{HCO}_3^-]$.
 
 
 ### Handling Diffusion Coefficients
@@ -704,10 +748,10 @@ python run_velde_model_fast.py --run      # Displays time, grid, and domain sett
 | **Solver** | `--solver` | `monolithic` \| `coupled` | `monolithic` | Backend solver architecture |
 | | `--solver-tol`, `--newton-tol` | `<float>` | `1e-3` | Newton-Raphson convergence residual tolerance |
 | | `--numerical-jacobian` | (flag) | `False` | Use finite differences instead of SymPy analytical Jacobian |
-| | `--max-newton-iters` | `<int>` | `8` | Maximum Newton iterations allowed per timestep |
+| | `--max-newton-iters` | `<int>` | `12` | Maximum Newton iterations allowed per timestep |
 | | `--newton-norm` | `linf` \| `wrms` | `linf` | Residual norm formulation ($L_\infty$ or WRMS) |
 | | `--newton-target-optimal`| `<int>` | `4` | Target Newton iterations for timestep expansion |
-| | `--newton-max-acceptable`| `<int>` | `6` | Maximum iterations before timestep reduction |
+| | `--newton-max-acceptable`| `<int>` | `8` | Maximum iterations before timestep reduction |
 | | `--dt-tolerance` | `<float>` | `1e-5` | Adaptive timestep convergence tolerance |
 | | `--force-regen`, `--rebuild-equations` | (flag) | `False` | Force regeneration of equation system & analytical Jacobian |
 | **Video** | `--video` | `<interval>` | `None` | Live video recording frame interval (e.g. `'10 year'`, `'none'`) |

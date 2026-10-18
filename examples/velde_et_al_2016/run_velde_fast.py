@@ -39,7 +39,8 @@ if __name__ == "__main__":
         advection=0.0,
         phi=0.8,
         isotopes=True,
-        VCDT=0.044162589,
+        # VCDT=0.044162589, # should be set in species file. 
+        dt_tolerance = 1e-7,
         bioturbation={
             "BT0": "4 cm^2/year",
             "depth": "6 cm",

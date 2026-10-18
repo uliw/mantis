@@ -27,6 +27,7 @@ Each key in the `species` dictionary represents a chemical species name:
 - isotope: (Optional) Name of corresponding isotopic companion species (e.g., 'SO4_32').
 - isotope_of: (Optional) Base species name if this entry is an isotope companion.
 - delta_threshold: (Optional) Minimum concentration threshold for calculating delta values (mmol/L).
+- prefill: whether to fill the initial vector with the concentration at the upper boundary, or with zero, defaults to False
 """
 
 import numpy as np
@@ -75,6 +76,7 @@ species = {
         "isotope": "SO4_32",
         "isotope_standard": "S",
         "delta_name": "d34S_SO4",
+        "prefill": True,
     },
     "SO4_32": {
         "phase": "liquid",
@@ -108,6 +110,7 @@ species = {
         "diff_coeff_function": "boudreau_o2",
         "diffusion": None,
         "bc": {"top": 0.28, "type": "dissolved"},
+        "prefill": True,
     },
 
     # -------------------------------------------------------------------------
@@ -118,6 +121,7 @@ species = {
         "include": False,
         "formula": "H",
         "bc": {"pH": 7.5},  # Single source of truth for porewater pH
+        "prefill": True,
     },
     "HS": {
         "phase": "liquid",
@@ -222,30 +226,7 @@ species = {
         "isotope_standard": "S",
         "delta_name": "d34S_FeS2",
     },
-    "FeS2_32": {
-        "phase": "solid",
-        "include": True,
-        "formula": "FeS2",
-        "isotope_of": "FeS2",
-        "diffusion": None,
-    },
-    "S0": {
-        "phase": "solid",
-        "include": True,
-        "formula": "S",
-        "diffusion": None,
-        "bc": {"top": 0.0, "type": "particulate", "delta": 8.0},
-        "isotope": "S0_32",
-        "isotope_standard": "S",
-        "delta_name": "d34S_S0",
-    },
-    "S0_32": {
-        "phase": "solid",
-        "include": True,
-        "formula": "S",
-        "isotope_of": "S0",
-        "diffusion": None,
-    },
+   
 
     # External / Reaction Balance Species (Excluded from transport)
     "CO2": {"phase": "liquid", "include": False, "formula": "CO2"},

@@ -479,9 +479,12 @@ def capture_state(
     from . import diff_lib
 
     # 1. Capture current rates in the main thread (thread-safe snap)
-    c_numpy = diff_lib.data_container({s: diff_lib.ArrayProxy(val.value) for s, val in c.items()})
+    c_numpy = diff_lib.data_container(
+        {s: diff_lib.ArrayProxy(val.value if hasattr(val, "value") else val) for s, val in c.items()}
+    )
     mp_numpy = diff_lib.data_container(mp_params)
-    mp_numpy.phi = diff_lib.ArrayProxy(mp_params.phi.value)
+    phi_val = mp_params.phi.value if hasattr(mp_params.phi, "value") else mp_params.phi
+    mp_numpy.phi = diff_lib.ArrayProxy(phi_val)
     f_final, RATES = diagenetic_reactions(mp_numpy, c_numpy, k, diff_lib.data_container())
     f_final, RATES = equilibrium_reactions(mp_params, c, k, f_final, RATES, current_dt)
 
@@ -528,12 +531,18 @@ def capture_state(
             c_iso = data[f"c_{iso}"]
 
             std_key = meta.get("isotope_standard", "S")
-            if std_key in iso_stds and isinstance(iso_stds[std_key], dict):
-                std_ratio = float(iso_stds[std_key].get("ratio", 0.044162589))
-            elif hasattr(mp_params, "VCDT"):
+            if (
+                std_key in iso_stds
+                and isinstance(iso_stds[std_key], dict)
+                and "ratio" in iso_stds[std_key]
+            ):
+                std_ratio = float(iso_stds[std_key]["ratio"])
+            elif hasattr(mp_params, "VCDT") and std_key == "S":
                 std_ratio = float(mp_params.VCDT)
             else:
-                std_ratio = 0.044162589
+                raise ValueError(
+                    f"[MANTIS ERROR] Standard '{std_key}' with a valid 'ratio' is not defined in isotope_standards in species.py."
+                )
 
             thresh = diff_lib.get_species_delta_threshold(base, mp=mp_params, phi=phi_val)
             delta_val = diff_lib.get_delta(tot, c_iso, std_ratio, threshold=thresh)
@@ -547,7 +556,19 @@ def capture_state(
                     tot = data[f"c_{base}"]
                     c_iso = data[f"c_{iso}"]
                     thresh = diff_lib.get_species_delta_threshold(base, mp=mp_params, phi=phi_val)
-                    r_std = getattr(mp_params, "VCDT", 0.044162589)
+                    if (
+                        hasattr(mp_params, "isotope_standards")
+                        and "S" in mp_params.isotope_standards
+                        and isinstance(mp_params.isotope_standards["S"], dict)
+                        and "ratio" in mp_params.isotope_standards["S"]
+                    ):
+                        r_std = float(mp_params.isotope_standards["S"]["ratio"])
+                    elif hasattr(mp_params, "VCDT"):
+                        r_std = float(mp_params.VCDT)
+                    else:
+                        raise ValueError(
+                            "[MANTIS ERROR] Standard ratio for 'S' is not defined in isotope_standards or mp.VCDT."
+                        )
                     data[f"d_{base}"] = diff_lib.get_delta(tot, c_iso, r_std, threshold=thresh)
 
     data["w"] = np.ones(len(z)) * mp_params.w

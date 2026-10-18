@@ -14,6 +14,7 @@ from mantis.diff_lib import (
     calculate_fractionated_coeff_32,
     partition_equilibrium_isotope,
     partition_equilibrium_isotope_32,
+    compute_carbonate_speciation,
     data_container,
 )
 try:
@@ -25,6 +26,8 @@ def get_limiters(c, mp):
     """Calculates phase-corrected Monod and inhibition limiters dynamically."""
     if _external_get_limiters is not None:
         return _external_get_limiters(c, mp)
+    if hasattr(c, "TA") and hasattr(c, "DIC"):
+        compute_carbonate_speciation(c, mp)
     phi = np.asarray(mp.phi.value if hasattr(mp.phi, "value") else mp.phi)
     solid_phi = 1.0 - phi
     limiters = {}
@@ -616,14 +619,14 @@ def compute_chemical_jacobian(c, mp, k, species_names):
         c_SO4 = np.asarray(c["SO4"].value if hasattr(c["SO4"], "value") else c["SO4"])
         c_TS2 = np.asarray(c["TS2"].value if hasattr(c["TS2"], "value") else c["TS2"])
         _lim_O2_TS2 = lim.get("O2_TS2_implicit", lim.get("O2_TS2", 1.0))
-        d_TS2_hs_oxidation = diss_fac * (k_num_hs_oxidation / 1.0) * float(mp.hs_frac) * c_O2 * _lim_O2_TS2
+        d_TS2_hs_oxidation = diss_fac * (k_num_hs_oxidation / 1.0) * (mp.hs_frac) * c_O2 * _lim_O2_TS2
         J[:, idx["TS2"], idx["TS2"]] -= 1.0 * d_TS2_hs_oxidation
         J[:, idx["O2"], idx["TS2"]] -= 2.0 * d_TS2_hs_oxidation
         J[:, idx["SO4"], idx["TS2"]] += 1.0 * d_TS2_hs_oxidation
         if "TS2_32" in idx and getattr(mp, "isotopes", False):
             J[:, idx["TS2_32"], idx["TS2_32"]] -= 1.0 * d_TS2_hs_oxidation
             J[:, idx["SO4_32"], idx["TS2_32"]] += 1.0 * d_TS2_hs_oxidation
-        d_O2_hs_oxidation = diss_fac * (k_num_hs_oxidation / 1.0) * (c_TS2 * float(mp.hs_frac)) * _lim_O2_TS2
+        d_O2_hs_oxidation = diss_fac * (k_num_hs_oxidation / 1.0) * (c_TS2 * (mp.hs_frac)) * _lim_O2_TS2
         J[:, idx["TS2"], idx["O2"]] -= 1.0 * d_O2_hs_oxidation
         J[:, idx["O2"], idx["O2"]] -= 2.0 * d_O2_hs_oxidation
         J[:, idx["SO4"], idx["O2"]] += 1.0 * d_O2_hs_oxidation
@@ -637,7 +640,7 @@ def compute_chemical_jacobian(c, mp, k, species_names):
         c_TS2 = np.asarray(c["TS2"].value if hasattr(c["TS2"], "value") else c["TS2"])
         _lim_Fe3 = lim.get("Fe3_implicit", lim.get("Fe3", 1.0))
         _inh_O2 = lim.get("O2_inhibit", lim.get("O2_inhib", 1.0))
-        d_TS2_sulfide_mediated_iron_reduction_velde = solid_fac * (k_num_sulfide_mediated_iron_reduction_velde / 8.0) * float(mp.hs_frac) * c_Fe3 * _lim_Fe3 * _inh_O2
+        d_TS2_sulfide_mediated_iron_reduction_velde = solid_fac * (k_num_sulfide_mediated_iron_reduction_velde / 8.0) * (mp.hs_frac) * c_Fe3 * _lim_Fe3 * _inh_O2
         J[:, idx["TS2"], idx["TS2"]] -= 1.0 * d_TS2_sulfide_mediated_iron_reduction_velde
         J[:, idx["Fe3"], idx["TS2"]] -= 8.0 * d_TS2_sulfide_mediated_iron_reduction_velde
         J[:, idx["SO4"], idx["TS2"]] += 1.0 * d_TS2_sulfide_mediated_iron_reduction_velde
@@ -645,7 +648,7 @@ def compute_chemical_jacobian(c, mp, k, species_names):
         if "TS2_32" in idx and getattr(mp, "isotopes", False):
             J[:, idx["TS2_32"], idx["TS2_32"]] -= 1.0 * d_TS2_sulfide_mediated_iron_reduction_velde
             J[:, idx["SO4_32"], idx["TS2_32"]] += 1.0 * d_TS2_sulfide_mediated_iron_reduction_velde
-        d_Fe3_sulfide_mediated_iron_reduction_velde = solid_fac * (k_num_sulfide_mediated_iron_reduction_velde / 8.0) * (c_TS2 * float(mp.hs_frac)) * _lim_Fe3 * _inh_O2
+        d_Fe3_sulfide_mediated_iron_reduction_velde = solid_fac * (k_num_sulfide_mediated_iron_reduction_velde / 8.0) * (c_TS2 * (mp.hs_frac)) * _lim_Fe3 * _inh_O2
         J[:, idx["TS2"], idx["Fe3"]] -= 1.0 * d_Fe3_sulfide_mediated_iron_reduction_velde
         J[:, idx["Fe3"], idx["Fe3"]] -= 8.0 * d_Fe3_sulfide_mediated_iron_reduction_velde
         J[:, idx["SO4"], idx["Fe3"]] += 1.0 * d_Fe3_sulfide_mediated_iron_reduction_velde
@@ -693,17 +696,17 @@ def compute_chemical_jacobian(c, mp, k, species_names):
         i_ts2 = idx["TS2"]
         i_fes = idx["FeS"]
         Fe2_total_val = np.maximum(c["Fe2_total"].value if hasattr(c["Fe2_total"], "value") else c["Fe2_total"], 1e-20)
-        Fe2_liq_pw = Fe2_total_val * float(getattr(mp, 'Fe2_total_dissolved', getattr(mp, 'Fe2_liq', 1.0)))
+        Fe2_liq_pw = Fe2_total_val * (getattr(mp, 'Fe2_total_dissolved', getattr(mp, 'Fe2_liq', 1.0)))
         TS2_val = np.maximum(c["TS2"].value if hasattr(c["TS2"], "value") else c["TS2"], 1e-20)
-        HS_pw = TS2_val * float(mp.hs_frac)
+        HS_pw = TS2_val * (mp.hs_frac)
         FeS_val = np.maximum(c["FeS"].value if hasattr(c["FeS"], "value") else c["FeS"], 1e-20)
         k_Hplus = float(getattr(k, "Hplus", getattr(mp, "Hplus", 10**-7.5)))
         k_min_sp = float(getattr(k, "FeS_sp", getattr(mp, "FeS_sp", 10**-3.5)))
         k_min_isp = float(getattr(k, "FeS_isp", getattr(mp, "FeS_isp", 1.0)))
         k_min_isd = float(getattr(k, "FeS_isd", getattr(mp, "FeS_isd", 0.3)))
         omega = (Fe2_liq_pw * HS_pw) / (k_Hplus * k_min_sp + 1e-30)
-        d_omega_dFe2_total = (float(getattr(mp, 'Fe2_total_dissolved', getattr(mp, 'Fe2_liq', 1.0))) * HS_pw) / (k_Hplus * k_min_sp + 1e-30)
-        d_omega_dTS2 = (float(mp.hs_frac) * Fe2_liq_pw) / (k_Hplus * k_min_sp + 1e-30)
+        d_omega_dFe2_total = ((getattr(mp, 'Fe2_total_dissolved', getattr(mp, 'Fe2_liq', 1.0))) * HS_pw) / (k_Hplus * k_min_sp + 1e-30)
+        d_omega_dTS2 = ((mp.hs_frac) * Fe2_liq_pw) / (k_Hplus * k_min_sp + 1e-30)
         eps_sm = float(getattr(mp, "fes_smooth_epsilon", getattr(mp, "saturation_smooth_epsilon", 0.01)))
         is_prec = omega >= 1.0
         df_p = np.maximum(omega - 1.0, 0.0)

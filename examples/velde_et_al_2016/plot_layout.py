@@ -47,7 +47,6 @@ def get_layout(df):
     # relative to sulfur
     Fe3_s = solid_conc_to_wt_percent(df.c_Fe3, 32, 2.6, phi)
     FeS_s = solid_conc_to_wt_percent(df.c_FeS, 32, 2.6, phi)
-    S0_s = solid_conc_to_wt_percent(df.c_S0, 32, 2.6, phi)
     FeS2_s = solid_conc_to_wt_percent(df.c_FeS2, 32, 2.6, phi)
 
     # relative to Iron
@@ -98,15 +97,15 @@ def get_layout(df):
             ],
             "right1_ylim": (0, 1),
             "right1_ylabel": "[wt% Fe]",
-            "right2": [
+            # "right2": [
                 # [POC_slow, r"POC_slow [wt% C]", POC_slow_attr],
                 # [POC_fast, r"POC_fast [wt% C]", POC_fast_attr],
-                [S0_s, r"S$^{0}$ [wt% S]", S0_attr],
+                # [S0_s, r"S$^{0}$ [wt% S]", S0_attr],
                 # [FeS2_s, r"FeS$_2$ [wt% S]", {"color": "black"}],
                 # [FeS_s, r"$\times$ FeS [wt% S]", {"color": "C6"}],
-            ],
-            "right2_ylim": (0, max(max(solid_conc_to_wt_percent(df.c_S0, 32, 2.6, phi)),0.1)),
-            "right2_ylabel": "[wt% S]",
+                # ],
+            # "right2_ylim": (0, max(max(solid_conc_to_wt_percent(df.c_S0, 32, 2.6, phi)),0.1)),
+            # "right2_ylabel": "[wt% S]",
             # "right3": [
             #     [S0_s, r"S$^{0}$ [wt% S]", S0_attr],
             #     # [FeS2_s, r"FeS$_2$ [wt% S]", {"color": "black"}],
@@ -129,7 +128,7 @@ def get_layout(df):
                 # [df.f_Fe2_total, r"Fe$^{2+}_{liq}$", Fe2_l_attr],
                 [df.f_FeS, "FeS", FeS_attr],
                 [df.f_Fe3, r"Fe$^{3+}$", Fe3_attr],
-                [df.f_FeS2, r"FeS$_{2}$", FeS2_attr_nf],
+                # [df.f_FeS2, r"FeS$_{2}$", FeS2_attr_nf],
                 # [
                 #     df.f_r_sulfide_mediated_iron_reduction_S0,
                 #     r"Fe3_reduction_S0",
@@ -141,7 +140,7 @@ def get_layout(df):
                 [df.f_POC_slow + df.f_POC_fast, r"POC", POC_attr],
                 # [df.f_Fe2_p, "f_Fe2+p", {"color": "C9"}],
                 [df.f_TS2, "f_TS2", TS2_attr],
-                [df.f_S0, "f_S0", S0_attr],
+                # [df.f_S0, "f_S0", S0_attr],
             ],
             "left_ylabel": r"reaction rate [mol m$^{-3}s^{-1}$]",
             "xscale": "log",
@@ -160,8 +159,8 @@ def get_layout(df):
                     [df.d_SO4, r"SO$_{4}$", SO4_attr_nf],
                     [df.d_TS2, r"TS$^{2-}$", TS2_attr],
                     [df.d_FeS, r"FeS", FeS_attr],
-                    [df.d_FeS2, r"FeS$_{2}$", FeS2_attr_nf],
-                    [df.d_S0, r"S$^{0}$", S0_attr],
+                    # [df.d_FeS2, r"FeS$_{2}$", FeS2_attr_nf],
+                    # [df.d_S0, r"S$^{0}$", S0_attr],
                 ],
                 "left_ylabel": r"$\delta^{34}$ [mUr VCDT]",
                 "xscale": "log",

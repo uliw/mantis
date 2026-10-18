@@ -575,7 +575,9 @@ def run_non_steady_state_solver_monolithic(
     max_acceptable_iters = int(getattr(mp, "newton_max_acceptable", 6))
 
     # Fast NumPy proxy containers
-    c_numpy = data_container({s: ArrayProxy(val.value) for s, val in c.items()})
+    c_numpy = data_container(
+        {s: ArrayProxy(val.value if hasattr(val, "value") else val) for s, val in c.items()}
+    )
     mp_numpy = data_container(mp)
     phi_val = mp.phi.value if hasattr(mp.phi, "value") else mp.phi
     mp_numpy.phi = ArrayProxy(phi_val)

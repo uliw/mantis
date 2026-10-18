@@ -434,11 +434,13 @@ def get_l_mass(m, d, r):
     return (1000.0 * m) / ((d + 1000.0) * r + 1000.0)
 
 
-def get_total_s_export(df, VCDT=0.044162589):
+def get_total_s_export(df, VCDT=None):
     """Calculate the total sulfur and delta34S at the bottom of the column.
 
     Uses the logic as defined in run_fipy.py.
     """
+    if VCDT is None:
+        raise ValueError("Isotope standard ratio (VCDT) must be provided to get_total_s_export.")
     phi = df.phi.iloc[-1]
     s = phi * (df.c_SO4.iloc[-1] + df.c_h2s.iloc[-1]) + (1 - phi) * (
         df.c_S0.iloc[-1] + df.c_FeS.iloc[-1] + 2 * df.c_FeS2.iloc[-1]
@@ -663,9 +665,12 @@ def save_data(
     """
     Save the model results to a CSV file (Synchronous).
     """
-    c_numpy = data_container({s: ArrayProxy(val.value) for s, val in c.items()})
+    c_numpy = data_container(
+        {s: ArrayProxy(val.value if hasattr(val, "value") else val) for s, val in c.items()}
+    )
     mp_numpy = data_container(mp)
-    mp_numpy.phi = ArrayProxy(mp.phi.value)
+    phi_val = mp.phi.value if hasattr(mp.phi, "value") else mp.phi
+    mp_numpy.phi = ArrayProxy(phi_val)
     f_final, RATES = diagenetic_reactions(mp_numpy, c_numpy, k, data_container())
 
     return _save_data_to_disk(mp, c, k, species_list, z, D_mol, f_final)
@@ -717,12 +722,18 @@ def _save_data_to_disk(mp, c, k, species_list, z, D_mol, f_final):
             c_iso = data[f"c_{iso}"]
 
             std_key = meta.get("isotope_standard", "S")
-            if std_key in iso_stds and isinstance(iso_stds[std_key], dict):
-                std_ratio = float(iso_stds[std_key].get("ratio", 0.044162589))
-            elif hasattr(mp, "VCDT"):
+            if (
+                std_key in iso_stds
+                and isinstance(iso_stds[std_key], dict)
+                and "ratio" in iso_stds[std_key]
+            ):
+                std_ratio = float(iso_stds[std_key]["ratio"])
+            elif hasattr(mp, "VCDT") and std_key == "S":
                 std_ratio = float(mp.VCDT)
             else:
-                std_ratio = 0.044162589
+                raise ValueError(
+                    f"[MANTIS ERROR] Standard '{std_key}' with a valid 'ratio' is not defined in isotope_standards in species.py."
+                )
 
             thresh = get_species_delta_threshold(base, mp=mp, phi=phi_val)
             delta_val = get_delta(tot, c_iso, std_ratio, threshold=thresh)
@@ -741,8 +752,31 @@ def _save_data_to_disk(mp, c, k, species_list, z, D_mol, f_final):
                     tot = data[f"c_{base}"]
                     c_iso = data[f"c_{iso}"]
                     thresh = get_species_delta_threshold(base, mp=mp, phi=phi_val)
-                    r_std = getattr(mp, "VCDT", 0.044162589)
+                    if (
+                        hasattr(mp, "isotope_standards")
+                        and "S" in mp.isotope_standards
+                        and isinstance(mp.isotope_standards["S"], dict)
+                        and "ratio" in mp.isotope_standards["S"]
+                    ):
+                        r_std = float(mp.isotope_standards["S"]["ratio"])
+                    elif hasattr(mp, "VCDT"):
+                        r_std = float(mp.VCDT)
+                    else:
+                        raise ValueError(
+                            "[MANTIS ERROR] Standard ratio for 'S' is not defined in isotope_standards or mp.VCDT."
+                        )
                     data[f"d_{base}"] = get_delta(tot, c_iso, r_std, threshold=thresh)
+
+    # 4. Carbonate system speciation diagnostics
+    if hasattr(c, "TA") and hasattr(c, "DIC"):
+        compute_carbonate_speciation(c, mp)
+        data["pH"] = get_v(c.pH)
+        data["c_CO3"] = get_v(c.CO3)
+        data["c_HCO3"] = get_v(c.HCO3)
+        data["c_CO2"] = get_v(c.CO2)
+        if "c_Ca2" in data and hasattr(mp, "Ksp_calcite"):
+            ksp_val = float(mp.Ksp_calcite)
+            data["Omega_calcite"] = (data["c_Ca2"] * data["c_CO3"]) / (ksp_val + 1e-30)
 
     data["w"] = np.ones(len(z)) * mp.w
     data["phi"] = np.ones(len(z)) * mp.phi
@@ -1501,9 +1535,12 @@ def save_data_async(
     Schedule a background write of model results to CSV and return immediately.
     """
     # 1. Capture current rates in the main thread (FiPy objects aren't thread-safe)
-    c_numpy = data_container({s: ArrayProxy(val.value) for s, val in c.items()})
+    c_numpy = data_container(
+        {s: ArrayProxy(val.value if hasattr(val, "value") else val) for s, val in c.items()}
+    )
     mp_numpy = data_container(mp)
-    mp_numpy.phi = ArrayProxy(mp.phi.value)
+    phi_val = mp.phi.value if hasattr(mp.phi, "value") else mp.phi
+    mp_numpy.phi = ArrayProxy(phi_val)
     f_final, RATES = diagenetic_reactions(mp_numpy, c_numpy, k, data_container())
     f_final, RATES = equilibrium_reactions(mp, c, k, f_final, RATES, current_dt)
 
@@ -1672,13 +1709,27 @@ def get_total_delta(c, mp, index=-1):
     # Liquid species are scaled by porosity (phi)
     # Solid species are scaled by solid fraction (1-phi)
     s = phi * (c.SO4.value[index] + c.TS2.value[index]) + f_s * (
-        c.S0.value[index] + c.FeS.value[index] + 2 * c.FeS2.value[index]
+        + c.FeS.value[index] 
     )
     s32 = phi * (c.SO4_32.value[index] + c.TS2_32.value[index]) + f_s * (
-        c.S0_32.value[index] + c.FeS_32.value[index] + c.FeS2_32.value[index]
+         + c.FeS_32.value[index] 
     )
 
-    return get_delta(s, s32, mp.VCDT)
+    std_ratio = None
+    if (
+        hasattr(mp, "isotope_standards")
+        and "S" in mp.isotope_standards
+        and isinstance(mp.isotope_standards["S"], dict)
+        and "ratio" in mp.isotope_standards["S"]
+    ):
+        std_ratio = float(mp.isotope_standards["S"]["ratio"])
+    elif hasattr(mp, "VCDT"):
+        std_ratio = float(mp.VCDT)
+    if std_ratio is None:
+        raise ValueError(
+            "[MANTIS ERROR] Isotope standard ratio for 'S' (VCDT) is not defined in mp.isotope_standards."
+        )
+    return get_delta(s, s32, std_ratio)
 
 
 # =============================================================================
@@ -2007,3 +2058,84 @@ def partition_equilibrium_isotope(
 
 
 partition_equilibrium_isotope_32 = partition_equilibrium_isotope
+
+
+
+def compute_carbonate_speciation_from_ph_dic(pH: float, dic: float, mp: Any = None) -> tuple[float, float, float, float]:
+    """Calculate carbonate speciation (TA, CO3, HCO3, CO2) given pH and DIC.
+
+    Parameters
+    ----------
+    pH : float
+        Porewater pH.
+    dic : float
+        Total dissolved inorganic carbon concentration (mmol/L or mol/m^3).
+    mp : Any, optional
+        Model parameters object containing pK1_carb and pK2_carb.
+
+    Returns
+    -------
+    tuple[float, float, float, float]
+        (ta, co3, hco3, co2) in same concentration units as dic.
+    """
+    pK1 = getattr(mp, "pK1_carb", 5.86) if mp is not None else 5.86
+    pK2 = getattr(mp, "pK2_carb", 8.92) if mp is not None else 8.92
+    K1 = 10.0 ** (-float(pK1))
+    K2 = 10.0 ** (-float(pK2))
+    h_plus = 10.0 ** (-float(pH))
+
+    denom = h_plus**2 + K1 * h_plus + K1 * K2
+    co3 = dic * (K1 * K2) / denom
+    hco3 = dic * (K1 * h_plus) / denom
+    co2 = dic * (h_plus**2) / denom
+    ta = hco3 + 2.0 * co3
+    return float(ta), float(co3), float(hco3), float(co2)
+
+
+def compute_carbonate_speciation(c: Any, mp: Any) -> None:
+    """Calculates vectorized carbonate speciation, porewater [H+], and pH across all cells.
+
+    Solves the exact quadratic relationship for carbonate alkalinity:
+        TA = [HCO3-] + 2[CO32-]
+        TA * [H+]^2 + K1*(TA - DIC)*[H+] + K1*K2*(TA - 2*DIC) = 0
+    """
+    ta_val = np.asarray(c.TA.value if hasattr(c.TA, "value") else c.TA)
+    dic_val = np.asarray(c.DIC.value if hasattr(c.DIC, "value") else c.DIC)
+
+    pK1 = getattr(mp, "pK1_carb", 5.86)
+    pK2 = getattr(mp, "pK2_carb", 8.92)
+    K1 = 10.0 ** (-float(pK1))
+    K2 = 10.0 ** (-float(pK2))
+
+    a = np.maximum(ta_val, 1e-12)
+    b = K1 * (ta_val - dic_val)
+    c_term = K1 * K2 * (ta_val - 2.0 * dic_val)
+
+    disc = np.maximum(b**2 - 4.0 * a * c_term, 0.0)
+    h_plus = (-b + np.sqrt(disc)) / (2.0 * a)
+    h_plus = np.maximum(h_plus, 1e-14)
+
+    denom = h_plus**2 + K1 * h_plus + K1 * K2
+    co3 = dic_val * (K1 * K2) / denom
+    hco3 = dic_val * (K1 * h_plus) / denom
+    co2 = dic_val * (h_plus**2) / denom
+
+    def _set_c_field(attr_name, arr_val):
+        if hasattr(c, attr_name):
+            field_obj = getattr(c, attr_name)
+            if hasattr(field_obj, "value"):
+                field_obj.value[:] = arr_val
+                return
+        setattr(c, attr_name, arr_val)
+
+    _set_c_field("Hplus", h_plus)
+    _set_c_field("pH", -np.log10(h_plus))
+    _set_c_field("CO3", co3)
+    _set_c_field("HCO3", hco3)
+    _set_c_field("CO2", co2)
+
+    Ka1_H2S = 10.0 ** (-7.0)
+    c.hs_frac = Ka1_H2S / (h_plus + Ka1_H2S)
+    c.h2s_frac = h_plus / (h_plus + Ka1_H2S)
+    mp.hs_frac = c.hs_frac
+    mp.h2s_frac = c.h2s_frac
