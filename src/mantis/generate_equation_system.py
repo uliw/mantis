@@ -1091,7 +1091,7 @@ class EquationSystemGenerator:
         ])
         if has_hplus:
             lines.extend([
-                '    k_Hplus = getattr(c, "Hplus", getattr(k_val, "Hplus", getattr(mp, "Hplus", 10**-7.5 * 1000.0)))',
+                '    k_Hplus = np.asarray(getattr(c, "Hplus")) if hasattr(c, "TA") and hasattr(c, "DIC") and hasattr(c, "Hplus") else getattr(k_val, "Hplus", getattr(mp, "Hplus", 10**-7.5))',
                 '    omega_den = k_Hplus * k_sp + 1e-30',
             ])
         else:
@@ -1340,7 +1340,7 @@ class EquationSystemGenerator:
         ])
         if has_hplus:
             lines.extend([
-                '        k_Hplus = getattr(c, "Hplus", getattr(k, "Hplus", getattr(mp, "Hplus", 10**-7.5 * 1000.0)))',
+                '        k_Hplus = np.asarray(getattr(c, "Hplus")) if has_carb and hasattr(c, "Hplus") else float(getattr(k, "Hplus", getattr(mp, "Hplus", 10**-7.5)))',
                 f'        omega = ({omega_num}) / (k_Hplus * k_min_sp + 1e-30)',
             ])
         else:
