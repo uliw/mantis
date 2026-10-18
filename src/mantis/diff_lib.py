@@ -342,6 +342,11 @@ def is_solid_species(species_name: str, mp: Any = None) -> bool:
             if isinstance(sp_dict, dict):
                 for candidate in (species_name, base_name):
                     if candidate in sp_dict and isinstance(sp_dict[candidate], dict):
+                        phase = str(sp_dict[candidate].get("phase", "")).lower()
+                        if phase in ("solid", "particulate"):
+                            return True
+                        if phase in ("liquid", "dissolved"):
+                            return False
                         is_sol = sp_dict[candidate].get("solid")
                         if is_sol is not None:
                             return bool(is_sol)
@@ -1693,43 +1698,223 @@ def make_grid2(
     return mesh, z_centers
 
 
-def get_total_delta(c, mp, index=-1):
-    """Get total delta that is being buried.
+def get_total_delta(
+    c: Any,
+    mp: Any,
+    species: Union[str, Sequence[str], None] = "SO4, TS2, FeS",
+    isotope_standard: Optional[Union[str, float]] = None,
+    index: Optional[int] = -1,
+    isotope_standart: Optional[Union[str, float]] = None,
+    **kwargs: Any,
+) -> float:
+    """Calculate the total isotope delta (e.g. for buried species at boundary or whole column).
 
-    Calculate the total amount of S and S32 that leaves the system through the lower
-    boundary. Note that we have to count the mass of FeS2 since it has 2 S, however,
-    FeS2_32 is already corrected, so we do not mutiply it.
+    Dynamically sums total element concentration and light isotope companion concentration
+    across all specified species, scaled by phase (porosity phi for dissolved/liquid species,
+    and solid fraction 1-phi for particulate/solid species).
+
+    Stoichiometry:
+    For species such as FeS2 containing multiple atoms of the element (e.g. stoichiometry=2.0),
+    the total element mass is scaled by the stoichiometry factor, while its light isotope companion
+    (e.g. FeS2_32) is counted per single atom (stoichiometry 1.0) because isotope companion
+    variables track individual light isotope atoms.
+
+    Parameters
+    ----------
+    c : Any
+        Concentration container (data_container, object with attributes, or dict)
+        containing concentration variables (e.g. CellVariable, ArrayProxy, numpy array).
+    mp : Any
+        Model parameters object containing phi, species definitions, and isotope standards.
+    species : str, Sequence[str], or None, optional
+        Comma-separated string or sequence of species names to include in the summation
+        (e.g., "SO4, TS2, FeS" or ["SO4", "TS2", "FeS"]). Defaults to "SO4, TS2, FeS".
+    isotope_standard : str or float, optional
+        Isotope standard identifier (e.g., "S", "VCDT") to look up in mp.isotope_standards / mp,
+        or direct numeric reference ratio (e.g., 0.044162589).
+    index : int or None, optional
+        Spatial grid index at which to compute the total delta (default is -1 for burial
+        at the lower boundary). If None, calculates across the entire spatial profile.
+    isotope_standart : str or float, optional
+        Alias for isotope_standard (supported for user convenience).
+    **kwargs : Any
+        Additional keyword arguments for backward compatibility.
+
+    Returns
+    -------
+    float or np.ndarray
+        Calculated total delta value (permil / mUr).
     """
-    from .diff_lib import get_delta
+    # Backward compatibility: if an int or index-like object was passed as 3rd positional argument
+    if isinstance(species, (int, np.integer)) and not isinstance(species, bool):
+        index = int(species)
+        species = "SO4, TS2, FeS"
 
-    phi_val = getattr(mp.phi, "value", mp.phi)
-    phi = phi_val[index] if hasattr(phi_val, "__getitem__") else phi_val
-    f_s = 1.0 - phi
-
-    # Liquid species are scaled by porosity (phi)
-    # Solid species are scaled by solid fraction (1-phi)
-    s = phi * (c.SO4.value[index] + c.TS2.value[index]) + f_s * (
-        + c.FeS.value[index] 
-    )
-    s32 = phi * (c.SO4_32.value[index] + c.TS2_32.value[index]) + f_s * (
-         + c.FeS_32.value[index] 
-    )
+    # Resolve isotope reference ratio argument
+    std_arg = isotope_standart if isotope_standart is not None else isotope_standard
+    if std_arg is None:
+        std_arg = kwargs.get("isotope_standard", kwargs.get("isotope_standart", "S"))
 
     std_ratio = None
-    if (
-        hasattr(mp, "isotope_standards")
-        and "S" in mp.isotope_standards
-        and isinstance(mp.isotope_standards["S"], dict)
-        and "ratio" in mp.isotope_standards["S"]
-    ):
-        std_ratio = float(mp.isotope_standards["S"]["ratio"])
-    elif hasattr(mp, "VCDT"):
-        std_ratio = float(mp.VCDT)
+    if isinstance(std_arg, (int, float, np.floating, np.integer)):
+        std_ratio = float(std_arg)
+    elif isinstance(std_arg, str):
+        try:
+            std_ratio = float(std_arg)
+        except ValueError:
+            std_ratio = None
+
+        if std_ratio is None:
+            iso_stds = getattr(mp, "isotope_standards", {})
+            if isinstance(iso_stds, dict):
+                if std_arg in iso_stds:
+                    entry = iso_stds[std_arg]
+                    if isinstance(entry, dict) and "ratio" in entry:
+                        std_ratio = float(entry["ratio"])
+                    elif isinstance(entry, (int, float, np.floating, np.integer)):
+                        std_ratio = float(entry)
+                else:
+                    for k_std, entry in iso_stds.items():
+                        if str(k_std).lower() == std_arg.lower():
+                            if isinstance(entry, dict) and "ratio" in entry:
+                                std_ratio = float(entry["ratio"])
+                            elif isinstance(entry, (int, float, np.floating, np.integer)):
+                                std_ratio = float(entry)
+                            break
+
+            if std_ratio is None:
+                if hasattr(mp, std_arg):
+                    std_ratio = float(getattr(mp, std_arg))
+                elif std_arg.upper() in ("S", "VCDT") and hasattr(mp, "VCDT"):
+                    std_ratio = float(getattr(mp, "VCDT"))
+
     if std_ratio is None:
         raise ValueError(
-            "[MANTIS ERROR] Isotope standard ratio for 'S' (VCDT) is not defined in mp.isotope_standards."
+            f"[MANTIS ERROR] Isotope standard ratio for '{std_arg}' is not defined in mp.isotope_standards or mp."
         )
-    return get_delta(s, s32, std_ratio)
+
+    # Parse species list
+    is_default_species = species is None or species == "SO4, TS2, FeS"
+    if species is None:
+        species_list = ["SO4", "TS2", "FeS"]
+    elif isinstance(species, str):
+        species_list = [s.strip() for s in species.replace(",", " ").split() if s.strip()]
+    elif isinstance(species, (list, tuple, set)):
+        species_list = [str(s).strip() for s in species if str(s).strip()]
+    else:
+        raise TypeError(
+            f"[MANTIS ERROR] Expected species to be a string or sequence of strings, got {type(species).__name__}"
+        )
+
+    phi_val = getattr(mp.phi, "value", mp.phi)
+    if index is not None and hasattr(phi_val, "__getitem__"):
+        try:
+            phi = float(phi_val[index])
+        except (IndexError, TypeError):
+            phi = float(phi_val)
+    else:
+        phi = phi_val
+    f_s = 1.0 - phi
+
+    def _get_c_val(container: Any, key: str) -> Any:
+        if hasattr(container, key):
+            val = getattr(container, key)
+        elif isinstance(container, dict) and key in container:
+            val = container[key]
+        elif hasattr(container, f"c_{key}"):
+            val = getattr(container, f"c_{key}")
+        elif isinstance(container, dict) and f"c_{key}" in container:
+            val = container[f"c_{key}"]
+        else:
+            return None
+        if hasattr(val, "value"):
+            val = val.value
+        return val
+
+    def _extract_at_index(val: Any, idx: Optional[int]) -> Any:
+        if val is None:
+            return None
+        if idx is not None and hasattr(val, "__getitem__"):
+            try:
+                return val[idx]
+            except (IndexError, TypeError):
+                return val
+        return val
+
+    species_defs = getattr(mp, "species_defs", None) or getattr(mp, "species", None)
+    if not isinstance(species_defs, dict):
+        species_defs = {}
+
+    s_tot = 0.0
+    s_iso = 0.0
+    processed_count = 0
+
+    for sp in species_list:
+        meta = species_defs.get(sp, {})
+
+        # 1. Base concentration
+        val_base_raw = _get_c_val(c, sp)
+        if val_base_raw is None:
+            if is_default_species:
+                continue
+            raise KeyError(f"[MANTIS ERROR] Species '{sp}' not found in concentration object c.")
+
+        c_base = _extract_at_index(val_base_raw, index)
+
+        # 2. Companion isotope concentration
+        iso_name = meta.get("isotope")
+        if not iso_name:
+            candidates = [f"{sp}_32", f"{sp}_12", f"{sp}_18"]
+            for cand in candidates:
+                if _get_c_val(c, cand) is not None:
+                    iso_name = cand
+                    break
+            if not iso_name:
+                iso_name = f"{sp}_32"
+
+        val_iso_raw = _get_c_val(c, iso_name)
+        if val_iso_raw is None:
+            if is_default_species:
+                continue
+            raise KeyError(
+                f"[MANTIS ERROR] Isotope companion '{iso_name}' for species '{sp}' not found in concentration object c."
+            )
+
+        c_iso = _extract_at_index(val_iso_raw, index)
+
+        # 3. Phase weighting (liquid scaled by phi, solid by 1-phi)
+        phase = str(meta.get("phase", "")).lower()
+        if phase in ("solid", "particulate"):
+            is_solid = True
+        elif phase in ("liquid", "dissolved"):
+            is_solid = False
+        elif meta.get("solid") is not None:
+            is_solid = bool(meta.get("solid"))
+        else:
+            is_solid = is_solid_species(sp, mp)
+
+        weight = f_s if is_solid else phi
+
+        # 4. Stoichiometry:
+        # FeS2 has 2 sulfur atoms per molecule, so total S receives 2 * [FeS2].
+        # FeS2_32 is already tracked per single sulfur atom, so it receives 1 * [FeS2_32].
+        stoich = float(meta.get("stoichiometry", 2.0 if sp == "FeS2" else 1.0))
+
+        s_tot = s_tot + weight * stoich * c_base
+        s_iso = s_iso + weight * 1.0 * c_iso
+        processed_count += 1
+
+    if processed_count == 0:
+        raise ValueError(
+            f"[MANTIS ERROR] None of the specified species ({species_list}) could be found in concentration object c."
+        )
+
+    delta = get_delta(s_tot, s_iso, std_ratio)
+    if hasattr(delta, "shape") and delta.shape == ():
+        return float(delta)
+    elif isinstance(delta, (float, int, np.floating, np.integer)):
+        return float(delta)
+    return delta
 
 
 # =============================================================================

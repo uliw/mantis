@@ -67,7 +67,8 @@ if __name__ == "__main__":
     result.save_state()
 
     if result.mp.isotopes:
-        print(f"d34S = {get_total_delta(result.c, result.mp):.2f}")
+        d34 = get_total_delta(result.c, result.mp, species="SO4, TS2, FeS", isotope_standart="S")
+        print(f"d34S = {d34:.2f}")
 
     total_iron = df.c_Fe2_total + df.c_Fe3 + df.c_FeS + df.c_FeS2
     print(f"total_iron diff = {total_iron.max() - total_iron.min():.2e}")
