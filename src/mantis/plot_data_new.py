@@ -830,7 +830,7 @@ class BrokenLocator(mticker.Locator):
 class BrokenYScale(mscale.ScaleBase):
     name = "broken_y"
 
-    def __init__(self, axis, *, y1=-4, y2=20, gap_ratio=0.03, split_ratio=0.5, **kwargs):
+    def __init__(self, axis=None, *, y1=-4, y2=20, gap_ratio=0.03, split_ratio=0.5, **kwargs):
         super().__init__(axis)
         self.axis = axis
         self.y1 = float(min(y1, y2))

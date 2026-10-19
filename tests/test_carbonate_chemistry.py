@@ -3,6 +3,8 @@
 Unit and integration tests for the marine carbonate equilibrium chemistry module.
 """
 
+from pathlib import Path
+
 import pytest
 import numpy as np
 from mantis.seawater_carbonate import (
@@ -72,33 +74,34 @@ def test_missing_ca2_raises_error():
         adjust_for_calcite_equilibrium(ca2_top=-1.0, dic=2.2, ta=2.4, const=const)
 
 
-def test_model_carbonate_overrides_species_bc(tmp_path):
+FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures" / "carbonate_test"
+
+
+def test_model_carbonate_overrides_species_bc():
     """Test that carbonate_equilibrium_chemistry overrides any TA, DIC, pH in species.py."""
-    import os
     from mantis import DiageneticModel
 
-    orig_cwd = os.getcwd()
-    try:
-        os.chdir("nbk/carbonate_test")
-        model = DiageneticModel(
-            reactions="fes_reactions.py",
-            constants="kinetic_constants_fast.py",
-            layout="plot_layout.py",
-        )
-        model.configure(
-            w="0.2 cm/yr",
-            phi=0.8,
-            carbonate_equilibrium_chemistry={
-                "pressure": 1,
-                "salinity": 34,
-                "TA": 2.4,
-                "DIC": 2.2,
-                "adjust_omega": True,
-            },
-        )
-        model.setup()
-        assert model.mp.is_carbonate is True
-        assert hasattr(model.mp, "carb_spec_top")
-        assert model.mp.carb_spec_top["TA"] == pytest.approx(2.182, rel=1e-2)
-    finally:
-        os.chdir(orig_cwd)
+    eq_file = Path(__file__).resolve().parent / "test_carbonate_chemistry_equations.py"
+    model = DiageneticModel(
+        base_dir=FIXTURES_DIR,
+        species="species.py",
+        reactions="fes_reactions.py",
+        constants="kinetic_constants_fast.py",
+        equations=eq_file,
+        layout="plot_layout.py",
+    )
+    model.configure(
+        w="0.2 cm/yr",
+        phi=0.8,
+        carbonate_equilibrium_chemistry={
+            "pressure": 1,
+            "salinity": 34,
+            "TA": 2.4,
+            "DIC": 2.2,
+            "adjust_omega": True,
+        },
+    )
+    model.setup()
+    assert model.mp.is_carbonate is True
+    assert hasattr(model.mp, "carb_spec_top")
+    assert model.mp.carb_spec_top["TA"] == pytest.approx(2.182, rel=1e-2)

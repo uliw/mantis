@@ -1,4 +1,4 @@
-# MANTIS: A Python framework to solve extremely stiff reaction-transport equations using a *M*onolithic *A*ssembly of *N*onlinear *T*ransport *I*nteraction *S*olver (MANTIS)
+# MANTIS: A Python framework to solve extremely stiff reaction-transport equations using a *M*onolithic *A*ssembly of *N*onlinear *T*ransport *I*nteractions *S*olver (MANTIS)
 
 [![Build Status](https://github.com/uliw/mantis/actions/workflows/tests.yml/badge.svg)](https://github.com/uliw/mantis/actions/workflows/tests.yml)
 [![PyPI Version](https://img.shields.io/pypi/v/mantis-rtm.svg)](https://pypi.org/project/mantis-rtm/)
