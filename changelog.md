@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-10-19
+
+### Added
+
+- **Marine Carbonate Equilibrium Chemistry (`seawater_carbonate.py`)**:
+  - Implemented consensus oceanographic equilibrium formulations (Lueker et al. 2000, Mucci 1983, Millero 1995, Ingle 1975, UNESCO 1981 density equation) to compute stoichiometric constants ($K_1^*, K_2^*, K_{\text{sp}}'$) and calcite saturation state ($\Omega$) as functions of in-situ temperature, salinity, and hydrostatic pressure.
+  - Carbonate speciation routines calculating $[\text{CO}_2^*]$, $[\text{HCO}_3^-]$, and $[\text{CO}_3^{2-}]$ from any valid parameter pair: pH & DIC, pH & TA, or DIC & TA.
+  - Boundary condition validation and automatic equilibrium adjustment (`adjust_omega=True`), preventing overdefinition of the carbonate system and initializing sediment porewater profiles in thermodynamic equilibrium with solid $\text{CaCO}_3$.
+  - Gated all carbonate equilibrium speciation behind the `carbonate_equilibrium_chemistry` parameter dictionary in `model.configure()`, isolating non-carbonate models from side effects.
+  - Added scientific documentation with thermodynamic derivations and literature citations in `docs/carbonate_chemistry.org`.
+- **Species-Agnostic Equation System & SymPy Analytical Jacobian Generator**:
+  - Completely generalized `generate_equation_system.py` to be species-agnostic, replacing hardcoded species checks (`HS`, `H2S`, `Fe2`, `FeS`, `TS2`, `VCDT`) with phase-permutation detection (`liquid_to_liquid`, `solid_to_liquid`, `liquid_to_solid`, `solid_transformation`) and reaction mechanism classification.
+  - Automated analytical chemical Jacobian assembly via SymPy symbolic differentiation.
+  - Dynamic derivation of speciation factors and equilibrium partitioning from `species.py` metadata (`fraction`, `equilibrium_of`, `alias_of`, `isotope_of`, `isotope_standards`).
+  - Added generic helper functions `calculate_fractionated_rate_coeff` and `partition_equilibrium_isotope` in `diff_lib.py`.
+- **Multi-Isotope Cross-Derivatives & Coupling**:
+  - Populated analytical cross-derivatives for companion isotope species when differentiating with respect to non-isotope reactants, scaling rates by reactant isotope ratios to eliminate numerical front ratio divergence.
+  - Generalized cross-derivative logic across all isotope systems (S, C, N, O), dynamically resolving standard ratios from species definitions.
+  - Added `get_total_delta` function in `diff_lib.py` for multi-species pooled isotope delta calculations with test suite in `tests/test_get_total_delta.py`.
+- **Calcite Reactions & Diagnostics**:
+  - Added dedicated calcite precipitation and dissolution reaction handling with smooth transitions across saturation state ($\Omega$).
+  - Coupled reversible saturation isotope reactions to Total Alkalinity (TA) and Dissolved Inorganic Carbon (DIC) in the analytical chemical Jacobian.
+  - Added carbonate system diagnostics and live plotting support.
+  - Added `prefill=True` keyword in `species.py` to allow initializing species profiles to boundary values instead of zeros.
+- **Timestamp-Aware Automatic Equation Regeneration**:
+  - The equation generator now inspects modification timestamps of all core Mantis source files to automatically rebuild equation systems when the library is updated.
+
+### Fixed
+
+- Corrected units in reversible saturation reactions: unified $[\text{H}^+]$ scaling in $\partial\Omega/\partial h$ for mineral reactions and ensured consistent units for $k_{H^+}$.
+- Simplified dynamic $H^+$ parameter handling in generated equation systems.
+- Added `__future__.annotations` and `Sequence` import in `diff_lib.py` to resolve Python 3.12 CI compatibility.
+- Excluded non-carbonate TA from kinetic isotope rate expressions.
+
 ## [0.2.1] - 2026-10-15
 - fixed github CI errors
 
