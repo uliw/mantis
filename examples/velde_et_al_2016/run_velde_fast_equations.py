@@ -328,10 +328,10 @@ def rxn_FeS_precipitation_dissolution(c, k_val, lim, LHS, RHS, RATES, CROSS, mp)
     TS2_val = np.maximum(np.asarray(c.TS2.value if hasattr(c.TS2, "value") else c.TS2), 1e-20)
     HS_pw = TS2_val * mp.hs_frac
     FeS_val = np.maximum(np.asarray(c.FeS.value if hasattr(c.FeS, "value") else c.FeS), 1e-20)
-    k_Hplus = getattr(k_val, "Hplus", getattr(mp, "Hplus", 10**-7.5))
     k_sp = getattr(k_val, "FeS_sp", getattr(mp, "FeS_sp", 10**-3.5))
     k_isp = getattr(k_val, "FeS_isp", getattr(mp, "FeS_isp", 1.0))
     k_isd = getattr(k_val, "FeS_isd", getattr(mp, "FeS_isd", 0.3))
+    k_Hplus = np.asarray(getattr(c, "Hplus")) if hasattr(c, "TA") and hasattr(c, "DIC") and hasattr(c, "Hplus") else getattr(k_val, "Hplus", getattr(mp, "Hplus", 10**-7.5))
     omega_den = k_Hplus * k_sp + 1e-30
     omega = (Fe2_liq_pw * HS_pw) / omega_den
     is_prec = np.where(omega >= 1.0, 1.0, 0.0)
@@ -509,6 +509,29 @@ def compute_chemical_jacobian(c, mp, k, species_names):
         lim = mp.get_limiters(c, mp)
     else:
         lim = getattr(mp, "limiters", {})
+    has_carb = "TA" in idx and "DIC" in idx
+    if has_carb:
+        _ta_val = np.maximum(np.asarray(c["TA"].value if hasattr(c["TA"], "value") else c["TA"]), 1e-12)
+        _dic_val = np.maximum(np.asarray(c["DIC"].value if hasattr(c["DIC"], "value") else c["DIC"]), 1e-12)
+        _pK1 = getattr(mp, "pK1_carb", 5.86)
+        _pK2 = getattr(mp, "pK2_carb", 8.92)
+        _K1 = 10.0 ** (-float(_pK1))
+        _K2 = 10.0 ** (-float(_pK2))
+        _b = _K1 * (_ta_val - _dic_val)
+        _c_term = _K1 * _K2 * (_ta_val - 2.0 * _dic_val)
+        _disc = np.maximum(_b**2 - 4.0 * _ta_val * _c_term, 0.0)
+        _h = (-_b + np.sqrt(_disc)) / (2.0 * _ta_val)
+        _h = np.maximum(_h, 1e-14)
+        _denom = _h**2 + _K1 * _h + _K1 * _K2
+        _co3 = _dic_val * (_K1 * _K2) / _denom
+        _dF_dh = 2.0 * _ta_val * _h + _b
+        _dF_dta = _h**2 + _K1 * _h + _K1 * _K2
+        _dF_ddic = -(_K1 * _h + 2.0 * _K1 * _K2)
+        _dh_dta = -_dF_dta / (_dF_dh + 1e-30)
+        _dh_ddic = -_dF_ddic / (_dF_dh + 1e-30)
+        _dD_dh = 2.0 * _h + _K1
+        _dco3_dta = - (_dic_val * _K1 * _K2 / _denom**2) * _dD_dh * _dh_dta
+        _dco3_ddic = (_K1 * _K2 / _denom) - (_dic_val * _K1 * _K2 / _denom**2) * _dD_dh * _dh_ddic
 
     # Reaction: aerobic_respiration_fast (POC_fast + O2 -> CO2)
     if "O2" in idx and "POC_fast" in idx:
@@ -700,10 +723,10 @@ def compute_chemical_jacobian(c, mp, k, species_names):
         TS2_val = np.maximum(c["TS2"].value if hasattr(c["TS2"], "value") else c["TS2"], 1e-20)
         HS_pw = TS2_val * (mp.hs_frac)
         FeS_val = np.maximum(c["FeS"].value if hasattr(c["FeS"], "value") else c["FeS"], 1e-20)
-        k_Hplus = float(getattr(k, "Hplus", getattr(mp, "Hplus", 10**-7.5)))
         k_min_sp = float(getattr(k, "FeS_sp", getattr(mp, "FeS_sp", 10**-3.5)))
         k_min_isp = float(getattr(k, "FeS_isp", getattr(mp, "FeS_isp", 1.0)))
         k_min_isd = float(getattr(k, "FeS_isd", getattr(mp, "FeS_isd", 0.3)))
+        k_Hplus = np.asarray(getattr(c, "Hplus")) if has_carb and hasattr(c, "Hplus") else float(getattr(k, "Hplus", getattr(mp, "Hplus", 10**-7.5)))
         omega = (Fe2_liq_pw * HS_pw) / (k_Hplus * k_min_sp + 1e-30)
         d_omega_dFe2_total = ((getattr(mp, 'Fe2_total_dissolved', getattr(mp, 'Fe2_liq', 1.0))) * HS_pw) / (k_Hplus * k_min_sp + 1e-30)
         d_omega_dTS2 = ((mp.hs_frac) * Fe2_liq_pw) / (k_Hplus * k_min_sp + 1e-30)
@@ -742,6 +765,18 @@ def compute_chemical_jacobian(c, mp, k, species_names):
         J[:, i_fes, i_fes] += d_net_dFeS
         J[:, i_fe2_total, i_fes] -= d_net_dFeS
         J[:, i_ts2, i_fes] -= d_net_dFeS
+        if has_carb:
+            _Ka1_h2s = float(getattr(mp, "K_a1_h2s", 10.0 ** (-7.0)))
+            _domega_dh_m3 = -omega * (1.0 / (k_Hplus + 1e-30) + 1.0 / (_h * 1000.0 + _Ka1_h2s + 1e-30))
+            _domega_dh = _domega_dh_m3 * 1000.0
+            _d_net_dTA = (dR_prec_domega * diss_fac - dR_diss_domega * solid_fac) * _domega_dh * _dh_dta
+            _d_net_dDIC = (dR_prec_domega * diss_fac - dR_diss_domega * solid_fac) * _domega_dh * _dh_ddic
+            J[:, i_fes, idx["TA"]] += _d_net_dTA
+            J[:, i_fes, idx["DIC"]] += _d_net_dDIC
+            J[:, i_fe2_total, idx["TA"]] -= _d_net_dTA
+            J[:, i_fe2_total, idx["DIC"]] -= _d_net_dDIC
+            J[:, i_ts2, idx["TA"]] -= _d_net_dTA
+            J[:, i_ts2, idx["DIC"]] -= _d_net_dDIC
         if "FeS_32" in idx and "TS2_32" in idx and getattr(mp, "isotopes", False):
             i_fes_32 = idx["FeS_32"]
             i_ts2_32 = idx["TS2_32"]

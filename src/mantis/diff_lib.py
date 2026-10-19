@@ -2364,13 +2364,23 @@ def compute_carbonate_speciation(c: Any, mp: Any) -> None:
         TA = [HCO3-] + 2[CO32-]
         TA * [H+]^2 + K1*(TA - DIC)*[H+] + K1*K2*(TA - 2*DIC) = 0
     """
+    if not getattr(mp, "is_carbonate", False):
+        return
+
+    if not hasattr(c, "TA") or not hasattr(c, "DIC"):
+        return
+
     ta_val = np.asarray(c.TA.value if hasattr(c.TA, "value") else c.TA)
     dic_val = np.asarray(c.DIC.value if hasattr(c.DIC, "value") else c.DIC)
 
-    pK1 = getattr(mp, "pK1_carb", 5.86)
-    pK2 = getattr(mp, "pK2_carb", 8.92)
-    K1 = 10.0 ** (-float(pK1))
-    K2 = 10.0 ** (-float(pK2))
+    K1 = getattr(mp, "K1_carb", None)
+    if K1 is None:
+        pK1 = getattr(mp, "pK1_carb", 5.996)
+        K1 = 10.0 ** (-float(pK1))
+    K2 = getattr(mp, "K2_carb", None)
+    if K2 is None:
+        pK2 = getattr(mp, "pK2_carb", 9.223)
+        K2 = 10.0 ** (-float(pK2))
 
     a = np.maximum(ta_val, 1e-12)
     b = K1 * (ta_val - dic_val)
