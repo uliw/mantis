@@ -868,8 +868,13 @@ class EquationSystemGenerator:
         ]
         if not transport_r:
             transport_r = reactants
-        master_coeff, master_sp = transport_r[0]
-        for coeff, sp in transport_r:
+        non_ta_r = [
+            (coeff, sp) for coeff, sp in transport_r
+            if self.validator.get_parent_species(sp) != "TA" or ("calcite" in r_name.lower() or "caco3" in r_name.lower())
+        ]
+        candidates = non_ta_r if non_ta_r else transport_r
+        master_coeff, master_sp = candidates[0]
+        for coeff, sp in candidates:
             if self.validator.get_species_phase(sp) in ("solid", "mixed"):
                 master_coeff, master_sp = coeff, sp
                 break
@@ -922,6 +927,8 @@ class EquationSystemGenerator:
         for coeff, sp in reactants:
             p_sp = self.validator.get_parent_species(sp)
             if p_sp != master_parent:
+                if p_sp == "TA" and not ("calcite" in r_name.lower() or "caco3" in r_name.lower()):
+                    continue
                 spec = self.validator.get_speciation_factor_expr(sp)
                 term = f'getattr(c, "{p_sp}")' if not spec else f'(getattr(c, "{p_sp}") * {spec})'
                 coeff_expr += f' * {term}'
@@ -1149,6 +1156,12 @@ class EquationSystemGenerator:
                 f'    add_implicit_sink(LHS, RATES, "{p1}", prec_coeff_{p1}, prec_rate_{p1}, mp=mp, has_solid=False)',
             ])
 
+        if has_hplus and "TA" in getattr(self.validator, "species_defs", {}):
+            lines.extend([
+                '    if "TA" in RATES:',
+                '        RATES["TA"] -= R_prec * phi',
+            ])
+
         # Dissolution of solid mineral
         lines.extend([
             '    k_diss_eff = k_isd * is_diss',
@@ -1165,6 +1178,12 @@ class EquationSystemGenerator:
                 f'        coeff=diss_coeff_{mineral_parent}, rate=diss_rate_{mineral_parent}, mp=mp, has_solid=True,',
                 f'        add_lhs_sink={idx == 0}, stoich_ratio=1.0,',
                 '    )',
+            ])
+
+        if has_hplus and "TA" in getattr(self.validator, "species_defs", {}):
+            lines.extend([
+                '    if "TA" in RATES:',
+                f'        RATES["TA"] += diss_rate_{mineral_parent} * (1.0 - phi)',
             ])
 
         # Isotope handling for reversible saturation
@@ -1420,6 +1439,19 @@ class EquationSystemGenerator:
                     f'            J[:, {p_tgt_idx}, idx["TA"]] -= _d_net_dTA',
                     f'            J[:, {p_tgt_idx}, idx["DIC"]] -= _d_net_dDIC',
                 ])
+            if "TA" in getattr(self.validator, "species_defs", {}):
+                lines.extend([
+                    '        if "TA" in idx:',
+                ])
+                for _, _, p_i, _ in reactants_info:
+                    p_idx = f"i_{p_i.lower()}"
+                    lines.append(f'            J[:, idx["TA"], {p_idx}] -= d_net_d{p_i}')
+                lines.append(f'            J[:, idx["TA"], {m_idx}] -= d_net_d{mineral_parent}')
+                lines.extend([
+                    '            if has_carb:',
+                    '                J[:, idx["TA"], idx["TA"]] -= _d_net_dTA',
+                    '                J[:, idx["TA"], idx["DIC"]] -= _d_net_dDIC',
+                ])
 
         # Isotope Jacobian entries
         iso_sp_map = r.get("isotope_species", {})
@@ -1616,8 +1648,10 @@ class EquationSystemGenerator:
             return lines
 
         for coeff_diff, orig_sp_diff, diff_p in r_parents:
+            if diff_p == "TA" and not ("calcite" in r_name.lower() or "caco3" in r_name.lower()):
+                continue
             other_r = [
-                (c, sp, p) for c, sp, p in r_parents if p != diff_p
+                (c, sp, p) for c, sp, p in r_parents if p != diff_p and (p != "TA" or ("calcite" in r_name.lower() or "caco3" in r_name.lower()))
             ]
             other_terms = []
             for c, sp, p in other_r:

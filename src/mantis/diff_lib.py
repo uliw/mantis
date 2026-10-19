@@ -2246,6 +2246,85 @@ partition_equilibrium_isotope_32 = partition_equilibrium_isotope
 
 
 
+def compute_ph_from_ta_dic(ta: float, dic: float, mp: Any = None) -> float:
+    """Calculate porewater pH given Total Alkalinity (TA) and Dissolved Inorganic Carbon (DIC).
+
+    Solves the quadratic equation for [H+]:
+        TA * [H+]^2 + K1*(TA - DIC)*[H+] + K1*K2*(TA - 2*DIC) = 0
+    """
+    pK1 = getattr(mp, "pK1_carb", 5.86) if mp is not None else 5.86
+    pK2 = getattr(mp, "pK2_carb", 8.92) if mp is not None else 8.92
+    K1 = 10.0 ** (-float(pK1))
+    K2 = 10.0 ** (-float(pK2))
+
+    a = max(float(ta), 1e-12)
+    b = K1 * (float(ta) - float(dic))
+    c_term = K1 * K2 * (float(ta) - 2.0 * float(dic))
+
+    disc = max(b**2 - 4.0 * a * c_term, 0.0)
+    h_plus = (-b + np.sqrt(disc)) / (2.0 * a)
+    h_plus = max(h_plus, 1e-14)
+    return float(-np.log10(h_plus))
+
+
+def compute_dic_from_ph_ta(pH: float, ta: float, mp: Any = None) -> float:
+    """Calculate Dissolved Inorganic Carbon (DIC) given pH and Total Alkalinity (TA)."""
+    pK1 = getattr(mp, "pK1_carb", 5.86) if mp is not None else 5.86
+    pK2 = getattr(mp, "pK2_carb", 8.92) if mp is not None else 8.92
+    K1 = 10.0 ** (-float(pK1))
+    K2 = 10.0 ** (-float(pK2))
+    h_plus = 10.0 ** (-float(pH))
+
+    denom = h_plus**2 + K1 * h_plus + K1 * K2
+    alpha1 = K1 * h_plus / denom
+    alpha2 = K1 * K2 / denom
+    denom_ta = alpha1 + 2.0 * alpha2
+    return float(ta / max(denom_ta, 1e-14))
+
+
+def compute_calcite_equilibrium(dic: float, ca2: float, mp: Any = None) -> tuple[float, float, float]:
+    """Calculate equilibrium pH, TA, and [CO32-] at calcite saturation (Omega_calcite = 1.0).
+
+    Given [Ca2+] and Ksp_calcite:
+        [CO32-]_eq = Ksp_calcite / [Ca2+]
+    Then solves for [H+] such that DIC * alpha2 = [CO32-]_eq.
+
+    Returns
+    -------
+    tuple[float, float, float]
+        (pH_eq, ta_eq, co3_eq)
+    """
+    pK1 = getattr(mp, "pK1_carb", 5.86) if mp is not None else 5.86
+    pK2 = getattr(mp, "pK2_carb", 8.92) if mp is not None else 8.92
+    # Ksp_calcite default in (mol/m^3)^2: 10^-6.37 (mol/L)^2 = 0.42658 (mol/m^3)^2
+    Ksp = getattr(mp, "Ksp_calcite", None)
+    if Ksp is None and hasattr(mp, "k") and hasattr(mp.k, "Ksp_calcite"):
+        Ksp = mp.k.Ksp_calcite
+    if Ksp is None:
+        Ksp = (10.0 ** (-6.37)) * 1e6
+    Ksp = float(Ksp)
+
+    K1 = 10.0 ** (-float(pK1))
+    K2 = 10.0 ** (-float(pK2))
+
+    co3_eq = Ksp / max(float(ca2), 1e-12)
+    alpha2 = co3_eq / max(float(dic), 1e-12)
+
+    a = alpha2
+    b = alpha2 * K1
+    c_term = (alpha2 - 1.0) * K1 * K2
+
+    disc = max(b**2 - 4.0 * a * c_term, 0.0)
+    h_plus = (-b + np.sqrt(disc)) / (2.0 * a)
+    h_plus = max(h_plus, 1e-14)
+    ph_eq = float(-np.log10(h_plus))
+
+    denom = h_plus**2 + K1 * h_plus + K1 * K2
+    hco3_eq = dic * (K1 * h_plus) / denom
+    ta_eq = float(hco3_eq + 2.0 * co3_eq)
+    return ph_eq, ta_eq, float(co3_eq)
+
+
 def compute_carbonate_speciation_from_ph_dic(pH: float, dic: float, mp: Any = None) -> tuple[float, float, float, float]:
     """Calculate carbonate speciation (TA, CO3, HCO3, CO2) given pH and DIC.
 
@@ -2275,6 +2354,7 @@ def compute_carbonate_speciation_from_ph_dic(pH: float, dic: float, mp: Any = No
     co2 = dic * (h_plus**2) / denom
     ta = hco3 + 2.0 * co3
     return float(ta), float(co3), float(hco3), float(co2)
+
 
 
 def compute_carbonate_speciation(c: Any, mp: Any) -> None:

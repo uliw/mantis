@@ -737,22 +737,98 @@ class DiageneticModel:
                 )
                 sys.exit(1)
 
-        # 2. Extract pH from species definitions (e.g. Hplus or any species defining 'pH' under 'bc')
-        if "pH" not in self.p_dict:
+        # 2. Extract pH and check carbonate system boundary consistency
+        is_carbonate = "TA" in species_defs and "DIC" in species_defs
+
+        ph_val = None
+        if "pH" in self.p_dict and self.p_dict["pH"] is not None:
+            ph_val = float(self.p_dict["pH"])
+        else:
             for sp_k, s_meta in species_defs.items():
                 s_bc = s_meta.get("bc")
-                if isinstance(s_bc, dict) and "pH" in s_bc:
-                    self.mp.pH = float(s_bc["pH"])
+                if isinstance(s_bc, dict) and "pH" in s_bc and s_bc["pH"] is not None:
+                    ph_val = float(s_bc["pH"])
                     break
 
-        if not hasattr(self.mp, "pH"):
-            print(
-                "\n[MANTIS ERROR] pH is not defined in the model.\n"
-                "Please specify pH in species.py (e.g. Hplus: {'bc': {'pH': 7.5}}) "
-                "or pass model.configure(pH=7.5).\n",
-                file=sys.stderr,
+        if is_carbonate:
+            from mantis.diff_lib import (
+                compute_ph_from_ta_dic,
+                compute_dic_from_ph_ta,
+                compute_carbonate_speciation_from_ph_dic,
             )
-            sys.exit(1)
+
+            # Check boundary conditions defined in species_defs (or overrides)
+            bc_overrides = self.mp.get("bc_overrides", {})
+            ta_meta = species_defs.get("TA", {}).get("bc", {}) if isinstance(species_defs.get("TA", {}).get("bc"), dict) else {}
+            dic_meta = species_defs.get("DIC", {}).get("bc", {}) if isinstance(species_defs.get("DIC", {}).get("bc"), dict) else {}
+
+            ta_ov = bc_overrides.get("TA")
+            if isinstance(ta_ov, dict):
+                ta_top = ta_ov.get("top", ta_meta.get("top"))
+            elif ta_ov is not None:
+                ta_top = ta_ov
+            else:
+                ta_top = ta_meta.get("top")
+
+            dic_ov = bc_overrides.get("DIC")
+            if isinstance(dic_ov, dict):
+                dic_top = dic_ov.get("top", dic_meta.get("top"))
+            elif dic_ov is not None:
+                dic_top = dic_ov
+            else:
+                dic_top = dic_meta.get("top")
+
+            # Convert string units if given as pint strings
+            if isinstance(ta_top, str):
+                ta_top = self.Q_(ta_top).to("mol/m^3").magnitude
+            if isinstance(dic_top, str):
+                dic_top = self.Q_(dic_top).to("mol/m^3").magnitude
+
+            has_ph = ph_val is not None
+            has_ta = ta_top is not None
+            has_dic = dic_top is not None
+
+            if has_ph and has_ta and has_dic:
+                print(
+                    "\n[MANTIS ERROR] Overdefined carbonate system at upper boundary.\n"
+                    "You have specified non-None boundary values for all three: pH, DIC, and TA.\n"
+                    "Because pH, DIC, and TA are thermodynamically linked, only two of the three\n"
+                    "can be independently specified as boundary controls.\n"
+                    "Please explicitly set 'top': None (or 'pH': None) for one of them in species.py,\n"
+                    "for example:\n"
+                    "  TA:    {'bc': {'top': None, 'type': 'dissolved'}}  # Calculate TA from pH and DIC\n"
+                    "  Hplus: {'bc': {'pH': None}}                       # Calculate pH from TA and DIC\n"
+                    "  DIC:   {'bc': {'top': None, 'type': 'dissolved'}}  # Calculate DIC from pH and TA\n",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+
+            num_specified = sum([has_ph, has_ta, has_dic])
+            if num_specified < 2:
+                print(
+                    "\n[MANTIS ERROR] Underdefined carbonate system at upper boundary.\n"
+                    "At least two of (pH, DIC, TA) must be specified with non-None boundary values.\n",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+
+            if has_ta and has_dic:
+                self.mp.pH = compute_ph_from_ta_dic(ta_top, dic_top, self.mp)
+            elif has_ph and has_dic:
+                self.mp.pH = ph_val
+            elif has_ph and has_ta:
+                self.mp.pH = ph_val
+        else:
+            if ph_val is not None:
+                self.mp.pH = ph_val
+            else:
+                print(
+                    "\n[MANTIS ERROR] pH is not defined in the model.\n"
+                    "Please specify pH in species.py (e.g. Hplus: {'bc': {'pH': 7.5}}) "
+                    "or pass model.configure(pH=7.5).\n",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
 
         # 3. Compile or load reaction equations
         prep_dict = dict(self.mp)
@@ -915,14 +991,30 @@ class DiageneticModel:
                     bc_map[sp_k]["top"] = float(ov)
 
         # Carbonate system boundary condition consistency:
-        # Treat pH and DIC as primary controls and calculate TA boundary condition
-        if "DIC" in bc_map and "TA" in bc_map:
-            from mantis.diff_lib import compute_carbonate_speciation_from_ph_dic
-            dic_top = bc_map["DIC"]["top"]
-            ta_calc, co3_calc, hco3_calc, _ = compute_carbonate_speciation_from_ph_dic(
-                self.mp.pH, dic_top, self.mp
+        if is_carbonate:
+            from mantis.diff_lib import (
+                compute_carbonate_speciation_from_ph_dic,
+                compute_dic_from_ph_ta,
             )
-            bc_map["TA"]["top"] = ta_calc
+            ta_val = bc_map["TA"]["top"]
+            dic_val = bc_map["DIC"]["top"]
+
+            if has_ph and has_dic:
+                ta_calc, co3_calc, hco3_calc, _ = compute_carbonate_speciation_from_ph_dic(
+                    self.mp.pH, dic_val, self.mp
+                )
+                bc_map["TA"]["top"] = ta_calc
+            elif has_ph and has_ta:
+                dic_calc = compute_dic_from_ph_ta(self.mp.pH, ta_val, self.mp)
+                bc_map["DIC"]["top"] = dic_calc
+                _, co3_calc, hco3_calc, _ = compute_carbonate_speciation_from_ph_dic(
+                    self.mp.pH, dic_calc, self.mp
+                )
+            else:  # has_ta and has_dic
+                _, co3_calc, hco3_calc, _ = compute_carbonate_speciation_from_ph_dic(
+                    self.mp.pH, dic_val, self.mp
+                )
+
             if "CO3" in bc_map:
                 bc_map["CO3"]["top"] = co3_calc
             if "HCO3" in bc_map:
@@ -1064,7 +1156,12 @@ class DiageneticModel:
                 J_solid = props["top"] / (1.0 - phi_top)
                 val = J_solid / self.mp.w if self.mp.w > 0 else 0.0
 
-                if prefill:
+                if "init" in meta and meta["init"] is not None:
+                    init_val = meta["init"]
+                    if isinstance(init_val, str):
+                        init_val = self.Q_(init_val).to("mol/m^3").magnitude
+                    var.setValue(init_val)
+                elif prefill:
                     var.setValue(val)
                 else:
                     var.setValue(0.0)
@@ -1084,7 +1181,12 @@ class DiageneticModel:
                     var.constrain(val, mesh.facesLeft)
             else:
                 val = props["top"]
-                if prefill:
+                if "init" in meta and meta["init"] is not None:
+                    init_val = meta["init"]
+                    if isinstance(init_val, str):
+                        init_val = self.Q_(init_val).to("mol/m^3").magnitude
+                    var.setValue(init_val)
+                elif prefill:
                     var.setValue(val)
                 else:
                     var.setValue(0.0)
@@ -1094,7 +1196,28 @@ class DiageneticModel:
 
         # Initialize carbonate speciation diagnostics across cells if carbonate system is active
         if hasattr(c, "TA") and hasattr(c, "DIC"):
-            from mantis.diff_lib import compute_carbonate_speciation
+            from mantis.diff_lib import compute_carbonate_speciation, compute_calcite_equilibrium
+
+            # If solid CaCO3 and Ca2 are present, initialize porewater in equilibrium with calcite
+            # unless an explicit 'init' was defined for TA in species.py
+            ta_meta = species_defs.get("TA", {})
+            if "init" not in ta_meta or ta_meta["init"] is None:
+                if hasattr(c, "Ca2") and hasattr(c, "CaCO3"):
+                    dic_init = float(c.DIC.value[0] if hasattr(c.DIC, "value") else c.DIC[0])
+                    ca2_init = float(c.Ca2.value[0] if hasattr(c.Ca2, "value") else c.Ca2[0])
+                    if dic_init > 1e-12 and ca2_init > 1e-12:
+                        ph_eq, ta_eq, co3_eq = compute_calcite_equilibrium(dic_init, ca2_init, self.mp)
+                        c.TA.setValue(ta_eq)
+                        ta_top_bc = bc_map.get("TA", {}).get("top", ta_eq)
+                        print(
+                            f"\n[MANTIS] Carbonate system detected (DIC, TA, Ca2, CaCO3):\n"
+                            f"         Sediment porewater initialized in equilibrium with solid CaCO3\n"
+                            f"         (Omega = 1.00, pH_init = {ph_eq:.2f}, TA_init = {ta_eq:.2f} mol/m^3 based on DIC and Ca2+)\n"
+                            f"         to avoid artificial column-wide precipitation shock.\n"
+                            f"         Overlying water boundary condition remains TA_top = {ta_top_bc:.2f} mol/m^3 "
+                            f"(pH_top = {self.mp.pH:.2f}).\n"
+                        )
+
             compute_carbonate_speciation(c, self.mp)
 
         # Restore state if specified

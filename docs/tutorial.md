@@ -148,25 +148,48 @@ When starting a simulation, each active transport variable must have an initial 
   Isotope species (defined with `isotope_of`) automatically inherit the `prefill` setting of their parent species unless explicitly overridden. If `prefill: True`, the companion isotope vector is prefilled with the calculated isotopic mass abundance at the upper boundary.
 
 
-### Carbonate System Modeling & Upper Boundary Consistency
+### Carbonate System Modeling: Boundary Conditions & Porewater Equilibrium
 
 Modeling the dissolved inorganic carbon (DIC) and total alkalinity (TA) system in porewaters involves coupled acid-base equilibria:
 $$\text{CO}_2 + \text{H}_2\text{O} \rightleftharpoons \text{HCO}_3^- + \text{H}^+ \quad (K_1^*)$$
 $$\text{HCO}_3^- \rightleftharpoons \text{CO}_3^{2-} + \text{H}^+ \quad (K_2^*)$$
 
-#### 1. Primary Boundary Controls: pH and DIC
+#### 1. Transport Variables vs. Local Algebraic Diagnostics
+In reactive transport modeling (e.g. Boudreau 1996, Soetaert et al. 1996), **$\text{TA}$ and $\text{DIC}$ are conservative transport scalars**—they satisfy standard advection-diffusion-reaction PDEs with stoichiometric reaction sources and sinks. In contrast, free proton concentration $[\text{H}^+]$ is not conservative because rapid acid-base buffering constantly exchanges protons among species. Therefore, porewater $\text{pH}$ and speciation are solved algebraically at each grid cell from the local $(\text{TA}, \text{DIC})$ balance.
+
+#### 2. Upper Boundary Controls: Exactly Two of Three
 Because porewater $\text{pH}$, $\text{DIC}$, and $\text{TA}$ are thermodynamically interdependent:
 $$\text{DIC} = [\text{CO}_2] + [\text{HCO}_3^-] + [\text{CO}_3^{2-}]$$
 $$\text{TA} = [\text{HCO}_3^-] + 2[\text{CO}_3^{2-}]$$
-specifying all three independently at the upper boundary would overdefine the chemical system.
+specifying all three independently at the upper boundary overdefines the chemical system.
 
-MANTIS enforces thermodynamic consistency by treating **$\text{pH}$** (declared via `Hplus: {'bc': {'pH': ...}}` in `species.py`) and **$\text{DIC}$** (`DIC: {'bc': {'top': ...}}`) as the primary independent controls. MANTIS automatically calculates the upper boundary condition for $\text{TA}$ (as well as diagnostic species $\text{CO}_3^{2-}$ and $\text{HCO}_3^-$) using the apparent equilibrium constants ($pK_{1,\text{carb}}^*$, $pK_{2,\text{carb}}^*$):
-$$[\text{H}^+] = 10^{-\text{pH}}$$
-$$[\text{CO}_3^{2-}] = \text{DIC} \cdot \frac{K_1^* K_2^*}{[\text{H}^+]^2 + K_1^* [\text{H}^+] + K_1^* K_2^*}$$
-$$[\text{HCO}_3^-] = \text{DIC} \cdot \frac{K_1^* [\text{H}^+]}{[\text{H}^+]^2 + K_1^* [\text{H}^+] + K_1^* K_2^*}$$
-$$\text{TA}_{\text{top}} = [\text{HCO}_3^-] + 2[\text{CO}_3^{2-}]$$
+MANTIS requires that **only two of the three** ($\text{pH}$, $\text{DIC}$, $\text{TA}$) have non-`None` boundary conditions. If all three are specified with numerical values, MANTIS halts execution with an explicit error prompting you to set `'top': None` (or `'pH': None`) for the dependent variable:
+- **Case A: Define $(\text{pH}, \text{DIC})$** $\rightarrow$ Set `TA: {'bc': {'top': None, 'type': 'dissolved'}}`. MANTIS calculates the corresponding bottom water $\text{TA}_{\text{top}}$ and $[\text{CO}_3^{2-}]_{\text{top}}$.
+- **Case B: Define $(\text{TA}, \text{DIC})$** $\rightarrow$ Set `Hplus: {'bc': {'pH': None}}`. MANTIS calculates bottom water $\text{pH}_{\text{top}}$ and $[\text{H}^+]$ from the alkalinity quadratic.
+- **Case C: Define $(\text{pH}, \text{TA})$** $\rightarrow$ Set `DIC: {'bc': {'top': None, 'type': 'dissolved'}}`. MANTIS calculates bottom water $\text{DIC}_{\text{top}}$.
 
-#### 2. Vectorized Speciation & Dynamic pH Evolution
+#### 3. Overlying Water vs. Sediment Porewater Initial Equilibrium
+A critical distinction in marine diagenesis is between the **overlying water boundary condition** and the **sediment porewater initial condition**:
+- **Overlying Bottom Water ($z = 0$)**: In the open ocean, bottom water is typically supersaturated with respect to calcite ($\Omega_{\text{calcite}} \sim 4\text{--}8$, $\text{pH} \approx 8.0\text{--}8.2$) because high dissolved $\text{Mg}^{2+}$ kinetically inhibits abiotic calcite precipitation in the water column.
+- **Sediment Porewater ($z > 0$)**: Inside the sediment column, abundant mineral calcite surfaces ($\sim 50,000\ \text{mol/m}^3$ in carbonate-bearing sediments) rapidly buffer porewater to thermodynamic equilibrium ($\Omega_{\text{calcite}} = 1.0$, $\text{pH} \approx 7.22$ for typical seawater $\text{DIC} = 2.2\ \text{mM}$ and $\text{Ca}^{2+} = 10.3\ \text{mM}$).
+
+If a simulation blindly copies the supersaturated bottom water ($\text{pH} = 8.2$) throughout the entire sediment column at $t = 0$ via `prefill: True`, every grid cell undergoes an immediate, artificial precipitation burst ($\sim 23,500\ \text{mol}/(\text{m}^3\cdot\text{yr})$). The adaptive Newton solver must then take small timesteps ($\Delta t \sim \text{hours}$) for thousands of iterations until the column relaxes to equilibrium.
+
+To prevent this artificial transient, MANTIS automatically initializes the sediment porewater profile in thermodynamic equilibrium with solid $\text{CaCO}_3$:
+$$[\text{CO}_3^{2-}]_{\text{init}} = \frac{K_{\text{sp, calcite}}}{[\text{Ca}^{2+}]}$$
+$$\alpha_{2,\text{eq}} = \frac{[\text{CO}_3^{2-}]_{\text{init}}}{\text{DIC}_{\text{init}}} = \frac{K_1^* K_2^*}{[\text{H}^+]^2 + K_1^* [\text{H}^+] + K_1^* K_2^*}$$
+$$[\text{TA}]_{\text{init}} = \text{DIC}_{\text{init}} \left( \frac{K_1^* [\text{H}^+] + 2 K_1^* K_2^*}{[\text{H}^+]^2 + K_1^* [\text{H}^+] + K_1^* K_2^*} \right)$$
+while maintaining the user's specified overlying water concentration at $z = 0$. MANTIS announces this initialization with a clear console notice upon model startup:
+```text
+[MANTIS] Carbonate system detected (DIC, TA, Ca2, CaCO3):
+         Sediment porewater initialized in equilibrium with solid CaCO3
+         (Omega = 1.00, pH_init = 7.22, TA_init = 2.15 mol/m^3 based on DIC and Ca2+)
+         to avoid artificial column-wide precipitation shock.
+         Overlying water boundary condition remains TA_top = 2.40 mol/m^3 (pH_top = 7.96).
+```
+*(If you wish to override this equilibrium prefill with custom concentrations, you can explicitly set `'init': <value>` in `species.py`).*
+
+#### 4. Vectorized Speciation & Dynamic pH Evolution
 During the time-stepping loop, reactions like organic matter degradation, iron reduction, and calcite dissolution/precipitation produce or consume $\text{DIC}$ and $\text{TA}$. At each timestep, MANTIS solves the exact quadratic relationship for carbonate alkalinity in a fully vectorized manner across all grid cells via `compute_carbonate_speciation`, updating porewater $[\text{H}^+]$, dynamic $\text{pH}$, $[\text{CO}_3^{2-}]$, and $[\text{HCO}_3^-]$.
 
 
