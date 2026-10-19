@@ -26,8 +26,9 @@ The module contains:
 These helpers are primarily intended for modelling isotope diffusion and fractionation
 processes in geological simulations.
 """
+from __future__ import annotations
 
-from typing import Any, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 import numpy as np
 
 
