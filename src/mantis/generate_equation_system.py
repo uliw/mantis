@@ -709,9 +709,17 @@ def resolve_and_prepare_equations(
     elif species_path.exists() and species_path.stat().st_mtime > equations_path.stat().st_mtime:
         needs_regen = True
         reason = f"{species_path.name} is newer than {equations_path.name}"
-    elif generator_path.exists() and generator_path.stat().st_mtime > equations_path.stat().st_mtime:
+    elif any(
+        m_file.exists() and m_file.stat().st_mtime > equations_path.stat().st_mtime
+        for m_file in Path(__file__).resolve().parent.glob("*.py")
+    ):
+        mantis_dir = Path(__file__).resolve().parent
+        newer_files = [
+            m.name for m in mantis_dir.glob("*.py")
+            if m.stat().st_mtime > equations_path.stat().st_mtime
+        ]
         needs_regen = True
-        reason = f"{generator_path.name} is newer than {equations_path.name}"
+        reason = f"mantis codebase updated ({', '.join(newer_files[:3])}{'...' if len(newer_files) > 3 else ''})"
 
     if needs_regen:
         print(f"[MANTIS] Regenerating {equations_path.name} ({reason})...")
@@ -975,6 +983,8 @@ class EquationSystemGenerator:
                 for coeff, sp in reactants:
                     p_sp = self.validator.get_parent_species(sp)
                     if p_sp != iso_master_parent:
+                        if p_sp == "TA" and not ("calcite" in r_name.lower() or "caco3" in r_name.lower()):
+                            continue
                         spec = self.validator.get_speciation_factor_expr(sp)
                         term = f'getattr(c, "{p_sp}")' if not spec else f'(getattr(c, "{p_sp}") * {spec})'
                         iso_coeff_expr += f' * {term}'
@@ -1098,7 +1108,7 @@ class EquationSystemGenerator:
         ])
         if has_hplus:
             lines.extend([
-                '    k_Hplus = np.asarray(getattr(c, "Hplus")) if hasattr(c, "TA") and hasattr(c, "DIC") and hasattr(c, "Hplus") else getattr(k_val, "Hplus", getattr(mp, "Hplus", 10**-7.5))',
+                '    k_Hplus = np.asarray(getattr(c, "Hplus")) if hasattr(c, "TA") and hasattr(c, "DIC") and hasattr(c, "Hplus") else getattr(k_val, "Hplus", getattr(mp, "Hplus", 10.0 ** (-float(getattr(mp, "pH", 7.5))) * 1000.0))',
                 '    omega_den = k_Hplus * k_sp + 1e-30',
             ])
         else:
@@ -1359,7 +1369,7 @@ class EquationSystemGenerator:
         ])
         if has_hplus:
             lines.extend([
-                '        k_Hplus = np.asarray(getattr(c, "Hplus")) if has_carb and hasattr(c, "Hplus") else float(getattr(k, "Hplus", getattr(mp, "Hplus", 10**-7.5)))',
+                '        k_Hplus = np.asarray(getattr(c, "Hplus")) if has_carb and hasattr(c, "Hplus") else float(getattr(k, "Hplus", getattr(mp, "Hplus", 10.0 ** (-float(getattr(mp, "pH", 7.5))) * 1000.0)))',
                 f'        omega = ({omega_num}) / (k_Hplus * k_min_sp + 1e-30)',
             ])
         else:
@@ -1426,8 +1436,7 @@ class EquationSystemGenerator:
             lines.extend([
                 '        if has_carb:',
                 '            _Ka1_h2s = float(getattr(mp, "K_a1_h2s", 10.0 ** (-7.0)))',
-                '            _domega_dh_m3 = -omega * (1.0 / (k_Hplus + 1e-30) + 1.0 / (_h * 1000.0 + _Ka1_h2s + 1e-30))',
-                '            _domega_dh = _domega_dh_m3 * 1000.0',
+                '            _domega_dh = -omega * (1.0 / (_h + 1e-30) + 1.0 / (_h + _Ka1_h2s + 1e-30))',
                 '            _d_net_dTA = (dR_prec_domega * diss_fac - dR_diss_domega * solid_fac) * _domega_dh * _dh_dta',
                 '            _d_net_dDIC = (dR_prec_domega * diss_fac - dR_diss_domega * solid_fac) * _domega_dh * _dh_ddic',
                 f'            J[:, {m_idx}, idx["TA"]] += _d_net_dTA',
@@ -1543,6 +1552,16 @@ class EquationSystemGenerator:
                     f'            J[:, {r_iso_idx}, {r_iso_idx}] -= dRp_iso_d{r_iso}',
                     f'            J[:, {r_iso_idx}, {m_iso_idx}] += dRd_iso_d{m_iso}',
                 ])
+                if has_hplus:
+                    lines.extend([
+                        '            if has_carb:',
+                        f'                _d_net_dTA_iso = (dR_prec_domega * diss_fac * f_iso_r - dR_diss_domega * solid_fac * f_iso_m) * _domega_dh * _dh_dta',
+                        f'                _d_net_dDIC_iso = (dR_prec_domega * diss_fac * f_iso_r - dR_diss_domega * solid_fac * f_iso_m) * _domega_dh * _dh_ddic',
+                        f'                J[:, {m_iso_idx}, idx["TA"]] += _d_net_dTA_iso',
+                        f'                J[:, {m_iso_idx}, idx["DIC"]] += _d_net_dDIC_iso',
+                        f'                J[:, {r_iso_idx}, idx["TA"]] -= _d_net_dTA_iso',
+                        f'                J[:, {r_iso_idx}, idx["DIC"]] -= _d_net_dDIC_iso',
+                    ])
 
         lines.append('')
         return lines
@@ -1675,19 +1694,49 @@ class EquationSystemGenerator:
             for coeff_p, _, p_tgt in p_parents:
                 lines.append(f'        J[:, idx["{p_tgt}"], idx["{diff_p}"]] += {coeff_p} * {d_var}')
 
-            # Companion 32S isotopes
+            # Companion isotopes (e.g. 32S, 13C, 15N)
             iso_sp_map = r.get("isotope_species")
-            if iso_sp_map and diff_p in iso_sp_map:
-                diff_32 = iso_sp_map[diff_p]
-                lines.append(f'        if "{diff_32}" in idx and getattr(mp, "isotopes", False):')
-                for coeff_r, _, r_tgt in r_parents:
-                    if r_tgt in iso_sp_map:
-                        r_tgt_32 = iso_sp_map[r_tgt]
-                        lines.append(f'            J[:, idx["{r_tgt_32}"], idx["{diff_32}"]] -= {coeff_r} * {d_var}')
-                for coeff_p, _, p_tgt in p_parents:
-                    if p_tgt in iso_sp_map:
-                        p_tgt_32 = iso_sp_map[p_tgt]
-                        lines.append(f'            J[:, idx["{p_tgt_32}"], idx["{diff_32}"]] += {coeff_p} * {d_var}')
+            if iso_sp_map:
+                iso_r_candidates = [
+                    (c, s, self.validator.get_parent_species(s))
+                    for c, s in reactants
+                    if self.validator.get_parent_species(s) in iso_sp_map
+                ]
+                if iso_r_candidates:
+                    iso_master_parent = iso_r_candidates[0][2]
+                    iso_master = iso_sp_map[iso_master_parent]
+                    std_name = self.validator.species_defs.get(iso_master_parent, {}).get("isotope_standard", "S")
+                    std_info = getattr(self.validator, "isotope_standards", {}).get(std_name, {})
+                    std_ratio = float(std_info.get("ratio", 0.044162589))
+                    f_iso_default = float(1.0 / (1.0 + std_ratio))
+
+                    if diff_p in iso_sp_map:
+                        diff_iso = iso_sp_map[diff_p]
+                        lines.append(f'        if "{diff_iso}" in idx and getattr(mp, "isotopes", False):')
+                        for coeff_r, _, r_tgt in r_parents:
+                            if r_tgt in iso_sp_map:
+                                r_tgt_iso = iso_sp_map[r_tgt]
+                                lines.append(f'            if "{r_tgt_iso}" in idx:')
+                                lines.append(f'                J[:, idx["{r_tgt_iso}"], idx["{diff_iso}"]] -= {coeff_r} * {d_var}')
+                        for coeff_p, _, p_tgt in p_parents:
+                            if p_tgt in iso_sp_map:
+                                p_tgt_iso = iso_sp_map[p_tgt]
+                                lines.append(f'            if "{p_tgt_iso}" in idx:')
+                                lines.append(f'                J[:, idx["{p_tgt_iso}"], idx["{diff_iso}"]] += {coeff_p} * {d_var}')
+                    else:
+                        lines.append(f'        if "{iso_master}" in idx and getattr(mp, "isotopes", False):')
+                        lines.append(f'            _c_{iso_master} = np.asarray(c["{iso_master}"].value if hasattr(c["{iso_master}"], "value") else c["{iso_master}"])')
+                        lines.append(f'            _f_iso = np.clip(np.where(c_{iso_master_parent} > 1e-12, _c_{iso_master} / (c_{iso_master_parent} + 1e-30), {f_iso_default}), 0.5, 1.5)')
+                        for coeff_r, _, r_tgt in r_parents:
+                            if r_tgt in iso_sp_map:
+                                r_tgt_iso = iso_sp_map[r_tgt]
+                                lines.append(f'            if "{r_tgt_iso}" in idx:')
+                                lines.append(f'                J[:, idx["{r_tgt_iso}"], idx["{diff_p}"]] -= {coeff_r} * {d_var} * _f_iso')
+                        for coeff_p, _, p_tgt in p_parents:
+                            if p_tgt in iso_sp_map:
+                                p_tgt_iso = iso_sp_map[p_tgt]
+                                lines.append(f'            if "{p_tgt_iso}" in idx:')
+                                lines.append(f'                J[:, idx["{p_tgt_iso}"], idx["{diff_p}"]] += {coeff_p} * {d_var} * _f_iso')
 
         lines.append('')
         return lines
