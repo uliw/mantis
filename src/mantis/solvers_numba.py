@@ -107,6 +107,72 @@ def compute_species_residual_linf(
     return max_ratio
 
 
+@nb.njit
+def compute_fractional_trust_region_alpha(
+    u_curr: np.ndarray,
+    delta_u: np.ndarray,
+    scale_vec: np.ndarray,
+    atol_vec: np.ndarray,
+    max_fractional_step: float = 0.5,
+) -> float:
+    """
+    Computes a fractional step limit alpha in (0, 1] to prevent excessive
+    relative state changes in a single Newton iteration:
+      - Depletion (delta_u < 0): bounded by max_fractional_step * (max(u, 0) + atol)
+      - Growth (delta_u > 0):
+          * if established (u >= atol): bounded by max_fractional_step * (u + atol)
+          * if empty cell (u < atol): bounded by max_fractional_step * scale_vec
+    """
+    N, S = u_curr.shape
+    alpha = 1.0
+    for s in range(S):
+        atol_s = atol_vec[s]
+        sc_s = scale_vec[s]
+        for i in range(N):
+            du = delta_u[i, s]
+            if abs(du) > 1e-30:
+                c_val = u_curr[i, s]
+                if du < 0.0:
+                    allowed = max_fractional_step * (max(c_val, 0.0) + atol_s)
+                    ratio = allowed / (-du)
+                else:
+                    base_val = max(c_val, sc_s) if c_val < atol_s else (c_val + atol_s)
+                    allowed = max_fractional_step * base_val
+                    ratio = allowed / du
+                if ratio < alpha:
+                    alpha = ratio
+    return max(alpha, 1e-4)
+
+
+@nb.njit
+def compute_weighted_residual_norm_wrms(
+    R: np.ndarray,
+    inv_dt_diag: np.ndarray,
+    u_curr: np.ndarray,
+    atol_vec: np.ndarray,
+    inner_tol: float,
+) -> float:
+    """
+    Computes component-weighted RMS norm of residual R:
+        sqrt( (1 / (N * S)) * sum_{i, s} ( R_{i, s} / (inv_dt_diag_{i, s} * (inner_tol * |u_{i, s}| + atol_s)) )^2 )
+    """
+    N, S = R.shape
+    sum_sq = 0.0
+    for s in range(S):
+        atol_s = atol_vec[s]
+        for i in range(N):
+            r_val = R[i, s]
+            if np.isnan(r_val) or np.isinf(r_val):
+                return np.inf
+            scale = inv_dt_diag[i, s] * (inner_tol * abs(u_curr[i, s]) + atol_s)
+            if scale <= 1e-30:
+                scale = 1e-30
+            ratio = r_val / scale
+            sum_sq += ratio * ratio
+    return np.sqrt(sum_sq / (N * S))
+
+
+
 @nb.njit(fastmath=True)
 def solve_block_tridiagonal_thomas(
     A: np.ndarray,

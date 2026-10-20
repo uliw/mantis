@@ -123,3 +123,49 @@ def test_solve_block_tridiagonal_thomas_accuracy():
         expected = solve(K, RHS_full).reshape((N, S))
         max_err = np.max(np.abs(out - expected))
         assert max_err < 1e-11, f"Failed for N={N}, S={S}: max_err={max_err}"
+
+
+def test_compute_fractional_trust_region_alpha():
+    """Verify compute_fractional_trust_region_alpha properly bounds excessive steps."""
+    from mantis.solvers_numba import compute_fractional_trust_region_alpha
+
+    N, S = 10, 3
+    u_curr = np.ones((N, S), dtype=np.float64) * 10.0
+    delta_u = np.zeros((N, S), dtype=np.float64)
+    scale_vec = np.array([10.0, 10.0, 10.0], dtype=np.float64)
+    atol_vec = np.array([1e-6, 1e-6, 1e-6], dtype=np.float64)
+
+    # 1. Zero change -> alpha = 1.0
+    alpha = compute_fractional_trust_region_alpha(u_curr, delta_u, scale_vec, atol_vec, max_fractional_step=0.5)
+    assert alpha == 1.0
+
+    # 2. Moderate change (delta_u = -2.0, which is 20% of 10.0) -> under 50% limit -> alpha = 1.0
+    delta_u[0, 0] = -2.0
+    alpha = compute_fractional_trust_region_alpha(u_curr, delta_u, scale_vec, atol_vec, max_fractional_step=0.5)
+    assert alpha == 1.0
+
+    # 3. Excessive depletion (delta_u = -10.0, 100% depletion) -> limited to 0.5 * 10 / 10 = 0.5
+    delta_u[0, 0] = -10.0
+    alpha = compute_fractional_trust_region_alpha(u_curr, delta_u, scale_vec, atol_vec, max_fractional_step=0.5)
+    assert alpha == pytest.approx(0.5, rel=1e-4)
+
+
+def test_compute_weighted_residual_norm_wrms():
+    """Verify compute_weighted_residual_norm_wrms matches reference NumPy calculation."""
+    from mantis.solvers_numba import compute_weighted_residual_norm_wrms
+
+    N, S = 20, 4
+    rng = np.random.default_rng(123)
+    R = rng.uniform(-1.0, 1.0, (N, S))
+    inv_dt = rng.uniform(0.5, 2.0, (N, S))
+    u_curr = rng.uniform(0.1, 10.0, (N, S))
+    atol_vec = np.full(S, 1e-5)
+    inner_tol = 1e-3
+
+    # Reference
+    scale = inv_dt * (inner_tol * np.abs(u_curr) + atol_vec[None, :])
+    expected = float(np.sqrt(np.mean((R / scale) ** 2)))
+
+    val = compute_weighted_residual_norm_wrms(R, inv_dt, u_curr, atol_vec, inner_tol)
+    assert val == pytest.approx(expected, rel=1e-12)
+

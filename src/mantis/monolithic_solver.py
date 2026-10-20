@@ -32,8 +32,10 @@ from .diff_lib import (
 )
 from .live_plot_lib import parse_time_to_seconds, save_final_pdf, write_to_queue_async
 from .solvers_numba import (
+    compute_fractional_trust_region_alpha,
     compute_species_residual_linf,
     compute_species_residual_wrms,
+    compute_weighted_residual_norm_wrms,
     solve_block_tridiagonal_thomas,
 )
 
@@ -426,9 +428,23 @@ class MonolithicNewtonSystem:
         phi_val = np.asarray(mp.phi.value if hasattr(mp.phi, "value") else mp.phi)
         solid_scheme = getattr(mp, "solid_convection_term", "powerlaw")
 
+        newton_atol_base = float(getattr(mp, "newton_atol", 1e-6))
+        species_atol_map = getattr(mp, "species_atol", {})
+        self.atol_vec = np.full(S, newton_atol_base, dtype=np.float64)
+
         for s_idx, s_obj in enumerate(species_struct):
             name = s_obj["name"]
             props = bc_map.get(name, {}) if bc_map is not None else {}
+
+            if name in species_atol_map:
+                self.atol_vec[s_idx] = float(species_atol_map[name])
+            elif "atol" in s_obj:
+                self.atol_vec[s_idx] = float(s_obj["atol"])
+            else:
+                var_val = np.asarray(s_obj["var"].value)
+                max_c = np.max(np.abs(var_val)) if len(var_val) > 0 else 0.0
+                if max_c > 1.0:
+                    self.atol_vec[s_idx] = max(newton_atol_base, 1e-6 * max_c)
 
             is_diss = props.get("type", "dissolved") == "dissolved"
             eff_phi_val = phi_val if is_diss else (1.0 - phi_val)
@@ -484,6 +500,13 @@ class MonolithicNewtonSystem:
         self.u_old = np.zeros((N, S), dtype=np.float64)
         self.J_chem = np.zeros((N, S, S), dtype=np.float64)
 
+        self.scale_vec = np.ones(S, dtype=np.float64)
+        for s_idx in range(S):
+            b0 = self.b_transport[0, s_idx]
+            B0 = self.B_trans[0, s_idx]
+            bc_c = abs(b0 / B0) if B0 != 0 else 0.0
+            self.scale_vec[s_idx] = max(bc_c, 1.0)
+
     def load_state(self) -> None:
         """Loads current concentration state into u_curr and u_old."""
         for s_idx, s_obj in enumerate(self.species_struct):
@@ -494,6 +517,11 @@ class MonolithicNewtonSystem:
                 if hasattr(var, "old")
                 else np.asarray(var.value)
             )
+            max_c = np.max(np.abs(self.u_curr[:, s_idx]))
+            if max_c > 1.0:
+                self.atol_vec[s_idx] = max(self.atol_vec[s_idx], 1e-6 * max_c)
+            if max_c > self.scale_vec[s_idx]:
+                self.scale_vec[s_idx] = max_c
 
     def sync_to_variables(self, u_target: np.ndarray) -> None:
         """Updates CellVariables in-place with u_target."""
@@ -708,12 +736,28 @@ def run_non_steady_state_solver_monolithic(
                             mono_system.D_prime,
                         )
 
-                        # 6. Backtracking line search with non-negativity protection
-                        res_norm_curr = np.sqrt(np.mean(R**2))
-                        alpha = 1.0
+                        # 6. Fractional trust-region limit and backtracking line search
+                        max_frac_step = float(getattr(mp, "newton_max_fractional_step", 0.5))
+                        alpha_trust = compute_fractional_trust_region_alpha(
+                            u_curr,
+                            mono_system.delta_u,
+                            mono_system.scale_vec,
+                            mono_system.atol_vec,
+                            max_frac_step,
+                        )
+                        alpha = alpha_trust
+
+                        is_wrms_ls = (getattr(mp, "newton_line_search_norm", "wrms") == "wrms")
+                        if is_wrms_ls:
+                            res_norm_curr = compute_weighted_residual_norm_wrms(
+                                R, inv_dt, u_curr, mono_system.atol_vec, newton_tol
+                            )
+                        else:
+                            res_norm_curr = np.sqrt(np.mean(R**2))
+
                         u_best = u_curr.copy()
                         min_res_norm = res_norm_curr
-                        best_alpha = 1.0
+                        best_alpha = alpha
 
                         for line_step in range(4):
                             u_trial = u_curr + alpha * mono_system.delta_u
@@ -730,7 +774,13 @@ def run_non_steady_state_solver_monolithic(
                                     r_bulk = np.asarray(r_bulk.value)
                                 R_trial[:, s_idx] -= mono_system.vol * r_bulk
 
-                            res_norm_trial = np.sqrt(np.mean(R_trial**2))
+                            if is_wrms_ls:
+                                res_norm_trial = compute_weighted_residual_norm_wrms(
+                                    R_trial, inv_dt, u_trial, mono_system.atol_vec, newton_tol
+                                )
+                            else:
+                                res_norm_trial = np.sqrt(np.mean(R_trial**2))
+
                             if res_norm_trial < min_res_norm or line_step == 3:
                                 min_res_norm = res_norm_trial
                                 u_best = u_trial
@@ -742,22 +792,22 @@ def run_non_steady_state_solver_monolithic(
 
                         # 7. Check convergence on actual projected step
                         raw_newton_err = 0.0
-                        newton_atol = float(getattr(mp, "newton_atol", 1e-6))
                         is_wrms = (newton_norm == "wrms")
                         for s_idx in range(S):
+                            atol_s = mono_system.atol_vec[s_idx]
                             if is_wrms:
                                 err_s = compute_species_residual_wrms(
                                     u_best[:, s_idx],
                                     u_curr[:, s_idx],
                                     inner_tol=newton_tol,
-                                    atol=newton_atol,
+                                    atol=atol_s,
                                 )
                             else:
                                 err_s = compute_species_residual_linf(
                                     u_best[:, s_idx],
                                     u_curr[:, s_idx],
                                     inner_tol=newton_tol,
-                                    atol=newton_atol,
+                                    atol=atol_s,
                                 )
                             raw_newton_err = max(raw_newton_err, err_s)
 
@@ -778,7 +828,8 @@ def run_non_steady_state_solver_monolithic(
                             )
 
                         res_tol = float(getattr(mp, "newton_res_tol", 1e-12))
-                        if raw_newton_err <= 1.0 or min_res_norm <= res_tol:
+                        res_converged = (min_res_norm <= 1.0) if is_wrms_ls else (min_res_norm <= res_tol)
+                        if raw_newton_err <= 1.0 or res_converged:
                             step_converged = True
                             last_iters = iter_idx
                             break
