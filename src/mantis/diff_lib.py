@@ -2415,3 +2415,126 @@ def compute_carbonate_speciation(c: Any, mp: Any) -> None:
     c.h2s_frac = h_plus / (h_plus + Ka1_H2S)
     mp.hs_frac = c.hs_frac
     mp.h2s_frac = c.h2s_frac
+
+
+def compute_sediment_age(
+    z: Any,
+    w: float | np.ndarray,
+    phi: Any = None,
+    Db: Any = None,
+) -> np.ndarray:
+    """Calculates steady-state mean sediment age profile A(z) [yr].
+
+    Solves the 1D advective-diffusive aging equation for solid sediment particles:
+        d/dz [ -(1 - phi) * Db * dA/dz + (1 - phi) * vs * A ] = 1 - phi
+
+    Physical considerations:
+    - Bioturbation (Db) mixes solid sediment grains, broadening particle age distributions
+      and increasing the mean age of particles near the sediment-water interface (A ~ Lb / w).
+    - Bioirrigation affects only dissolved solute flushing and does not alter solid particle age.
+    - If Db is None or 0, evaluates pure advective burial: A(z) = integral( dz' / vs(z') ).
+    - Compaction is incorporated through the solid volume fraction (1 - phi).
+
+    Parameters
+    ----------
+    z : array-like
+        Sediment depth coordinates [m] or [cm].
+    w : float or array-like
+        Solid sediment burial velocity vs(z) [depth_unit / yr].
+    phi : float or array-like, optional
+        Sediment porosity profile. If None, porosity is assumed uniform (no compaction).
+    Db : float or array-like, optional
+        Bioturbation biodiffusion coefficient profile [depth_unit^2 / yr].
+        If None or all zero, evaluates the unmixed advective integral.
+
+    Returns
+    -------
+    np.ndarray
+        Mean sediment age profile A(z) in [yr].
+    """
+    z_arr = np.asarray(z.value if hasattr(z, "value") else z, dtype=np.float64)
+    N = len(z_arr)
+    if N < 2:
+        return np.zeros_like(z_arr)
+
+    vs = np.asarray(w.value if hasattr(w, "value") else w, dtype=np.float64) if np.ndim(w) > 0 else np.full(N, float(w), dtype=np.float64)
+    phi_raw = phi.value if hasattr(phi, "value") else phi
+    phi_arr = np.asarray(phi_raw, dtype=np.float64) if phi_raw is not None else np.zeros(N)
+    phis = np.maximum(1.0 - phi_arr, 1e-6)
+
+    dz = np.diff(z_arr)
+
+    # If Db is None or all zero: pure advective integration
+    if Db is None:
+        has_db = False
+    else:
+        Db_raw = Db.value if hasattr(Db, "value") else Db
+        Db_arr = np.asarray(Db_raw, dtype=np.float64) if np.ndim(Db_raw) > 0 else np.full(N, float(Db_raw), dtype=np.float64)
+        has_db = np.any(Db_arr > 1e-20)
+
+    if not has_db:
+        age = np.zeros(N, dtype=np.float64)
+        inv_v = 1.0 / np.maximum(vs, 1e-20)
+        inv_v_mid = 0.5 * (inv_v[:-1] + inv_v[1:])
+        age[1:] = np.cumsum(inv_v_mid * dz)
+        return age
+
+    # Cell control widths h
+    h = np.zeros(N, dtype=np.float64)
+    h[0] = 0.5 * dz[0]
+    h[-1] = 0.5 * dz[-1]
+    h[1:-1] = 0.5 * (dz[:-1] + dz[1:])
+
+    # Face properties
+    phis_f = 0.5 * (phis[:-1] + phis[1:])
+    Db_f = 0.5 * (Db_arr[:-1] + Db_arr[1:])
+    vs_f = 0.5 * (vs[:-1] + vs[1:])
+
+    d_f = phis_f * Db_f / dz
+    v_f = phis_f * vs_f
+
+    # Tridiagonal system: diag_l (subdiagonal), diag_m (main), diag_u (superdiagonal)
+    diag_l = np.zeros(N - 1, dtype=np.float64)
+    diag_m = np.zeros(N, dtype=np.float64)
+    diag_u = np.zeros(N - 1, dtype=np.float64)
+    rhs = np.zeros(N, dtype=np.float64)
+
+    # Top boundary i=0: zero incoming age flux
+    diag_m[0] = -(d_f[0] + v_f[0])
+    diag_u[0] = d_f[0]
+    rhs[0] = -phis[0] * h[0]
+
+    # Interior cells i=1..N-2
+    for i in range(1, N - 1):
+        diag_l[i - 1] = d_f[i - 1] + v_f[i - 1]
+        diag_m[i] = -(d_f[i - 1] + d_f[i] + v_f[i])
+        diag_u[i] = d_f[i]
+        rhs[i] = -phis[i] * h[i]
+
+    # Bottom boundary i=N-1: dA/dz = 1 / vs
+    diag_l[N - 2] = -1.0 / dz[-1]
+    diag_m[N - 1] = 1.0 / dz[-1]
+    rhs[N - 1] = 1.0 / np.maximum(vs[-1], 1e-20)
+
+    # Solve tridiagonal system using Thomas algorithm
+    c_prime = np.zeros(N - 1, dtype=np.float64)
+    d_prime = np.zeros(N, dtype=np.float64)
+
+    c_prime[0] = diag_u[0] / diag_m[0]
+    d_prime[0] = rhs[0] / diag_m[0]
+
+    for i in range(1, N - 1):
+        denom = diag_m[i] - diag_l[i - 1] * c_prime[i - 1]
+        c_prime[i] = diag_u[i] / denom
+        d_prime[i] = (rhs[i] - diag_l[i - 1] * d_prime[i - 1]) / denom
+
+    denom_end = diag_m[N - 1] - diag_l[N - 2] * c_prime[N - 2]
+    d_prime[N - 1] = (rhs[N - 1] - diag_l[N - 2] * d_prime[N - 2]) / denom_end
+
+    age = np.zeros(N, dtype=np.float64)
+    age[N - 1] = d_prime[N - 1]
+    for i in range(N - 2, -1, -1):
+        age[i] = d_prime[i] - c_prime[i] * age[i + 1]
+
+    return np.maximum(age, 0.0)
+

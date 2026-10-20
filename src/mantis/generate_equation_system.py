@@ -117,18 +117,26 @@ class ReactionSystemValidator:
             extracted = {}
             for node in ast.walk(tree):
                 if isinstance(node, ast.Assign):
-                    for target in node.targets:
-                        if isinstance(target, ast.Subscript):
-                            if isinstance(target.value, ast.Name) and target.value.id == "limiters":
-                                if isinstance(target.slice, ast.Constant) and isinstance(target.slice.value, str):
-                                    expr_code = ast.unparse(node.value) if hasattr(ast, "unparse") else ""
-                                    extracted[target.slice.value] = expr_code
-                        elif isinstance(target, ast.Name) and target.id == "limiters":
-                            if isinstance(node.value, ast.Dict):
-                                for k_node, v_node in zip(node.value.keys, node.value.values):
-                                    if isinstance(k_node, ast.Constant) and isinstance(k_node.value, str):
-                                        expr_code = ast.unparse(v_node) if hasattr(ast, "unparse") else ""
-                                        extracted[k_node.value] = expr_code
+                    targets = node.targets
+                    val_node = node.value
+                elif isinstance(node, ast.AnnAssign):
+                    targets = [node.target]
+                    val_node = node.value
+                else:
+                    continue
+
+                for target in targets:
+                    if isinstance(target, ast.Subscript):
+                        if isinstance(target.value, ast.Name) and target.value.id == "limiters":
+                            if isinstance(target.slice, ast.Constant) and isinstance(target.slice.value, str):
+                                expr_code = ast.unparse(val_node) if hasattr(ast, "unparse") and val_node is not None else ""
+                                extracted[target.slice.value] = expr_code
+                    elif isinstance(target, ast.Name) and target.id == "limiters":
+                        if isinstance(val_node, ast.Dict):
+                            for k_node, v_node in zip(val_node.keys, val_node.values):
+                                if isinstance(k_node, ast.Constant) and isinstance(k_node.value, str):
+                                    expr_code = ast.unparse(v_node) if hasattr(ast, "unparse") else ""
+                                    extracted[k_node.value] = expr_code
             return extracted
 
         raw_limiters: Dict[str, str] = {}
@@ -1601,7 +1609,8 @@ class EquationSystemGenerator:
         lines = [
             f'    # Reaction: {r_name} ({r.get("reaction", "")})',
             f'    if {" and ".join(conds)}:',
-            f'        k_num_{r_name} = float(mp.k.get("{k_name}") if hasattr(mp, "k") else getattr(k, "{k_name}", 0.0))',
+            f'        _raw_k_{r_name} = mp.k.get("{k_name}") if hasattr(mp, "k") else getattr(k, "{k_name}", 0.0)',
+            f'        k_num_{r_name} = np.asarray(_raw_k_{r_name}, dtype=np.float64) if np.ndim(_raw_k_{r_name}) > 0 else float(_raw_k_{r_name})',
         ]
         for p in sorted(all_needed_parents):
             lines.append(f'        c_{p} = np.asarray(c["{p}"].value if hasattr(c["{p}"], "value") else c["{p}"])')
