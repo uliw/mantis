@@ -1,0 +1,110 @@
+#+TITLE: Numerical Time-Stepping, Monolithic Newton Convergence, and Time-Step Governor Methods
+#+STARTUP: showall shrink inlineimages
+#+OPTIONS: todo:nil tasks:nil tags:nil toc:nil
+#+EXCLUDE_TAGS: noexport answer
+#+latex_compiler: lualatex
+#+LATEX_CLASS: koma-article
+#+latex_class_options: [11pt,letter]
+#+latex_header: \newlength\bibitemsep
+#+latex_header: \hypersetup{colorlinks=true,linkcolor=Navy,filecolor=Navy,urlcolor=Navy,citecolor=Navy,anchorcolor=Navy}
+
+#+latex: \maketitle
+
+* Numerical Methods: Monolithic ADR Solver and Adaptive Time-Step Governor
+
+** Governing 1D Coupled Reactive-Transport Equations
+
+In MANTIS, the transient spatial-temporal evolution of $S$ interacting dissolved and particulate species across a 1D sediment column is governed by the coupled advection-diffusion-reaction (ADR) conservation equations:
+
+$$\frac{\partial (\phi_{\text{eff}, s} C_s)}{\partial t} = -\frac{\partial}{\partial z} \left( v_s \phi_{\text{eff}, s} C_s \right) + \frac{\partial}{\partial z} \left( \phi_{\text{eff}, s} D_{\text{eff}, s} \frac{\partial C_s}{\partial z} + \alpha_{\text{irr}, s} (C_{s, 0} - C_s) \right) + R_s(C_1, C_2, \dots, C_S)$$
+
+where $C_s(z, t)$ is the concentration of species $s$ ($\text{mol} \cdot \text{m}^{-3}$), $\phi_{\text{eff}, s}$ is the effective phase volume fraction ($\phi$ for porewater solutes, $1 - \phi$ for solid particulates), $v_s$ is the physical advective/sedimentation velocity, $D_{\text{eff}, s}$ is the total effective diffusion/dispersion/bioturbation coefficient, $\alpha_{\text{irr}, s}$ is the nonlocal bioirrigation coefficient, and $R_s$ is the net rate of production or consumption resulting from the coupled biogeochemical reaction network.
+
+Spatial discretization across a non-uniform 1D staggered finite-volume mesh of $N$ cells yields a system of coupled differential-algebraic equations. Discretizing time implicitly via the Backward Euler scheme for unconditional numerical stability over large diagenetic timescales ($t \sim 10^2 - 10^5\ \text{yr}$) gives the discrete algebraic residual vector $\mathbf{F}(\mathbf{U}^{n+1}) = \mathbf{0}$ for the state vector $\mathbf{U}^{n+1} \in \mathbb{R}^{N \times S}$:
+
+$$\mathbf{F}_i(\mathbf{U}^{n+1}) = \frac{\phi_{\text{eff}, i} V_i}{\Delta t_n} \left(\mathbf{U}_i^{n+1} - \mathbf{U}_i^n\right) + \mathbf{T}_i(\mathbf{U}^{n+1}) - \mathbf{b}_i - V_i \mathbf{R}_i(\mathbf{U}^{n+1}) = \mathbf{0} \quad (i = 1, \dots, N)$$
+
+where $V_i$ is cell volume, $\mathbf{T}_i$ is the linear inter-cell transport operator (advection, diffusion, irrigation), $\mathbf{b}_i$ encodes boundary fluxes, and $\mathbf{R}_i$ is the vector of net reaction rates evaluated at cell $i$.
+
+** Monolithic Block Newton-Raphson Solver
+
+The coupled nonlinear system $\mathbf{F}(\mathbf{U}) = \mathbf{0}$ is solved monolithically using a block Newton-Raphson scheme with exact analytical chemical Jacobian sub-blocks:
+
+$$\mathbf{J}(\mathbf{U}^{(k)}) \cdot \delta \mathbf{U}^{(k)} = -\mathbf{F}(\mathbf{U}^{(k)})$$
+
+$$\mathbf{U}^{(k+1)} = \mathbf{U}^{(k)} + \alpha \cdot \delta \mathbf{U}^{(k)}$$
+
+where $k$ is the Newton iteration index, $\mathbf{J} \in \mathbb{R}^{(N \cdot S) \times (N \cdot S)}$ is the global Jacobian, and $\alpha \in (0, 1]$ is a line-search damping factor. 
+
+Because spatial transport in 1D couples only adjacent cells ($i-1, i, i+1$), the global Jacobian exhibits a block-tridiagonal sparsity structure where each block is of size $S \times S$:
+
+$$\mathbf{A}_i \delta \mathbf{U}_{i-1} + \mathbf{B}_i \delta \mathbf{U}_i + \mathbf{C}_i \delta \mathbf{U}_{i+1} = -\mathbf{F}_i \quad (i = 1, \dots, N)$$
+
+$$\mathbf{B}_i = \left(\frac{\phi_{\text{eff}, i} V_i}{\Delta t} \mathbf{I} + \mathbf{T}_{i, \text{diag}}\right) - V_i \frac{\partial \mathbf{R}_i}{\partial \mathbf{U}_i}$$
+
+The off-diagonal coupling between different chemical species sits entirely inside the diagonal block $\mathbf{B}_i$ via the chemical Jacobian $\frac{\partial \mathbf{R}_i}{\partial \mathbf{U}_i}$. This coupled linear block system is inverted in $\mathcal{O}(N \cdot S^3)$ operations using an in-place, Numba-compiled Block Tridiagonal Matrix Algorithm (Block TDMA / Block Thomas algorithm; Patankar, 1980), eliminating iterative linear solver residual overhead.
+
+** Component-Weighted Convergence Criteria for Multi-Scale Systems
+
+Marine diagenetic systems encompass concentrations spanning up to 9 orders of magnitude, ranging from abundant solid matrix phases (e.g., sedimentary $\text{CaCO}_3$ at $50\ \text{wt}\% \approx 1.3 \times 10^4\ \text{mol} \cdot \text{m}^{-3}$) to macro-ions ($\text{SO}_4^{2-}, \text{Ca}^{2+} \sim 10 - 30\ \text{mol} \cdot \text{m}^{-3}$), dissolved intermediates ($\text{TA}, \text{DIC} \sim 2\ \text{mol} \cdot \text{m}^{-3}$), and trace porewater species ($\text{Fe}^{2+}, \text{H}_2\text{S} \sim 10^{-3}\ \text{mol} \cdot \text{m}^{-3}; [\text{H}^+] \sim 10^{-5}\ \text{mol} \cdot \text{m}^{-3}$).
+
+In such systems:
+1. *Unscaled absolute norms* ($\|\delta \mathbf{U}\|_2$) are completely dominated by high-concentration species, rendering the solver insensitive to large relative errors in critical trace reactants.
+2. *Pure relative norms* ($\delta U_s / U_s$) suffer from zero-crossing singularities ($\Delta t \to 0$ choking) near advancing reaction fronts or depleted zones where $U_s \to 0$.
+
+To resolve this, MANTIS employs a mixed relative-absolute error norm (Hairer & Wanner, 1996; Hindmarsh et al., 2005) with a vectorized absolute error floor $\mathbf{ATOL} \in \mathbb{R}^S$:
+
+$$\text{scale}_{i, s} = \text{RTOL} \cdot |U_{i, s}^{(k)}| + \text{ATOL}_s$$
+
+$$\text{ATOL}_s = \max \left( \text{ATOL}_{\text{base}}, \; 10^{-6} \cdot C_{s, \text{nominal}} \right)$$
+
+where $\text{RTOL}$ is the relative convergence tolerance (typically $10^{-3}$), $\text{ATOL}_{\text{base}} = 10^{-6}\ \text{mol} \cdot \text{m}^{-3}$ provides the floor for trace dissolved species, and $C_{s, \text{nominal}}$ reflects the physical scale of abundant minerals.
+
+Convergence of the Newton iteration is assessed on the component-wise weighted root-mean-square (WRMS) or $L_\infty$ error of the step increment:
+
+$$\text{Err}_s = \sqrt{\frac{1}{N} \sum_{i=1}^N \left( \frac{\delta U_{i, s}^{(k)}}{\text{scale}_{i, s}} \right)^2} \quad \text{or} \quad \text{Err}_s = \max_{1 \le i \le N} \left( \frac{|\delta U_{i, s}^{(k)}|}{\text{scale}_{i, s}} \right)$$
+
+$$\text{Err} = \max_{1 \le s \le S} \left( \text{Err}_s \right) \le 1.0$$
+
+A Newton step is declared converged when $\text{Err} \le 1.0$, guaranteeing that every individual chemical species simultaneously satisfies its required relative and absolute tolerances across all depth cells.
+
+** Backtracking Line Search and Non-Negativity Safeguards
+
+To prevent unconstrained linear Newton steps from overshooting steep geochemical thresholds (such as mineral saturation horizons $\Omega = [\text{Ca}^{2+}][\text{CO}_3^{2-}] / K'_{sp} = 1.0$) or predicting unphysical negative concentrations, each Newton iteration employs a backtracking line search:
+
+1. The full Newton tangent step ($\alpha = 1.0$) is evaluated first to preserve asymptotic quadratic convergence ($\sim 1 - 2$ iterations per step in smooth regimes).
+2. Physical non-negativity is enforced via continuous projection: if $U_{i, s}^{(k)} + \alpha \delta U_{i, s}^{(k)} < 0$, the update is truncated to $0.1 \cdot U_{i, s}^{(k)}$ for active species or zero for trace pools.
+3. If the candidate update fails to decrease the physical residual norm ($\|\mathbf{F}(\mathbf{U}_{\text{trial}})\| \ge \|\mathbf{F}(\mathbf{U}_{\text{curr}})\|$), the step is iteratively backtracked ($\alpha \leftarrow 0.5 \alpha$, up to 4 line-search levels) before committing the state.
+
+** Adaptive Time-Step Governor ($\Delta t$ Controller)
+
+The global simulation time step $\Delta t_n$ is dynamically adapted by an iteration-count governor based on the convergence efficiency of the Newton solver. Let $k_{\text{iter}}$ be the number of Newton iterations required to achieve convergence at step $n$:
+
+$$\Delta t_{n+1} = \begin{cases} 
+\min \left( \Delta t_n \cdot f_{\text{grow}}, \; \Delta t_{\max} \right) & \text{if } k_{\text{iter}} \le k_{\text{optimal}} \quad (k_{\text{optimal}} = 3, f_{\text{grow}} = 1.20) \\
+\min \left( \Delta t_n \cdot 1.05, \; \Delta t_{\max} \right) & \text{if } k_{\text{optimal}} < k_{\text{iter}} \le k_{\text{acceptable}} \quad (k_{\text{acceptable}} = 6) \\
+\max \left( \Delta t_n \cdot 0.85, \; \Delta t_{\min} \right) & \text{if } k_{\text{iter}} > k_{\text{acceptable}} \quad (\text{sluggish convergence damping})
+\end{cases}$$
+
+If the Newton iteration fails to satisfy the convergence tolerance within the maximum permitted iterations ($k_{\max} = 8 - 12$):
+1. The candidate step is rejected.
+2. The concentration state is reverted to the previously converged solution ($\mathbf{U}^n$).
+3. The time step is cut aggressively:
+   $$\Delta t \leftarrow \max \left( \Delta t \cdot f_{\text{cut}}, \; \Delta t_{\min} \right) \quad (f_{\text{cut}} = 0.50)$$
+4. The step is retried from $\mathbf{U}^n$ at the reduced $\Delta t$.
+
+** Steady-State Termination Criterion
+
+For simulations advancing toward a diagenetic steady state, temporal invariance is evaluated using a grid-independent, volume-weighted $L_2$ norm of the state change over each accepted step:
+
+$$\Delta_{\text{ss}} = \max_{1 \le s \le S} \left( \sqrt{ \sum_{i=1}^N \frac{V_i}{\sum_{j=1}^N V_j} \left( U_{i, s}^{n+1} - U_{i, s}^n \right)^2 } \right)$$
+
+When $\Delta_{\text{ss}} < \text{TOL}_{\text{ss}}$ (typically $10^{-7} - 10^{-5}\ \text{mol} \cdot \text{m}^{-3}$) for consecutive steps, temporal derivatives satisfy $\frac{\partial C_s}{\partial t} \approx 0$, and the simulation terminates with exact physical mass conservation.
+
+** References
+
+- **Hairer, E., & Wanner, G. (1996).** *Solving Ordinary Differential Equations II: Stiff and Differential-Algebraic Problems.* Springer-Verlag, Berlin.
+- **Hindmarsh, A. C., Brown, P. N., Grant, K. E., Lee, S. L., Serban, R., Shumaker, D. E., & Woodward, C. S. (2005).** SUNDIALS: Suite of nonlinear and differential/algebraic equation solvers. *ACM Transactions on Mathematical Software (TOMS)*, 31(3), 363-396.
+- **Jourabchi, P., Van Cappellen, P., & Regnier, P. (2005).** Quantitative interpretation of pH distributions in aquatic sediments: A reactive transport modeling approach. *American Journal of Science*, 305(9), 919-956.
+- **Patankar, S. V. (1980).** *Numerical Heat Transfer and Fluid Flow.* Hemisphere Publishing Corporation, New York.
+- **Steefel, C. I., Appelo, C. A. J., Arora, B., et al. (2015).** Reactive transport codes for subsurface environmental simulation. *Computational Geosciences*, 19(3), 445-478.
