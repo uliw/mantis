@@ -736,18 +736,8 @@ def run_non_steady_state_solver_monolithic(
                             mono_system.D_prime,
                         )
 
-                        # 6. Fractional trust-region limit and backtracking line search
-                        max_frac_step = float(getattr(mp, "newton_max_fractional_step", 0.5))
-                        alpha_trust = compute_fractional_trust_region_alpha(
-                            u_curr,
-                            mono_system.delta_u,
-                            mono_system.scale_vec,
-                            mono_system.atol_vec,
-                            max_frac_step,
-                        )
-                        alpha = alpha_trust
-
-                        is_wrms_ls = (getattr(mp, "newton_line_search_norm", "wrms") == "wrms")
+                        # 6. Backtracking line search with non-negativity protection
+                        is_wrms_ls = (getattr(mp, "newton_line_search_norm", "l2") == "wrms")
                         if is_wrms_ls:
                             res_norm_curr = compute_weighted_residual_norm_wrms(
                                 R, inv_dt, u_curr, mono_system.atol_vec, newton_tol
@@ -755,9 +745,10 @@ def run_non_steady_state_solver_monolithic(
                         else:
                             res_norm_curr = np.sqrt(np.mean(R**2))
 
+                        alpha = 1.0
                         u_best = u_curr.copy()
                         min_res_norm = res_norm_curr
-                        best_alpha = alpha
+                        best_alpha = 1.0
 
                         for line_step in range(4):
                             u_trial = u_curr + alpha * mono_system.delta_u
@@ -828,7 +819,7 @@ def run_non_steady_state_solver_monolithic(
                             )
 
                         res_tol = float(getattr(mp, "newton_res_tol", 1e-12))
-                        res_converged = (min_res_norm <= 1.0) if is_wrms_ls else (min_res_norm <= res_tol)
+                        res_converged = (min_res_norm <= 1e-6) if is_wrms_ls else (min_res_norm <= res_tol)
                         if raw_newton_err <= 1.0 or res_converged:
                             step_converged = True
                             last_iters = iter_idx
