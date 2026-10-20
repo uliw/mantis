@@ -31,9 +31,7 @@ reaction_parameters = {
     # Isotope fractionation factors
     "msr_alpha": 1.07,
     "TS2_O2_alpha": 0.995,
-    "S0_O2_alpha": 1.0,
     "dispro_hs_alpha": 0.993,
-    "dispro_SO4_hs_split": 3.0,
     "h2s_hs_alpha": 0.99991542,
     # Primary respiration stoichiometry
     "POC_O2_ratio": 1.27,
@@ -120,9 +118,6 @@ reactions = [
         "k_value_name": "TS2_O2",
         "limiters": ["O2_TS2"],
         "isotope_species": {"SO4": "SO4_32", "TS2": "TS2_32", "HS": "HS_32"},
-        "isotope_fractionation": {
-            "HS_32 to S0_32": ["TS2_O2_alpha", "TS2_alpha_explicit"]
-        },
     },
     {
         "reaction_name": "sulfide_mediated_iron_reduction_velde",

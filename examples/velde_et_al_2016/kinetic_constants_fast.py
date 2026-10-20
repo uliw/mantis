@@ -43,16 +43,7 @@ def get_reaction_constants(
             "dimensionless",
             "dimensionless",
         ],  # sorbed vs Fe2+ Fe2+ liq.
-        "FeS2_O2": [
-            1e-10,
-            "m^3/(mol*second)",
-            "m^3/(mol*second)",
-        ],  # FeS2 + O2 -> SO4, Halevy et al
-        "FeS_S0": [  # FeS + S0 -> FeS2
-            5e-8,
-            "m^3/(mol*second)",
-            "m^3/(mol*second)",
-        ],  # FeS + HS -> FeS2
+        # FeS + HS -> FeS2
         "FeS_TS2": [
             5e-8,
             "m^3/(mol*second)",
@@ -69,7 +60,6 @@ def get_reaction_constants(
         "FeS_O2": [1e7, "cm^3/(umol*year)", "m^3/(mol*second)"],
         "Fe2_O2": [1e7, "cm^3/(umol*year)", "m^3/(mol*second)"],
         # "Fe2p_ox": [1e73, "cm^3/(umol*year)", "m^3/(mol*second)"],
-        "S0_O2": [4e7, "cm^3/(umol*year)", "m^3/(mol*second)"],
         # Iron sulfide reactions after Velde at eal 2016
         "FeS_isp": [
             1e4,
@@ -82,8 +72,6 @@ def get_reaction_constants(
             "mol/l",
             "mol/m^3 ",
         ],
-        # S0 disproportionation rate (first-order in S0)
-        "S0_dispro": [50, "1/year", "1/second"],
         # Monod half-saturation & inhibition thresholds
         "K_O2": [0.001, "umol/cm^3", "mol/m^3"],
         "K_O2_TS2": [0.001, "umol/cm^3", "mol/m^3"],

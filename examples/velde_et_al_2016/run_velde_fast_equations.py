@@ -60,8 +60,6 @@ def get_limiters(c, mp):
     limiters["Fe3_diss_red_inhib"] = limiters["Fe3_diss_red_inhibit"]
     _l_SO4_alpha_explicit = c.SO4 / (c.SO4 + 1e-3)
     limiters["SO4_alpha_explicit"] = _l_SO4_alpha_explicit
-    _l_TS2_alpha_explicit = c.TS2 / (c.TS2 + 1e-3)
-    limiters["TS2_alpha_explicit"] = _l_TS2_alpha_explicit
     return limiters
 
 # -----------------------------------------------------------------------------
@@ -229,11 +227,7 @@ def rxn_hs_oxidation(c, k_val, lim, LHS, RHS, RATES, CROSS, mp):
         ref_species="TS2", stoich_ref=1.0,
     )
     if getattr(mp, "isotopes", False):
-        _coeff_base_iso = k_num * mp.hs_frac * getattr(c, "O2") * _lim_O2_TS2
-        _alpha = 1.0 + (getattr(mp, "TS2_O2_alpha", 1.0) - 1.0) * lim.get("TS2_alpha_explicit", 1.0)
-        coeff_master_iso = calculate_fractionated_rate_coeff(
-            _coeff_base_iso, getattr(c, "TS2"), getattr(c, "TS2_32"), _alpha, eps=1e-30
-        )
+        coeff_master_iso = k_num * mp.hs_frac * getattr(c, "O2") * _lim_O2_TS2
         add_coupled_reaction(
             CROSS=CROSS, LHS=LHS, RATES=RATES, mp=mp,
             master_species={"TS2_32": 1.0},
@@ -535,7 +529,8 @@ def compute_chemical_jacobian(c, mp, k, species_names):
 
     # Reaction: aerobic_respiration_fast (POC_fast + O2 -> CO2)
     if "O2" in idx and "POC_fast" in idx:
-        k_num_aerobic_respiration_fast = float(mp.k.get("POC_fast") if hasattr(mp, "k") else getattr(k, "POC_fast", 0.0))
+        _raw_k_aerobic_respiration_fast = mp.k.get("POC_fast") if hasattr(mp, "k") else getattr(k, "POC_fast", 0.0)
+        k_num_aerobic_respiration_fast = np.asarray(_raw_k_aerobic_respiration_fast, dtype=np.float64) if np.ndim(_raw_k_aerobic_respiration_fast) > 0 else float(_raw_k_aerobic_respiration_fast)
         c_O2 = np.asarray(c["O2"].value if hasattr(c["O2"], "value") else c["O2"])
         c_POC_fast = np.asarray(c["POC_fast"].value if hasattr(c["POC_fast"], "value") else c["POC_fast"])
         _lim_O2 = lim.get("O2_implicit", lim.get("O2", 1.0))
@@ -548,7 +543,8 @@ def compute_chemical_jacobian(c, mp, k, species_names):
 
     # Reaction: aerobic_respiration_slow (POC_slow + O2 -> CO2)
     if "O2" in idx and "POC_slow" in idx:
-        k_num_aerobic_respiration_slow = float(mp.k.get("POC_slow") if hasattr(mp, "k") else getattr(k, "POC_slow", 0.0))
+        _raw_k_aerobic_respiration_slow = mp.k.get("POC_slow") if hasattr(mp, "k") else getattr(k, "POC_slow", 0.0)
+        k_num_aerobic_respiration_slow = np.asarray(_raw_k_aerobic_respiration_slow, dtype=np.float64) if np.ndim(_raw_k_aerobic_respiration_slow) > 0 else float(_raw_k_aerobic_respiration_slow)
         c_O2 = np.asarray(c["O2"].value if hasattr(c["O2"], "value") else c["O2"])
         c_POC_slow = np.asarray(c["POC_slow"].value if hasattr(c["POC_slow"], "value") else c["POC_slow"])
         _lim_O2 = lim.get("O2_implicit", lim.get("O2", 1.0))
@@ -561,7 +557,8 @@ def compute_chemical_jacobian(c, mp, k, species_names):
 
     # Reaction: dissimilatory_iron_reduction_fast (POC_fast + 4 Fe3 -> 4 Fe2_total)
     if "Fe2_total" in idx and "Fe3" in idx and "POC_fast" in idx:
-        k_num_dissimilatory_iron_reduction_fast = float(mp.k.get("POC_fast") if hasattr(mp, "k") else getattr(k, "POC_fast", 0.0))
+        _raw_k_dissimilatory_iron_reduction_fast = mp.k.get("POC_fast") if hasattr(mp, "k") else getattr(k, "POC_fast", 0.0)
+        k_num_dissimilatory_iron_reduction_fast = np.asarray(_raw_k_dissimilatory_iron_reduction_fast, dtype=np.float64) if np.ndim(_raw_k_dissimilatory_iron_reduction_fast) > 0 else float(_raw_k_dissimilatory_iron_reduction_fast)
         c_Fe2_total = np.asarray(c["Fe2_total"].value if hasattr(c["Fe2_total"], "value") else c["Fe2_total"])
         c_Fe3 = np.asarray(c["Fe3"].value if hasattr(c["Fe3"], "value") else c["Fe3"])
         c_POC_fast = np.asarray(c["POC_fast"].value if hasattr(c["POC_fast"], "value") else c["POC_fast"])
@@ -578,7 +575,8 @@ def compute_chemical_jacobian(c, mp, k, species_names):
 
     # Reaction: dissimilatory_iron_reduction_slow (POC_slow + 4 Fe3 -> 4 Fe2_total)
     if "Fe2_total" in idx and "Fe3" in idx and "POC_slow" in idx:
-        k_num_dissimilatory_iron_reduction_slow = float(mp.k.get("POC_slow") if hasattr(mp, "k") else getattr(k, "POC_slow", 0.0))
+        _raw_k_dissimilatory_iron_reduction_slow = mp.k.get("POC_slow") if hasattr(mp, "k") else getattr(k, "POC_slow", 0.0)
+        k_num_dissimilatory_iron_reduction_slow = np.asarray(_raw_k_dissimilatory_iron_reduction_slow, dtype=np.float64) if np.ndim(_raw_k_dissimilatory_iron_reduction_slow) > 0 else float(_raw_k_dissimilatory_iron_reduction_slow)
         c_Fe2_total = np.asarray(c["Fe2_total"].value if hasattr(c["Fe2_total"], "value") else c["Fe2_total"])
         c_Fe3 = np.asarray(c["Fe3"].value if hasattr(c["Fe3"], "value") else c["Fe3"])
         c_POC_slow = np.asarray(c["POC_slow"].value if hasattr(c["POC_slow"], "value") else c["POC_slow"])
@@ -595,7 +593,8 @@ def compute_chemical_jacobian(c, mp, k, species_names):
 
     # Reaction: sulfate_reduction_fast (2 POC_fast + SO4 -> TS2)
     if "POC_fast" in idx and "SO4" in idx and "TS2" in idx:
-        k_num_sulfate_reduction_fast = float(mp.k.get("POC_fast") if hasattr(mp, "k") else getattr(k, "POC_fast", 0.0))
+        _raw_k_sulfate_reduction_fast = mp.k.get("POC_fast") if hasattr(mp, "k") else getattr(k, "POC_fast", 0.0)
+        k_num_sulfate_reduction_fast = np.asarray(_raw_k_sulfate_reduction_fast, dtype=np.float64) if np.ndim(_raw_k_sulfate_reduction_fast) > 0 else float(_raw_k_sulfate_reduction_fast)
         c_POC_fast = np.asarray(c["POC_fast"].value if hasattr(c["POC_fast"], "value") else c["POC_fast"])
         c_SO4 = np.asarray(c["SO4"].value if hasattr(c["SO4"], "value") else c["SO4"])
         c_TS2 = np.asarray(c["TS2"].value if hasattr(c["TS2"], "value") else c["TS2"])
@@ -625,7 +624,8 @@ def compute_chemical_jacobian(c, mp, k, species_names):
 
     # Reaction: sulfate_reduction_slow (2 POC_slow + SO4 -> TS2)
     if "POC_slow" in idx and "SO4" in idx and "TS2" in idx:
-        k_num_sulfate_reduction_slow = float(mp.k.get("POC_slow") if hasattr(mp, "k") else getattr(k, "POC_slow", 0.0))
+        _raw_k_sulfate_reduction_slow = mp.k.get("POC_slow") if hasattr(mp, "k") else getattr(k, "POC_slow", 0.0)
+        k_num_sulfate_reduction_slow = np.asarray(_raw_k_sulfate_reduction_slow, dtype=np.float64) if np.ndim(_raw_k_sulfate_reduction_slow) > 0 else float(_raw_k_sulfate_reduction_slow)
         c_POC_slow = np.asarray(c["POC_slow"].value if hasattr(c["POC_slow"], "value") else c["POC_slow"])
         c_SO4 = np.asarray(c["SO4"].value if hasattr(c["SO4"], "value") else c["SO4"])
         c_TS2 = np.asarray(c["TS2"].value if hasattr(c["TS2"], "value") else c["TS2"])
@@ -655,7 +655,8 @@ def compute_chemical_jacobian(c, mp, k, species_names):
 
     # Reaction: hs_oxidation (1 HS + 2 O2 -> 1 SO4)
     if "O2" in idx and "SO4" in idx and "TS2" in idx:
-        k_num_hs_oxidation = float(mp.k.get("TS2_O2") if hasattr(mp, "k") else getattr(k, "TS2_O2", 0.0))
+        _raw_k_hs_oxidation = mp.k.get("TS2_O2") if hasattr(mp, "k") else getattr(k, "TS2_O2", 0.0)
+        k_num_hs_oxidation = np.asarray(_raw_k_hs_oxidation, dtype=np.float64) if np.ndim(_raw_k_hs_oxidation) > 0 else float(_raw_k_hs_oxidation)
         c_O2 = np.asarray(c["O2"].value if hasattr(c["O2"], "value") else c["O2"])
         c_SO4 = np.asarray(c["SO4"].value if hasattr(c["SO4"], "value") else c["SO4"])
         c_TS2 = np.asarray(c["TS2"].value if hasattr(c["TS2"], "value") else c["TS2"])
@@ -683,7 +684,8 @@ def compute_chemical_jacobian(c, mp, k, species_names):
 
     # Reaction: sulfide_mediated_iron_reduction_velde (HS + 8 Fe3 -> SO4 + 8 Fe2_total)
     if "Fe2_total" in idx and "Fe3" in idx and "SO4" in idx and "TS2" in idx:
-        k_num_sulfide_mediated_iron_reduction_velde = float(mp.k.get("Fe3_hs") if hasattr(mp, "k") else getattr(k, "Fe3_hs", 0.0))
+        _raw_k_sulfide_mediated_iron_reduction_velde = mp.k.get("Fe3_hs") if hasattr(mp, "k") else getattr(k, "Fe3_hs", 0.0)
+        k_num_sulfide_mediated_iron_reduction_velde = np.asarray(_raw_k_sulfide_mediated_iron_reduction_velde, dtype=np.float64) if np.ndim(_raw_k_sulfide_mediated_iron_reduction_velde) > 0 else float(_raw_k_sulfide_mediated_iron_reduction_velde)
         c_Fe2_total = np.asarray(c["Fe2_total"].value if hasattr(c["Fe2_total"], "value") else c["Fe2_total"])
         c_Fe3 = np.asarray(c["Fe3"].value if hasattr(c["Fe3"], "value") else c["Fe3"])
         c_SO4 = np.asarray(c["SO4"].value if hasattr(c["SO4"], "value") else c["SO4"])
@@ -715,7 +717,8 @@ def compute_chemical_jacobian(c, mp, k, species_names):
 
     # Reaction: Fe2_oxidation (4 Fe2_total + O2 -> 4 Fe3)
     if "Fe2_total" in idx and "Fe3" in idx and "O2" in idx:
-        k_num_Fe2_oxidation = float(mp.k.get("Fe2_O2") if hasattr(mp, "k") else getattr(k, "Fe2_O2", 0.0))
+        _raw_k_Fe2_oxidation = mp.k.get("Fe2_O2") if hasattr(mp, "k") else getattr(k, "Fe2_O2", 0.0)
+        k_num_Fe2_oxidation = np.asarray(_raw_k_Fe2_oxidation, dtype=np.float64) if np.ndim(_raw_k_Fe2_oxidation) > 0 else float(_raw_k_Fe2_oxidation)
         c_Fe2_total = np.asarray(c["Fe2_total"].value if hasattr(c["Fe2_total"], "value") else c["Fe2_total"])
         c_Fe3 = np.asarray(c["Fe3"].value if hasattr(c["Fe3"], "value") else c["Fe3"])
         c_O2 = np.asarray(c["O2"].value if hasattr(c["O2"], "value") else c["O2"])
@@ -730,7 +733,8 @@ def compute_chemical_jacobian(c, mp, k, species_names):
 
     # Reaction: FeS_oxidation (4 FeS + 9 O2 -> 4 Fe3 + 4 SO4)
     if "Fe3" in idx and "FeS" in idx and "O2" in idx and "SO4" in idx:
-        k_num_FeS_oxidation = float(mp.k.get("FeS_O2") if hasattr(mp, "k") else getattr(k, "FeS_O2", 0.0))
+        _raw_k_FeS_oxidation = mp.k.get("FeS_O2") if hasattr(mp, "k") else getattr(k, "FeS_O2", 0.0)
+        k_num_FeS_oxidation = np.asarray(_raw_k_FeS_oxidation, dtype=np.float64) if np.ndim(_raw_k_FeS_oxidation) > 0 else float(_raw_k_FeS_oxidation)
         c_Fe3 = np.asarray(c["Fe3"].value if hasattr(c["Fe3"], "value") else c["Fe3"])
         c_FeS = np.asarray(c["FeS"].value if hasattr(c["FeS"], "value") else c["FeS"])
         c_O2 = np.asarray(c["O2"].value if hasattr(c["O2"], "value") else c["O2"])
@@ -869,6 +873,6 @@ def compute_chemical_jacobian(c, mp, k, species_names):
 
 diagenetic_reactions.compute_chemical_jacobian = compute_chemical_jacobian
 
-reaction_parameters = {'msr_alpha': 1.07, 'TS2_O2_alpha': 0.995, 'S0_O2_alpha': 1.0, 'dispro_hs_alpha': 0.993, 'dispro_SO4_hs_split': 3.0, 'h2s_hs_alpha': 0.99991542, 'POC_O2_ratio': 1.27, 'K_epsilon_msr': 0.2, 'K_epsilon_TS2_O2': 0.01}
+reaction_parameters = {'msr_alpha': 1.07, 'TS2_O2_alpha': 0.995, 'dispro_hs_alpha': 0.993, 'h2s_hs_alpha': 0.99991542, 'POC_O2_ratio': 1.27, 'K_epsilon_msr': 0.2, 'K_epsilon_TS2_O2': 0.01}
 
 fractionation_factors = reaction_parameters
