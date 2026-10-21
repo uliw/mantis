@@ -585,6 +585,32 @@ def compute_sigmoidal_db(z, Db0, xL, xbm):
     return Db_z
 
 
+def compute_exponential_db(z, Db0, x_atten):
+    """
+    Compute the bio-diffusivity (Db) with exponential attenuation with depth.
+
+    Db(z) = Db0 * exp(-z / x_atten)
+
+    Parameters
+    ----------
+    z       : float or np.ndarray
+              Depth into the sediment in m
+    Db0     : float
+              Bio-diffusivity coefficient at sediment-water interface (m^2/s)
+    x_atten : float
+              Attenuation depth scale in m
+
+    Returns
+    -------
+    float or np.ndarray
+        The bio-diffusivity at depth z.
+    """
+    if Db0 == 0.0 or x_atten <= 0.0:
+        return np.zeros_like(z, dtype=np.float64)
+    z_arr = np.asarray(z.value if hasattr(z, "value") else z, dtype=np.float64)
+    return Db0 * np.exp(-z_arr / float(x_atten))
+
+
 def compute_bio_irrigation_alpha(z, alpha0, x_irr):
     """
     Compute the bio-irrigation coefficient (alpha) at a specific depth (z).
@@ -687,6 +713,8 @@ def _save_data_to_disk(mp, c, k, species_list, z, D_mol, f_final):
     import pandas as pd
     import pathlib as pl
 
+    update_all_species(c, mp)
+
     data = {"z": z}
 
     def get_v(obj):
@@ -695,26 +723,36 @@ def _save_data_to_disk(mp, c, k, species_list, z, D_mol, f_final):
             return obj.value
         return obj
 
-    # 1. Collect all basic concentrations and rates
-    for species_name in species_list:
-        data[f"c_{species_name}"] = get_v(getattr(c, species_name))
-        res_tuple = getattr(f_final, species_name)
-        data[f"f_{species_name}"] = get_v(res_tuple[2])
+    species_defs = getattr(mp, "species_defs", None) or getattr(mp, "species", None)
+    if isinstance(species_defs, dict):
+        all_species = list(species_defs.keys())
+    else:
+        all_species = list(species_list)
+
+    # 1. Collect all basic concentrations and rates across all defined species
+    for species_name in all_species:
+        if hasattr(c, species_name):
+            data[f"c_{species_name}"] = get_v(getattr(c, species_name))
+        res_tuple = getattr(f_final, species_name, None)
+        if res_tuple is not None and hasattr(res_tuple, "__len__") and len(res_tuple) > 2 and res_tuple[2] is not None:
+            data[f"f_{species_name}"] = get_v(res_tuple[2])
+        elif f"c_{species_name}" in data:
+            data[f"f_{species_name}"] = np.zeros(len(z))
 
     # Export process-specific rates dynamically
     for key in f_final.keys():
-        if key not in species_list:
+        if key not in all_species:
             res_tuple = getattr(f_final, key)
-            data[f"f_{key}"] = get_v(res_tuple[2])
+            if res_tuple is not None and hasattr(res_tuple, "__len__") and len(res_tuple) > 2:
+                data[f"f_{key}"] = get_v(res_tuple[2])
 
     # 2. Save all items in D_mol (diffusion coefficients)
     for d_name, d_val in D_mol.items():
-        key = f"D_{d_name}" if d_name in species_list else d_name
+        key = f"D_{d_name}" if (d_name in all_species or d_name in species_list) else d_name
         data[key] = get_v(d_val)
 
     # 3. Calculate delta values dynamically for all isotope companions
     phi_val = data.get("phi", getattr(mp, "phi", None))
-    species_defs = getattr(mp, "species_defs", None) or getattr(mp, "species", None)
     iso_stds = getattr(mp, "isotope_standards", {})
 
     if isinstance(species_defs, dict):
@@ -784,8 +822,13 @@ def _save_data_to_disk(mp, c, k, species_list, z, D_mol, f_final):
             ksp_val = float(mp.Ksp_calcite)
             data["Omega_calcite"] = (data["c_Ca2"] * data["c_CO3"]) / (ksp_val + 1e-30)
 
-    data["w"] = np.ones(len(z)) * mp.w
-    data["phi"] = np.ones(len(z)) * mp.phi
+    phi_raw = get_v(getattr(mp, "phi", 0.8))
+    phi_arr = np.asarray(phi_raw, dtype=np.float64)
+    data["phi"] = phi_arr if phi_arr.ndim > 0 and len(phi_arr) == len(z) else np.full(len(z), float(phi_arr))
+
+    w_raw = get_v(getattr(mp, "w", 0.0))
+    w_arr = np.asarray(w_raw, dtype=np.float64)
+    data["w"] = w_arr if w_arr.ndim > 0 and len(w_arr) == len(z) else np.full(len(z), float(w_arr))
 
     df = pd.DataFrame(data)
     # Ensure no NaN from misalignment by strictly using the same structure
@@ -795,14 +838,21 @@ def _save_data_to_disk(mp, c, k, species_list, z, D_mol, f_final):
     return df, fqfn
 
 
-def save_state(c, filename):
+def save_state(c, filename, mp=None):
     """
     Save the current concentration profiles (state) to a compressed numpy file.
 
     :param c: data_container containing species as CellVariables
     :param filename: Path to save the NPZ file
+    :param mp: optional parameter container to update dynamic equilibrium species first
     """
     from pathlib import Path
+
+    if mp is not None:
+        try:
+            update_all_species(c, mp)
+        except Exception:
+            pass
 
     path = Path(filename)
     if path.exists():
@@ -812,6 +862,8 @@ def save_state(c, filename):
     for key, var in c.items():
         if hasattr(var, "value"):
             state_dict[key] = var.value
+        elif isinstance(var, np.ndarray):
+            state_dict[key] = var
 
     np.savez_compressed(filename, **state_dict)
     print(f"State saved to {filename}")
@@ -2391,6 +2443,22 @@ def compute_carbonate_speciation(c: Any, mp: Any) -> None:
     h_plus = (-b + np.sqrt(disc)) / (2.0 * a)
     h_plus = np.maximum(h_plus, 1e-14)
 
+    # Account for sulfide alkalinity if TS2 is present
+    Ka1_H2S = 10.0 ** (-float(getattr(mp, "pKa1_H2S", 7.0)))
+    ts2_raw = getattr(c, "TS2", None)
+    if ts2_raw is not None:
+        ts2_val = np.asarray(ts2_raw.value if hasattr(ts2_raw, "value") else ts2_raw, dtype=np.float64)
+        if np.any(ts2_val > 1e-12):
+            for _ in range(3):
+                hs_alk = ts2_val * (Ka1_H2S / (h_plus + Ka1_H2S))
+                ta_carb = np.maximum(ta_val - hs_alk, 1e-12)
+                a = ta_carb
+                b = K1 * (ta_carb - dic_val)
+                c_term = K1 * K2 * (ta_carb - 2.0 * dic_val)
+                disc = np.maximum(b**2 - 4.0 * a * c_term, 0.0)
+                h_plus = (-b + np.sqrt(disc)) / (2.0 * a)
+                h_plus = np.maximum(h_plus, 1e-14)
+
     denom = h_plus**2 + K1 * h_plus + K1 * K2
     co3 = dic_val * (K1 * K2) / denom
     hco3 = dic_val * (K1 * h_plus) / denom
@@ -2410,11 +2478,182 @@ def compute_carbonate_speciation(c: Any, mp: Any) -> None:
     _set_c_field("HCO3", hco3)
     _set_c_field("CO2", co2)
 
-    Ka1_H2S = 10.0 ** (-7.0)
     c.hs_frac = Ka1_H2S / (h_plus + Ka1_H2S)
     c.h2s_frac = h_plus / (h_plus + Ka1_H2S)
     mp.hs_frac = c.hs_frac
     mp.h2s_frac = c.h2s_frac
+
+
+def update_all_species(c: Any, mp: Any) -> None:
+    """Updates dynamic equilibrium, diagnostic, and partition species across the grid.
+
+    Ensures that all species defined in species.py (including non-transported equilibrium
+    and diagnostic species like Fe2_liq, HS, H2S, CO3, HCO3, Hplus) have their spatial
+    profiles computed from their parent state variables and environmental parameters.
+    """
+    species_defs = getattr(mp, "species_defs", None) or getattr(mp, "species", None)
+    if not isinstance(species_defs, dict):
+        return
+
+    def get_v(obj):
+        if hasattr(obj, "value"):
+            return np.asarray(obj.value, dtype=np.float64)
+        return np.asarray(obj, dtype=np.float64)
+
+    # 1. Update carbonate system speciation if DIC and TA are present
+    if hasattr(c, "TA") and hasattr(c, "DIC"):
+        compute_carbonate_speciation(c, mp)
+
+    # 2. Setup evaluation context for equilibrium and partition fractions
+    phi_val = get_v(mp.phi) if hasattr(mp, "phi") else 0.8
+    fac_s = phi_val / np.maximum(1.0 - phi_val, 1e-6)
+    ph_arr = get_v(c.pH) if hasattr(c, "pH") else float(getattr(mp, "pH", 7.0))
+    h_arr = 10.0 ** (-ph_arr)
+
+    k = getattr(mp, "k", {})
+    eval_ctx = {
+        "k": k,
+        "mp": mp,
+        "np": np,
+        "Hplus": h_arr,
+        "pH": ph_arr,
+        "fac_s": fac_s,
+    }
+
+    # Evaluate dynamic / equilibrium species
+    for sp_name, meta in species_defs.items():
+        if not isinstance(meta, dict):
+            continue
+
+        parent_raw = meta.get("equilibrium_of") or meta.get("alias_of")
+        if parent_raw:
+            parts = str(parent_raw).split(".", 1)
+            parent_name = parts[0]
+            subphase = parts[1] if len(parts) > 1 else None
+
+            if hasattr(c, parent_name):
+                parent_val = get_v(getattr(c, parent_name))
+                child_val = None
+
+                if "fraction" in meta:
+                    frac_ctx = dict(eval_ctx)
+                    if "constants" in meta and isinstance(meta["constants"], dict):
+                        for c_name, c_val in meta["constants"].items():
+                            frac_ctx[c_name] = float(c_val)
+                            if c_name.startswith("pK"):
+                                base_c = c_name[1:]
+                                frac_ctx[base_c] = 10.0 ** (-float(c_val))
+                    frac_expr = meta["fraction"]
+                    frac_val = eval(frac_expr, frac_ctx)
+                    child_val = parent_val * frac_val
+
+                elif subphase is not None:
+                    attr_name = f"{parent_name}_{subphase}"
+                    if hasattr(mp, attr_name):
+                        child_val = parent_val * float(getattr(mp, attr_name))
+                    else:
+                        parent_meta = species_defs.get(parent_name, {})
+                        parent_part = parent_meta.get("partition", {})
+                        p_expr = parent_part.get(subphase, "1.0")
+                        p_val = eval(p_expr, eval_ctx)
+                        child_val = parent_val * p_val
+
+                elif "partition" in meta:
+                    part_dict = meta["partition"]
+                    p_expr = part_dict.get("dissolved", "1.0")
+                    p_val = eval(p_expr, eval_ctx)
+                    child_val = parent_val * p_val
+
+                else:
+                    # Check parent partition
+                    parent_meta = species_defs.get(parent_name, {})
+                    parent_part = parent_meta.get("partition", {})
+                    if "dissolved" in parent_part and (sp_name.endswith("_liq") or sp_name.endswith("_diss")):
+                        p_val = eval(parent_part["dissolved"], eval_ctx)
+                        child_val = parent_val * p_val
+                    elif "sorbed" in parent_part and (sp_name.endswith("_sorb") or sp_name.endswith("_sorbed")):
+                        p_val = eval(parent_part["sorbed"], eval_ctx)
+                        child_val = parent_val * p_val
+                    else:
+                        child_val = parent_val
+
+                if child_val is not None:
+                    target = getattr(c, sp_name, None)
+                    if hasattr(target, "setValue"):
+                        target.setValue(child_val)
+                    elif hasattr(target, "__setitem__"):
+                        target[:] = child_val
+                    else:
+                        setattr(c, sp_name, child_val)
+
+        elif not meta.get("include", True) and hasattr(c, sp_name):
+            # Non-transported diagnostic species with constant top boundary (e.g. Ca2)
+            bc_meta = meta.get("bc")
+            if bc_meta and isinstance(bc_meta, dict) and "top" in bc_meta:
+                top_val = bc_meta["top"]
+                target = getattr(c, sp_name, None)
+                if target is not None:
+                    curr_val = get_v(target)
+                    if np.all(curr_val == 0.0) and top_val != 0.0:
+                        if hasattr(target, "setValue"):
+                            target.setValue(top_val)
+                        elif hasattr(target, "__setitem__"):
+                            target[:] = top_val
+
+
+def compute_porosity_profile(
+    z: Any,
+    phi_top: float,
+    phi_bottom: float,
+    z_half: float | str | None = None,
+    z_decay: float | str | None = None,
+) -> np.ndarray:
+    """Calculates exponential sediment porosity profile with depth.
+
+    Porosity decreases exponentially from phi_top at the sediment-water interface (z=0)
+    towards an asymptotic baseline phi_bottom at depth:
+        phi(z) = phi_bottom + (phi_top - phi_bottom) * exp(-z / z_decay)
+
+    Parameters
+    ----------
+    z : array-like
+        Sediment depth coordinates [m].
+    phi_top : float
+        Porosity at the sediment-water interface (z=0).
+    phi_bottom : float
+        Asymptotic porosity at depth (z -> infinity).
+    z_half : float or str, optional
+        Depth at which porosity has dropped by half towards baseline,
+        i.e. phi(z_half) = phi_bottom + (phi_top - phi_bottom) / 2.
+        Related to decay depth by: z_decay = z_half / ln(2).
+    z_decay : float or str, optional
+        e-folding attenuation depth: z_decay = 1 / lambda.
+
+    Returns
+    -------
+    np.ndarray
+        Porosity profile across depth coordinates z.
+    """
+    import pint
+    ureg = pint.UnitRegistry()
+
+    def _to_meters(val):
+        if val is None:
+            return None
+        if isinstance(val, str):
+            return ureg.Quantity(val).to("meter").magnitude
+        return float(val)
+
+    zh_m = _to_meters(z_half)
+    zd_m = _to_meters(z_decay)
+
+    if zh_m is not None:
+        zd_m = zh_m / np.log(2.0)
+    elif zd_m is None:
+        raise ValueError("Either 'z_half' or 'z_decay' must be specified.")
+
+    z_arr = np.asarray(z.value if hasattr(z, "value") else z, dtype=np.float64)
+    return float(phi_bottom) + (float(phi_top) - float(phi_bottom)) * np.exp(-z_arr / zd_m)
 
 
 def compute_sediment_age(

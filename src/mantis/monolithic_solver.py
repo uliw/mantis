@@ -244,7 +244,10 @@ def build_native_1d_transport_stencil(
     diff_cond = (eff_phi_face * D_face) / d_centers
 
     # Face convection
-    F_face = eff_phi_face * w
+    w_arr = np.asarray(w, dtype=np.float64)
+    if w_arr.ndim == 0:
+        w_arr = np.full(N, float(w_arr), dtype=np.float64)
+    F_face = (eff_phi_arr[:-1] * w_arr[:-1] + eff_phi_arr[1:] * w_arr[1:]) / 2.0
     if solid_scheme == "upwind" and not is_dissolved:
         a_E = diff_cond + np.maximum(F_face, 0.0)
         a_W = diff_cond + np.maximum(-F_face, 0.0)
@@ -274,7 +277,7 @@ def build_native_1d_transport_stencil(
 
     if is_dissolved:
         D_top = (phi_top * D_cell_arr[0]) / d_top
-        F_top = phi_top * w
+        F_top = phi_top * w_arr[0]
         Pe_top = F_top / np.maximum(D_top, 1e-30)
         A_top = np.maximum(0.0, (1.0 - 0.1 * np.abs(Pe_top))**5)
         a_in_diag = D_top * A_top + np.maximum(-F_top, 0.0)
@@ -285,7 +288,7 @@ def build_native_1d_transport_stencil(
         b_transport[0] += top_val
 
     # Right boundary (z=L): Neumann zero-gradient (advection carries mass out)
-    ab[1, -1] += eff_phi_arr[-1] * w
+    ab[1, -1] += eff_phi_arr[-1] * w_arr[-1]
 
     # Bio-irrigation (non-local exchange for dissolved species)
     if is_dissolved and D_irr is not None:
@@ -460,7 +463,11 @@ class MonolithicNewtonSystem:
             # Advection velocity
             w_val = getattr(mp, "w", 0.0)
             if is_diss:
-                w_val -= getattr(mp, "advection", 0.0)
+                w_val = w_val - getattr(mp, "advection", 0.0)
+            else:
+                if hasattr(phi_val, "__len__") and len(phi_val) > 1 and np.ndim(w_val) == 0:
+                    phi_inf = float(phi_val[-1])
+                    w_val = float(w_val) * (1.0 - phi_inf) / np.maximum(1.0 - np.asarray(phi_val, dtype=np.float64), 1e-6)
 
             # Bio-irrigation (dissolved only)
             D_irr_val = (
@@ -826,13 +833,23 @@ def run_non_steady_state_solver_monolithic(
                             break
 
                     if not step_converged:
+                        err_by_sp = {
+                            mono_system.species_names[s]: float(
+                                compute_species_residual_wrms(u_best[:, s], u_curr[:, s], inner_tol=newton_tol, atol=mono_system.atol_vec[s])
+                                if is_wrms_ls
+                                else compute_species_residual_linf(u_best[:, s], u_curr[:, s], inner_tol=newton_tol, atol=mono_system.atol_vec[s])
+                            )
+                            for s in range(S)
+                        }
                         raise RuntimeError(
-                            f"Newton iteration failed to converge in {max_newton_iters} iterations (err={raw_newton_err:.2e})"
+                            f"Newton iteration failed to converge in {max_newton_iters} iterations (err={raw_newton_err:.2e}, details={err_by_sp})"
                         )
 
                 except Exception as ex:
                     # Step failed: cut dt and retry
                     step_first_attempt = False
+                    if getattr(mp, "verbose", False):
+                        print(f"  [RETRY step {step} at time={get_time_units(total_time):.2f~P}] {ex}", flush=True)
                     current_dt = max(current_dt * dt_controller.cut_factor, dt_controller.dt_min)
                     dt_controller._dt = current_dt
                     if current_dt <= dt_controller.dt_min + 1e-15:
@@ -943,7 +960,7 @@ def run_non_steady_state_solver_monolithic(
     experiment = getattr(mp, "experiment", "model_output")
     state_out = f"{experiment}_state.npz"
     try:
-        save_state(c, state_out)
+        save_state(c, state_out, mp=mp)
         print(f"State saved to {state_out}")
     except Exception as e:
         print(f"Could not save state: {e}")

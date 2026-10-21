@@ -10,7 +10,7 @@ from mantis.generate_equation_system import (
 )
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-EXP_DIR = BASE_DIR / "examples" / "velde_et_al_2016"
+EXP_DIR = BASE_DIR / "examples" / "velde_et_al_2016" / "with_isotopes"
 SPECIES_FILE = EXP_DIR / "species.py"
 CONSTANTS_FILE = EXP_DIR / "kinetic_constants_fast.py"
 LIMITERS_FILE = EXP_DIR / "fes_reactions.py"
@@ -120,7 +120,7 @@ def test_validation_dynamic_variables():
     )
     rxn = {
         "reaction_name": "pyrite_formation_fes_ts2",
-        "reaction": "1 FeS + 1 HS_custom -> 1 FeS2",
+        "reaction": "1 FeS + 1 HS_custom -> 1 Fe3",
         "k_value_name": "FeS_TS2",
         "dynamic_variables": {"HS_custom": "c.TS2 * mp.hs_frac"},
     }

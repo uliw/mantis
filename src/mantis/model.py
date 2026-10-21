@@ -27,6 +27,7 @@ from mantis.diff_lib import (
     VariableArray as CellVariable,
     check_peclet_numbers,
     compute_bio_irrigation_alpha,
+    compute_exponential_db,
     compute_sigmoidal_db,
     data_container,
     diff_coeff,
@@ -87,7 +88,7 @@ class DiageneticModelResult:
         if filepath is None:
             filepath = f"{self.mp.plot_name}_state.npz"
         filepath_str = str(filepath)
-        save_state(self.c, filepath_str)
+        save_state(self.c, filepath_str, mp=self.mp)
         return filepath_str
 
     def plot_summary(self, layout_file: Optional[Union[str, Path]] = None, outfile: Optional[str] = None) -> Optional[str]:
@@ -381,6 +382,10 @@ class DiageneticModel:
                     self.p_dict["BT_depth"] = float(c_val["depth"])
                 if "attenuation" in c_val:
                     self.p_dict["BT_attenuation"] = float(c_val["attenuation"])
+                if "decay" in c_val:
+                    self.p_dict["BT_attenuation"] = float(c_val["decay"])
+                if "profile" in c_val:
+                    self.p_dict["BT_profile"] = str(c_val["profile"]).lower()
                 self.p_dict["bioturbation"] = c_val
             elif key == "bioirrigation" and isinstance(val, dict):
                 c_val = _convert_value(val)
@@ -388,6 +393,12 @@ class DiageneticModel:
                     self.p_dict["BI0"] = float(c_val["BI0"])
                 if "depth" in c_val:
                     self.p_dict["BI_depth"] = float(c_val["depth"])
+                if "attenuation" in c_val:
+                    self.p_dict["BI_attenuation"] = float(c_val["attenuation"])
+                if "decay" in c_val:
+                    self.p_dict["BI_attenuation"] = float(c_val["decay"])
+                if "profile" in c_val:
+                    self.p_dict["BI_profile"] = str(c_val["profile"]).lower()
                 self.p_dict["bioirrigation"] = c_val
             else:
                 self.p_dict[key] = _convert_value(val)
@@ -955,7 +966,24 @@ class DiageneticModel:
         self.mp.mesh = mesh
         self.mp.z = z
         self.mp.grid_points = len(z)
-        self.mp.phi = CellVariable(name="porosity", mesh=mesh, value=self.mp.phi)
+        if isinstance(self.mp.phi, dict):
+            from mantis.diff_lib import compute_porosity_profile
+            phi_top = float(self.mp.phi.get("top", 0.9))
+            phi_bottom = float(self.mp.phi.get("bottom", self.mp.phi.get("inf", 0.8)))
+            z_half = self.mp.phi.get("half_depth", self.mp.phi.get("z_half", None))
+            z_decay = self.mp.phi.get("decay", self.mp.phi.get("z_decay", None))
+            phi_arr = compute_porosity_profile(
+                z,
+                phi_top=phi_top,
+                phi_bottom=phi_bottom,
+                z_half=z_half,
+                z_decay=z_decay,
+            )
+            self.mp.phi = CellVariable(name="porosity", mesh=mesh, value=phi_arr)
+        elif callable(self.mp.phi):
+            self.mp.phi = CellVariable(name="porosity", mesh=mesh, value=self.mp.phi(z))
+        else:
+            self.mp.phi = CellVariable(name="porosity", mesh=mesh, value=self.mp.phi)
 
         # 6. Evaluate k values
         k = data_container()
@@ -1138,8 +1166,15 @@ class DiageneticModel:
                 setattr(D_mol, sp_name, getattr(D_mol, sp_name) * diss_frac)
 
         # Bioturbation & Bio-irrigation profiles
-        D_mol.D_irr = compute_bio_irrigation_alpha(z, self.mp.BI0, self.mp.BI_depth)
-        D_mol.D_bio = compute_sigmoidal_db(z, self.mp.BT0, self.mp.BT_depth, self.mp.BT_attenuation)
+        bi_atten = getattr(self.mp, "BI_attenuation", self.mp.BI_depth)
+        D_mol.D_irr = compute_bio_irrigation_alpha(z, self.mp.BI0, bi_atten)
+
+        bt_profile = getattr(self.mp, "BT_profile", "sigmoidal")
+        if bt_profile == "exponential":
+            bt_atten = getattr(self.mp, "BT_attenuation", getattr(self.mp, "BT_depth", 0.03))
+            D_mol.D_bio = compute_exponential_db(z, self.mp.BT0, bt_atten)
+        else:
+            D_mol.D_bio = compute_sigmoidal_db(z, self.mp.BT0, self.mp.BT_depth, self.mp.BT_attenuation)
 
         # 9. Isotope boundary conditions companion setup (generalized across all species)
         if self.mp.isotopes:
@@ -1191,6 +1226,10 @@ class DiageneticModel:
 
         # 10. Initial conditions and boundary constraints
         phi_top = phi_val[0] if hasattr(phi_val, "__getitem__") else phi_val
+        phi_bottom = phi_val[-1] if hasattr(phi_val, "__getitem__") else phi_val
+        w_top = self.mp.w
+        if hasattr(phi_val, "__getitem__") and len(phi_val) > 1 and np.ndim(self.mp.w) == 0:
+            w_top = float(self.mp.w) * (1.0 - phi_bottom) / np.maximum(1.0 - phi_top, 1e-6)
         for sp_name in species_transport:
             var = getattr(c, sp_name)
             props = bc_map.get(sp_name, {"top": 0.0, "type": "dissolved"})
@@ -1207,7 +1246,7 @@ class DiageneticModel:
             if props["type"] == "particulate":
                 # Convert bulk surface flux J_bulk to solid-phase flux: J_solid = J_bulk / (1 - phi)
                 J_solid = props["top"] / (1.0 - phi_top)
-                val = J_solid / self.mp.w if self.mp.w > 0 else 0.0
+                val = J_solid / w_top if w_top > 0 else 0.0
 
                 if "init" in meta and meta["init"] is not None:
                     init_val = meta["init"]
@@ -1366,7 +1405,7 @@ class DiageneticModel:
             mp=self.mp,
             c=self._c,
             k=self._k,
-            species_list=self._species_transport,
+            species_list=self._species_all if hasattr(self, "_species_all") else self._species_transport,
             z=self.mp.z,
             D_mol=self._D_mol,
             diagenetic_reactions=diag_rxn_func,

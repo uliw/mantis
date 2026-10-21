@@ -479,6 +479,8 @@ def capture_state(
     from . import diff_lib
 
     # 1. Capture current rates in the main thread (thread-safe snap)
+    diff_lib.update_all_species(c, mp_params)
+
     c_numpy = diff_lib.data_container(
         {s: diff_lib.ArrayProxy(val.value if hasattr(val, "value") else val) for s, val in c.items()}
     )
@@ -498,21 +500,32 @@ def capture_state(
 
     data = {"z": z.copy()}
 
-    # Collect concentrations and rates
-    for species_name in species_list:
-        data[f"c_{species_name}"] = snap(getattr(c, species_name))
-        res_tuple = getattr(f_final, species_name)
-        data[f"f_{species_name}"] = snap(res_tuple[2])
+    species_defs = getattr(mp_params, "species_defs", None) or getattr(mp_params, "species", None)
+    if isinstance(species_defs, dict):
+        all_species = list(species_defs.keys())
+    else:
+        all_species = list(species_list)
+
+    # Collect concentrations and rates across all defined species
+    for species_name in all_species:
+        if hasattr(c, species_name):
+            data[f"c_{species_name}"] = snap(getattr(c, species_name))
+        res_tuple = getattr(f_final, species_name, None)
+        if res_tuple is not None and hasattr(res_tuple, "__len__") and len(res_tuple) > 2 and res_tuple[2] is not None:
+            data[f"f_{species_name}"] = snap(res_tuple[2])
+        elif f"c_{species_name}" in data:
+            data[f"f_{species_name}"] = np.zeros(len(z))
 
     # Capture process-specific rates dynamically
     for key in f_final.keys():
-        if key not in species_list:
+        if key not in all_species:
             res_tuple = getattr(f_final, key)
-            data[f"f_{key}"] = snap(res_tuple[2])
+            if res_tuple is not None and hasattr(res_tuple, "__len__") and len(res_tuple) > 2:
+                data[f"f_{key}"] = snap(res_tuple[2])
 
     # Diffusion coefficients
     for d_name, d_val in D_mol.items():
-        key = f"D_{d_name}" if d_name in species_list else d_name
+        key = f"D_{d_name}" if (d_name in all_species or d_name in species_list) else d_name
         data[key] = snap(d_val)
 
     # Isotopes: dynamically calculate delta values for all companions
@@ -583,10 +596,13 @@ def capture_state(
             ksp_val = float(mp_params.Ksp_calcite)
             data["Omega_calcite"] = (data["c_Ca2"] * data["c_CO3"]) / (ksp_val + 1e-30)
 
-    data["w"] = np.ones(len(z)) * mp_params.w
-    data["phi"] = np.ones(len(z)) * (
-        mp_params.phi.value if hasattr(mp_params.phi, "value") else mp_params.phi
-    )
+    phi_raw = mp_params.phi.value if hasattr(mp_params.phi, "value") else mp_params.phi
+    phi_arr = np.asarray(phi_raw, dtype=np.float64)
+    data["phi"] = phi_arr if phi_arr.ndim > 0 and len(phi_arr) == len(z) else np.full(len(z), float(phi_arr))
+
+    w_raw = mp_params.w.value if hasattr(mp_params.w, "value") else mp_params.w
+    w_arr = np.asarray(w_raw, dtype=np.float64)
+    data["w"] = w_arr if w_arr.ndim > 0 and len(w_arr) == len(z) else np.full(len(z), float(w_arr))
 
     return data
 

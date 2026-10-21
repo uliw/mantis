@@ -10,7 +10,7 @@ import pytest
 from mantis import DiageneticModel
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-EXP_DIR = BASE_DIR / "examples" / "velde_et_al_2016"
+EXP_DIR = BASE_DIR / "examples" / "velde_et_al_2016" / "with_isotopes"
 
 
 def test_diagenetic_model_experiment_name_derivation():
@@ -76,7 +76,7 @@ def test_diagenetic_model_setup(tmp_path):
     df, _ = save_data(mp, c, k, species_transport, z, D_mol, rxn_fn)
     assert "d_SO4" in df.columns
     assert "d34S_SO4" in df.columns
-    assert "d34S_FeS2" in df.columns
+    assert "d34S_FeS" in df.columns
 
 
 def test_diagenetic_model_missing_species_file_exits(tmp_path, capsys):
@@ -284,5 +284,60 @@ def test_resolve_and_prepare_equations_triggers_regen(tmp_path):
     p_dict["force_regen"] = True
     eq_mod5, _, _ = resolve_and_prepare_equations(p_dict, base_dir=tmp_path)
     assert eq_file.stat().st_mtime > mtime_after_kc
+
+
+def test_exponential_bioturbation_profile():
+    """Verify exponential bioturbation profile formula and configuration."""
+    import numpy as np
+    from mantis.diff_lib import compute_exponential_db
+
+    z = np.array([0.0, 0.03, 0.06])
+    Db0 = 10.0
+    x_atten = 0.03
+    db = compute_exponential_db(z, Db0, x_atten)
+    np.testing.assert_allclose(db[0], 10.0)
+    np.testing.assert_allclose(db[1], 10.0 / np.e)
+    np.testing.assert_allclose(db[2], 10.0 / (np.e**2))
+
+
+def test_all_species_exported_and_saved(tmp_path):
+    """Verify all species defined in species.py are exported to CSV/df and state .npz."""
+    import numpy as np
+    from mantis.diff_lib import save_data, save_state
+
+    model = DiageneticModel(
+        base_dir=EXP_DIR,
+        species="species.py",
+        reactions="fes_reactions.py",
+        constants="kinetic_constants_fast.py",
+        layout="plot_layout.py",
+        experiment="test_export_exp",
+    )
+    model.configure(
+        max_depth="0.1 m",
+        display_length="0.1 m",
+        t_end="1 day",
+        phi=0.8,
+        bioturbation={"BT0": "10 cm^2/year", "profile": "exponential", "attenuation": "3 cm"},
+    )
+    mp, c, k, species_transport, z, D_mol, rxn_fn = model.setup()
+
+    # Fe2_total initial value
+    c.Fe2_total.setValue(1.0)
+
+    df, _ = save_data(mp, c, k, species_transport, z, D_mol, rxn_fn)
+    # Fe2_liq should be present in df even though include=False in species.py
+    assert "c_Fe2_liq" in df.columns
+    assert "c_Fe2_total" in df.columns
+    assert np.all(df["c_Fe2_liq"] > 0.0)
+
+    # State file should also contain Fe2_liq
+    state_file = tmp_path / "test_state.npz"
+    save_state(c, str(state_file), mp=mp)
+    assert state_file.exists()
+    loaded = np.load(str(state_file))
+    assert "Fe2_liq" in loaded
+    assert np.all(loaded["Fe2_liq"] > 0.0)
+
 
 
