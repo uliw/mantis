@@ -1946,22 +1946,14 @@ class EquationSystemGenerator:
             for m in re.finditer(r'\b(K(?:m|in)?_[A-Za-z0-9_]+)\b', expr):
                 detected_k_constants.add(m.group(1))
 
-        # Dynamically determine phase scaling based on species phase from validator
+        # Dynamically extract half-saturation constants without erroneous phase scaling (constants are in native phase units)
         species_defs = getattr(self.validator, "species_defs", {})
         k_extract_lines = []
         for k_name in sorted(detected_k_constants):
-            # Check if species matching the suffix is solid
-            is_solid = False
-            for sp_k, s_meta in species_defs.items():
-                if isinstance(s_meta, dict) and s_meta.get("phase") == "solid":
-                    if sp_k in k_name:
-                        is_solid = True
-                        break
-            denom = "solid_phi" if is_solid else "phi"
-            k_extract_lines.append(f'    {k_name} = getattr(mp, "{k_name}", 0.0) / {denom}')
+            k_extract_lines.append(f'    {k_name} = getattr(mp, "{k_name}", 0.0)')
 
         if k_extract_lines:
-            header_code.append('    # Dynamically extract half-saturation constants (liquid scaled by phi, solid by 1-phi)')
+            header_code.append('    # Dynamically extract half-saturation constants in species native phase units')
             header_code.extend(k_extract_lines)
 
         # Dynamically emit only limiters actually referenced in reactions or Jacobian

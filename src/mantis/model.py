@@ -86,7 +86,8 @@ class DiageneticModelResult:
     def save_state(self, filepath: Optional[Union[str, Path]] = None) -> str:
         """Saves complete CellVariable array state to a compressed .npz archive."""
         if filepath is None:
-            filepath = f"{self.mp.plot_name}_state.npz"
+            caller_dir = getattr(self.mp, "base_dir", None) or getattr(self.mp, "_caller_dir", None) or Path.cwd()
+            filepath = Path(caller_dir) / f"{self.mp.plot_name}_state.npz"
         filepath_str = str(filepath)
         save_state(self.c, filepath_str, mp=self.mp)
         return filepath_str
@@ -119,7 +120,8 @@ class DiageneticModelResult:
             return None
 
         if self.df is not None:
-            pdf_out = outfile or f"{self.mp.plot_name}.pdf"
+            caller_dir = getattr(self.mp, "base_dir", None) or getattr(self.mp, "_caller_dir", None) or Path.cwd()
+            pdf_out = outfile or str(Path(caller_dir) / f"{self.mp.plot_name}.pdf")
             try:
                 plt_desc = pdn.load_layout_from_file(self.df, str(p_layout))
                 pdn.plot(self.df, self.mp.max_depth, outfile=pdf_out, show=False, plot_description=plt_desc)
@@ -776,14 +778,17 @@ class DiageneticModel:
             pressure_bar = float(carb_cfg.get("pressure", 1.0))
             salinity = float(carb_cfg.get("salinity", 34.0))
             adjust_omega = bool(carb_cfg.get("adjust_omega", True))
+            ph_scale = str(carb_cfg.get("ph_scale", carb_cfg.get("pH_scale", "free"))).lower().strip()
 
             temp_val = self.mp.temp
             temp_c = float(temp_val[0] if isinstance(temp_val, (list, tuple, np.ndarray)) else temp_val)
 
             carb_constants = calc_carbonate_constants(
-                temp_c=temp_c, salinity=salinity, pressure_bar=pressure_bar
+                temp_c=temp_c, salinity=salinity, pressure_bar=pressure_bar, ph_scale=ph_scale
             )
             self.mp.carb_constants = carb_constants
+            self.mp.ph_scale = carb_constants.ph_scale
+            self.mp.scale_factor = carb_constants.scale_factor
             self.mp.pK1_carb = carb_constants.pK1
             self.mp.pK2_carb = carb_constants.pK2
             self.mp.K1_carb = carb_constants.K1
@@ -874,7 +879,8 @@ class DiageneticModel:
                 print(
                     f"\n[MANTIS CARBONATE] Carbonate equilibrium chemistry enabled:\n"
                     f"         Temperature: {temp_c:.1f} °C, Salinity: {salinity:.1f} PSU, Pressure: {pressure_bar:.1f} bar\n"
-                    f"         Thermodynamic constants (Lueker et al. 2000, Mucci 1983, Millero 1995):\n"
+                    f"         pH scale: {carb_constants.ph_scale.capitalize()} (scale factor = {carb_constants.scale_factor:.4f})\n"
+                    f"         Thermodynamic constants (Lueker et al. 2000, Mucci 1983, Millero 1995, Dickson 1990):\n"
                     f"           pK1 = {carb_constants.pK1:.3f}, pK2 = {carb_constants.pK2:.3f}, K'sp(calcite) = {carb_constants.Ksp_calcite:.4f} (mol/m^3)^2\n"
                     f"         adjust_omega = True:\n"
                     f"           {adjust_msg}\n"
@@ -894,7 +900,8 @@ class DiageneticModel:
                 print(
                     f"\n[MANTIS CARBONATE] Carbonate equilibrium chemistry enabled:\n"
                     f"         Temperature: {temp_c:.1f} °C, Salinity: {salinity:.1f} PSU, Pressure: {pressure_bar:.1f} bar\n"
-                    f"         Thermodynamic constants (Lueker et al. 2000, Mucci 1983, Millero 1995):\n"
+                    f"         pH scale: {carb_constants.ph_scale.capitalize()} (scale factor = {carb_constants.scale_factor:.4f})\n"
+                    f"         Thermodynamic constants (Lueker et al. 2000, Mucci 1983, Millero 1995, Dickson 1990):\n"
                     f"           pK1 = {carb_constants.pK1:.3f}, pK2 = {carb_constants.pK2:.3f}, K'sp(calcite) = {carb_constants.Ksp_calcite:.4f} (mol/m^3)^2\n"
                     f"         adjust_omega = False: Using boundary conditions as is.\n"
                     f"           Overlying water calcite saturation state: Omega = {omega:.2f} ({omega_state}).\n"
@@ -1022,7 +1029,8 @@ class DiageneticModel:
             # Check partition for mixed species (e.g. Fe2_total: dissolved, sorbed)
             if "partition" in meta and isinstance(meta["partition"], dict):
                 for p_key, p_expr in meta["partition"].items():
-                    val = float(eval(p_expr, eval_ctx))
+                    raw_val = eval(p_expr, eval_ctx)
+                    val = float(raw_val) if np.ndim(raw_val) == 0 else np.asarray(raw_val, dtype=np.float64)
                     setattr(self.mp, f"{sp_name}_{p_key}", val)
                     eval_ctx[f"{sp_name}_{p_key}"] = val
                     # Backwards compatibility alias for Fe2_total.dissolved -> Fe2_diss
@@ -1158,7 +1166,8 @@ class DiageneticModel:
                 part = meta.get("partition", {})
                 if "dissolved" in part:
                     try:
-                        diss_frac = float(eval(part["dissolved"], eval_ctx))
+                        raw_diss = eval(part["dissolved"], eval_ctx)
+                        diss_frac = float(raw_diss) if np.ndim(raw_diss) == 0 else np.asarray(raw_diss, dtype=np.float64)
                     except Exception:
                         diss_frac = getattr(self.mp, f"{sp_name}_dissolved", getattr(self.mp, "Fe2_diss", 1.0))
                 else:

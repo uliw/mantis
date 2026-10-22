@@ -832,7 +832,8 @@ def _save_data_to_disk(mp, c, k, species_list, z, D_mol, f_final):
 
     df = pd.DataFrame(data)
     # Ensure no NaN from misalignment by strictly using the same structure
-    fqfn = pl.Path.cwd() / f"{mp.plot_name}.csv"
+    caller_dir = getattr(mp, "base_dir", None) or getattr(mp, "_caller_dir", None) or pl.Path.cwd()
+    fqfn = pl.Path(caller_dir) / f"{mp.plot_name}.csv"
     df.to_csv(fqfn, index=False)
 
     return df, fqfn
@@ -1709,12 +1710,18 @@ def make_grid2(
     dx_list = []
     current_z = 0
 
-    # 1. Refinement phase: from surface to reaction zone
+    # 1. Refinement / expansion phase: from surface to reaction zone
     current_dx = initial_spacing
-    while current_z + current_dx < rz_start:
-        dx_list.append(current_dx)
-        current_z += current_dx
-        current_dx = max(current_dx / r, reaction_zone_spacing)
+    if initial_spacing < reaction_zone_spacing:
+        while current_z + current_dx < rz_start:
+            dx_list.append(current_dx)
+            current_z += current_dx
+            current_dx = min(current_dx * r, reaction_zone_spacing)
+    else:
+        while current_z + current_dx < rz_start:
+            dx_list.append(current_dx)
+            current_z += current_dx
+            current_dx = max(current_dx / r, reaction_zone_spacing)
 
     if current_z < rz_start:
         dx_list.append(rz_start - current_z)
@@ -2483,6 +2490,36 @@ def compute_carbonate_speciation(c: Any, mp: Any) -> None:
     mp.hs_frac = c.hs_frac
     mp.h2s_frac = c.h2s_frac
 
+    # Account for iron speciation (FeHS+, inorganic complexes) and POC adsorption if configured
+    if hasattr(c, "Fe2_total") or hasattr(c, "Fe2_liq"):
+        enable_fe_spec = getattr(mp, "enable_iron_speciation", False) or hasattr(mp, "beta_FeHS")
+        if enable_fe_spec:
+            beta_FeHS = float(getattr(mp, "beta_FeHS", 251.1886))
+            beta_Cl = float(getattr(mp, "beta_Cl", 0.4292))
+            beta_SO4 = float(getattr(mp, "beta_SO4", 0.00912))
+            KFe_ads = float(getattr(mp, "KFe_ads", 0.001))
+
+            ts2_raw = getattr(c, "TS2", 0.0)
+            ts2_val = np.asarray(ts2_raw.value if hasattr(ts2_raw, "value") else ts2_raw, dtype=np.float64)
+            hs_pw = ts2_val * c.hs_frac
+
+            so4_raw = getattr(c, "SO4", 0.0)
+            so4_val = np.asarray(so4_raw.value if hasattr(so4_raw, "value") else so4_raw, dtype=np.float64)
+
+            poc_raw = getattr(c, "POC", 0.0)
+            poc_val = np.asarray(poc_raw.value if hasattr(poc_raw, "value") else poc_raw, dtype=np.float64)
+
+            phi_raw = getattr(mp, "phi", 0.8)
+            phi_val = np.asarray(phi_raw.value if hasattr(phi_raw, "value") else phi_raw, dtype=np.float64)
+            dstopw = (1.0 - phi_val) / np.maximum(phi_val, 1e-6)
+
+            ads_factor = 1.0 + KFe_ads * poc_val * dstopw
+            spec_factor = 1.0 + beta_Cl + beta_SO4 * so4_val + beta_FeHS * hs_pw
+            fe_denom = ads_factor * spec_factor
+
+            c.fe2_liq_frac = 1.0 / np.maximum(fe_denom, 1e-12)
+            mp.fe2_liq_frac = c.fe2_liq_frac
+
 
 def update_all_species(c: Any, mp: Any) -> None:
     """Updates dynamic equilibrium, diagnostic, and partition species across the grid.
@@ -2535,7 +2572,15 @@ def update_all_species(c: Any, mp: Any) -> None:
                 parent_val = get_v(getattr(c, parent_name))
                 child_val = None
 
-                if "fraction" in meta:
+                if sp_name == "Fe2_liq" and hasattr(mp, "fe2_liq_frac"):
+                    child_val = parent_val * np.asarray(mp.fe2_liq_frac, dtype=np.float64)
+                elif sp_name in ("Fe2_dis", "Fe2_dissolved") and hasattr(c, "POC"):
+                    poc_arr = get_v(getattr(c, "POC"))
+                    dstopw = (1.0 - phi_val) / np.maximum(phi_val, 1e-6)
+                    k_ads = float(getattr(mp, "KFe_ads", 0.001))
+                    ads_fac = 1.0 + k_ads * poc_arr * dstopw
+                    child_val = parent_val / ads_fac
+                elif "fraction" in meta:
                     frac_ctx = dict(eval_ctx)
                     if "constants" in meta and isinstance(meta["constants"], dict):
                         for c_name, c_val in meta["constants"].items():

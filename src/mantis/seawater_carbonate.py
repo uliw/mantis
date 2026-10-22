@@ -57,6 +57,83 @@ class CarbonateConstants:
     K1_mol_kg: float     # mol/kg-SW
     K2_mol_kg: float     # mol/kg-SW
     Ksp_mol_kg: float    # (mol/kg-SW)^2
+    ph_scale: str = "free"
+    scale_factor: float = 1.0  # (1 + St / Ks) conversion factor between Total and Free scales
+
+
+def calc_total_sulfate(salinity: float) -> float:
+    """Calculates total sulfate concentration in mol/kg-SW from practical salinity.
+
+    References:
+    -----------
+    - Morris, A. W., and Riley, J. P. (1966). The bromide/chlorinity and
+      sulphate/chlorinity ratio in sea water. Deep Sea Research 13, 699-705.
+    - Dickson, A. G., Sabine, C. L., and Christian, J. R. (2007). Guide to best
+      practices for ocean CO2 measurements. PICES Special Publication 3, Chap. 5.
+    """
+    S = float(salinity)
+    return (0.1400 / 96.062) * (S / 1.80655)
+
+
+def calc_bisulfate_constant(
+    temp_c: float,
+    salinity: float,
+    pressure_bar: float = 1.0,
+) -> float:
+    """Calculates stoichiometric dissociation constant of bisulfate (HSO4-) in seawater on the free scale.
+
+    References:
+    -----------
+    - 1 atm constant (KS0):
+      Dickson, A. G. (1990). Standard potential of the reaction:
+      AgCl(s) + 1/2 H2(g) = Ag(s) + HCl(aq), and the standard acidity constant of the ion
+      HSO4- in synthetic seawater from 273.15 to 318.15 K.
+      The Journal of Chemical Thermodynamics, 22(2), 113-127.
+    - Pressure correction:
+      Millero, F. J. (1995). Thermodynamics of the carbon dioxide system in the oceans.
+      Geochimica et Cosmochimica Acta, 59(4), 661-677 (Table 9).
+
+    Parameters:
+    -----------
+    temp_c : float
+        Temperature in degrees Celsius.
+    salinity : float
+        Practical salinity in PSU.
+    pressure_bar : float, optional
+        Hydrostatic pressure in bars (default: 1.0).
+
+    Returns:
+    --------
+    float
+        Stoichiometric KS in mol/kg-SW on the free scale.
+    """
+    T_c = float(temp_c)
+    T_k = T_c + 273.15
+    S = float(salinity)
+    P_bar = float(pressure_bar)
+
+    # Ionic strength on free scale (Dickson 1990)
+    I = 19.924 * S / (1000.0 - 1.005 * S)
+
+    ln_Ks_0 = (
+        -4276.1 / T_k
+        + 141.328
+        - 23.093 * np.log(T_k)
+        + (-13856.0 / T_k + 324.57 - 47.986 * np.log(T_k)) * np.sqrt(I)
+        + (35474.0 / T_k - 771.54 + 114.723 * np.log(T_k)) * I
+        - (2698.0 / T_k) * (I**1.5)
+        + (1776.0 / T_k) * (I**2)
+        + np.log(1.0 - 0.001005 * S)
+    )
+    Ks_0 = np.exp(ln_Ks_0)
+
+    # Pressure correction (Millero 1995)
+    deltaVS = -18.03 + 0.0466 * T_c + 0.000316 * (T_c**2)
+    kappaS = (-4.53 + 0.09 * T_c) / 1000.0
+    lnKsfac = (-deltaVS + 0.5 * kappaS * P_bar) * P_bar / (R_GAS_BAR * T_k)
+    Ks_P = Ks_0 * np.exp(lnKsfac)
+
+    return float(Ks_P)
 
 
 def calc_seawater_density(temp_c: float, salinity: float = 34.0) -> float:
@@ -111,15 +188,18 @@ def calc_carbonate_constants(
     temp_c: float,
     salinity: float = 34.0,
     pressure_bar: float = 1.0,
+    ph_scale: str = "free",
 ) -> CarbonateConstants:
-    """Calculates K1, K2, and K'sp(calcite) corrected for temperature, salinity, and pressure.
+    """Calculates K1, K2, and K'sp(calcite) corrected for temperature, salinity, pressure, and pH scale.
 
     References:
     -----------
-    - K1, K2: Lueker, Dickson, & Keeling (2000), Marine Chemistry 70: 105-119.
+    - K1, K2 (Total scale): Lueker, Dickson, & Keeling (2000), Marine Chemistry 70: 105-119.
     - Ksp: Mucci (1983), American Journal of Science 283: 780-799.
     - Pressure corrections: Millero (1995), GCA 59: 661-677; Ingle (1975), Marine Chemistry 3: 301-319.
     - Density: Millero & Poisson (1981), Deep Sea Research 28A: 625-629.
+    - Free vs Total pH scale conversion: Dickson (1990), J. Chem. Thermodyn. 22: 113-127;
+      Dickson et al. (2007), Guide to best practices for ocean CO2 measurements, PICES Spec. Publ. 3.
 
     Parameters:
     -----------
@@ -129,6 +209,10 @@ def calc_carbonate_constants(
         Salinity in PSU (default: 34.0).
     pressure_bar : float, optional
         Hydrostatic pressure in bars (default: 1.0 bar = ~10 m depth / sea surface).
+    ph_scale : str, optional
+        pH scale convention: 'free' (default) or 'total'.
+        - 'free': [H+] considers only free hydronium ions ([H+]_F).
+        - 'total': [H+] includes bisulfate ion pairs ([H+]_T = [H+]_F * (1 + St / Ks)).
 
     Returns:
     --------
@@ -139,6 +223,9 @@ def calc_carbonate_constants(
     T_k = T_c + 273.15
     S = float(salinity)
     P_bar = float(pressure_bar)
+    scale_norm = str(ph_scale).lower().strip()
+    if scale_norm not in ("free", "total"):
+        raise ValueError(f"Invalid ph_scale '{ph_scale}'. Supported scales are 'free' and 'total'.")
 
     # 1. First and Second Dissociation Constants of Carbonic Acid at 1 atm (LDK00)
     # Total pH scale, in mol/kg-SW
@@ -164,15 +251,29 @@ def calc_carbonate_constants(
     deltaV1 = -25.5 + 0.1271 * T_c
     Kappa1 = (-3.08 + 0.0877 * T_c) / 1000.0
     lnK1fac = (-deltaV1 + 0.5 * Kappa1 * P_bar) * P_bar / (R_GAS_BAR * T_k)
-    K1_mol_kg = K1_0 * np.exp(lnK1fac)
+    K1_mol_kg_total = K1_0 * np.exp(lnK1fac)
 
     deltaV2 = -15.82 - 0.0219 * T_c
     Kappa2 = (1.13 - 0.1475 * T_c) / 1000.0
     lnK2fac = (-deltaV2 + 0.5 * Kappa2 * P_bar) * P_bar / (R_GAS_BAR * T_k)
-    K2_mol_kg = K2_0 * np.exp(lnK2fac)
+    K2_mol_kg_total = K2_0 * np.exp(lnK2fac)
 
-    # 2. Calcite Stoichiometric Solubility Product at 1 atm (Mucci 1983)
-    # in (mol/kg-SW)^2
+    # 2. Conversion between Total scale and Free scale:
+    # [H+]_T = [H+]_F * (1 + St / Ks)
+    # K_free = K_total / (1 + St / Ks)
+    Ks_P = calc_bisulfate_constant(temp_c=T_c, salinity=S, pressure_bar=P_bar)
+    St = calc_total_sulfate(salinity=S)
+    scale_factor = 1.0 + (St / Ks_P)
+
+    if scale_norm == "free":
+        K1_mol_kg = K1_mol_kg_total / scale_factor
+        K2_mol_kg = K2_mol_kg_total / scale_factor
+    else:
+        K1_mol_kg = K1_mol_kg_total
+        K2_mol_kg = K2_mol_kg_total
+
+    # 3. Calcite Stoichiometric Solubility Product at 1 atm (Mucci 1983)
+    # in (mol/kg-SW)^2  (invariant with respect to pH scale)
     logKsp_0 = (
         -171.9065
         - 0.077993 * T_k
@@ -190,9 +291,8 @@ def calc_carbonate_constants(
     lnKspfac = (-deltaVKCa + 0.5 * KappaKCa * P_bar) * P_bar / (R_GAS_BAR * T_k)
     Ksp_mol_kg = Ksp_0 * np.exp(lnKspfac)
 
-    # 3. Seawater Density and Conversion to MANTIS Units
-    # For H+ speciation in [H+] = 10^-pH, K1 and K2 are on the standard scale (mol/kg-SW)
-    # matching the Total pH scale.
+    # 4. Seawater Density and Conversion to MANTIS Units
+    # For H+ speciation in [H+] = 10^-pH, K1 and K2 are in mol/kg-SW.
     # For Ksp = [Ca2+][CO32-], concentrations are in mol/m^3 (= mmol/L), so:
     # Ksp (mol/m^3)^2 = Ksp (mol/kg-SW)^2 * rho_sw^2
     rho_sw = calc_seawater_density(T_c, S)  # kg/m^3
@@ -212,6 +312,8 @@ def calc_carbonate_constants(
         K1_mol_kg=float(K1_mol_kg),
         K2_mol_kg=float(K2_mol_kg),
         Ksp_mol_kg=float(Ksp_mol_kg),
+        ph_scale=scale_norm,
+        scale_factor=float(scale_factor),
     )
 
 
