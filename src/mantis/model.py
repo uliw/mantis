@@ -299,6 +299,56 @@ class DiageneticModel:
             "use_numerical_jacobian": False,
         })
 
+    def _convert_value(self, val: Any) -> Any:
+        Q_ = self.Q_
+        if isinstance(val, (list, tuple)):
+            converted = [self._convert_value(item) for item in val]
+            return tuple(converted) if isinstance(val, tuple) else converted
+        if isinstance(val, dict):
+            return {k: self._convert_value(v) for k, v in val.items()}
+        if isinstance(val, str):
+            try:
+                q = Q_(val)
+                if hasattr(q, "dimensionality"):
+                    dim = q.dimensionality
+                    if dim == Q_("1 second").dimensionality:
+                        return q.to("seconds").magnitude
+                    elif dim == Q_("1 meter").dimensionality:
+                        return q.to("meter").magnitude
+                    elif dim == Q_("1 m/s").dimensionality:
+                        return q.to("m/s").magnitude
+                    elif dim == Q_("1 m^2/s").dimensionality:
+                        return q.to("m^2/second").magnitude
+                    elif dim == Q_("1 / second").dimensionality:
+                        return q.to("1/second").magnitude
+                    elif dim == Q_("1 mol/m^3").dimensionality:
+                        return q.to("mol/m^3").magnitude
+                    elif dim == Q_("1 mol/(m^2 * second)").dimensionality:
+                        return q.to("mol/(m^2 * second)").magnitude
+                    elif q.dimensionless and not isinstance(q.magnitude, str):
+                        return q.magnitude
+            except Exception:
+                pass
+        elif hasattr(val, "dimensionality"):
+            dim = val.dimensionality
+            if dim == Q_("1 second").dimensionality:
+                return val.to("seconds").magnitude
+            elif dim == Q_("1 meter").dimensionality:
+                return val.to("meter").magnitude
+            elif dim == Q_("1 m/s").dimensionality:
+                return val.to("m/s").magnitude
+            elif dim == Q_("1 m^2/s").dimensionality:
+                return val.to("m^2/second").magnitude
+            elif dim == Q_("1 / second").dimensionality:
+                return val.to("1/second").magnitude
+            elif dim == Q_("1 mol/m^3").dimensionality:
+                return val.to("mol/m^3").magnitude
+            elif dim == Q_("1 mol/(m^2 * second)").dimensionality:
+                return val.to("mol/(m^2 * second)").magnitude
+            elif val.dimensionless:
+                return val.to_base_units().magnitude
+        return val
+
     def configure(self, **kwargs) -> DiageneticModel:
         """Sets or overrides model configuration parameters with automatic unit handling.
 
@@ -314,57 +364,6 @@ class DiageneticModel:
 
         Nested structures (dicts, lists, tuples) are handled recursively.
         """
-        Q_ = self.Q_
-
-        def _convert_value(val: Any) -> Any:
-            if isinstance(val, (list, tuple)):
-                converted = [_convert_value(item) for item in val]
-                return tuple(converted) if isinstance(val, tuple) else converted
-            if isinstance(val, dict):
-                return {k: _convert_value(v) for k, v in val.items()}
-            if isinstance(val, str):
-                try:
-                    q = Q_(val)
-                    if hasattr(q, "dimensionality"):
-                        dim = q.dimensionality
-                        if dim == Q_("1 second").dimensionality:
-                            return q.to("seconds").magnitude
-                        elif dim == Q_("1 meter").dimensionality:
-                            return q.to("meter").magnitude
-                        elif dim == Q_("1 m/s").dimensionality:
-                            return q.to("m/s").magnitude
-                        elif dim == Q_("1 m^2/s").dimensionality:
-                            return q.to("m^2/second").magnitude
-                        elif dim == Q_("1 / second").dimensionality:
-                            return q.to("1/second").magnitude
-                        elif dim == Q_("1 mol/m^3").dimensionality:
-                            return q.to("mol/m^3").magnitude
-                        elif dim == Q_("1 mol/(m^2 * second)").dimensionality:
-                            return q.to("mol/(m^2 * second)").magnitude
-                        elif q.dimensionless and not isinstance(q.magnitude, str):
-                            return q.magnitude
-                except Exception:
-                    pass
-            elif hasattr(val, "dimensionality"):
-                dim = val.dimensionality
-                if dim == Q_("1 second").dimensionality:
-                    return val.to("seconds").magnitude
-                elif dim == Q_("1 meter").dimensionality:
-                    return val.to("meter").magnitude
-                elif dim == Q_("1 m/s").dimensionality:
-                    return val.to("m/s").magnitude
-                elif dim == Q_("1 m^2/s").dimensionality:
-                    return val.to("m^2/second").magnitude
-                elif dim == Q_("1 / second").dimensionality:
-                    return val.to("1/second").magnitude
-                elif dim == Q_("1 mol/m^3").dimensionality:
-                    return val.to("mol/m^3").magnitude
-                elif dim == Q_("1 mol/(m^2 * second)").dimensionality:
-                    return val.to("mol/(m^2 * second)").magnitude
-                elif val.dimensionless:
-                    return val.to_base_units().magnitude
-            return val
-
         for key, val in kwargs.items():
             if key in ("video", "video_dt"):
                 self.p_dict["video_dt"] = None if str(val).lower() in ("none", "null", "false") else val
@@ -376,8 +375,12 @@ class DiageneticModel:
                 self.p_dict["dt_tolerance"] = f_val
             elif key == "check_reactant_coexistence":
                 self.p_dict["check_reactant_coexistence"] = bool(val)
+            elif key in ("diffusive_boundary_layer", "dbl", "delta"):
+                val_m = self._convert_value(val)
+                self.p_dict["diffusive_boundary_layer"] = float(val_m)
+                self.p_dict["dbl"] = float(val_m)
             elif key == "bioturbation" and isinstance(val, dict):
-                c_val = _convert_value(val)
+                c_val = self._convert_value(val)
                 if "BT0" in c_val:
                     self.p_dict["BT0"] = float(c_val["BT0"])
                 if "depth" in c_val:
@@ -390,7 +393,7 @@ class DiageneticModel:
                     self.p_dict["BT_profile"] = str(c_val["profile"]).lower()
                 self.p_dict["bioturbation"] = c_val
             elif key == "bioirrigation" and isinstance(val, dict):
-                c_val = _convert_value(val)
+                c_val = self._convert_value(val)
                 if "BI0" in c_val:
                     self.p_dict["BI0"] = float(c_val["BI0"])
                 if "depth" in c_val:
@@ -403,7 +406,7 @@ class DiageneticModel:
                     self.p_dict["BI_profile"] = str(c_val["profile"]).lower()
                 self.p_dict["bioirrigation"] = c_val
             else:
-                self.p_dict[key] = _convert_value(val)
+                self.p_dict[key] = self._convert_value(val)
 
         return self
 
@@ -1083,10 +1086,19 @@ class DiageneticModel:
                         top_val = q_val.to("mol/(m^2 * second)").magnitude
                     else:
                         top_val = q_val.to("mol/m^3").magnitude
-                bc_map[sp_name] = {
+                bc_type = bc_meta.get("type", "dissolved")
+                bc_entry = {
                     "top": top_val,
-                    "type": bc_meta.get("type", "dissolved"),
+                    "type": bc_type,
                 }
+                dbl_val = float(self.p_dict.get("diffusive_boundary_layer", self.p_dict.get("dbl", 0.0)))
+                if dbl_val > 0.0 and bc_type == "dissolved":
+                    bc_entry["dbl"] = dbl_val
+                if isinstance(bc_meta, dict):
+                    for k_dbl in ("dbl", "delta", "diffusive_boundary_layer"):
+                        if k_dbl in bc_meta:
+                            bc_entry["dbl"] = float(self._convert_value(bc_meta[k_dbl]))
+                bc_map[sp_name] = bc_entry
 
         # Apply any explicit user overrides to boundary conditions
         bc_overrides = self.mp.get("bc_overrides", {})

@@ -218,6 +218,7 @@ def build_native_1d_transport_stencil(
     bc_props: Dict[str, Any],
     D_irr: Optional[np.ndarray] = None,
     solid_scheme: str = "powerlaw",
+    mp: Optional[Any] = None,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Constructs the exact 1D tridiagonal finite-volume transport stencil in pure NumPy.
 
@@ -276,7 +277,32 @@ def build_native_1d_transport_stencil(
     phi_top = eff_phi_arr[0]
 
     if is_dissolved:
-        D_top = (phi_top * D_cell_arr[0]) / d_top
+        delta_val = float(
+            bc_props.get(
+                "delta",
+                bc_props.get(
+                    "dbl",
+                    getattr(mp, "diffusive_boundary_layer", getattr(mp, "dbl", 0.0))
+                    if mp is not None
+                    else 0.0,
+                ),
+            )
+        )
+        d_cell_0 = max(float(D_cell_arr[0]), 1e-30)
+        if delta_val > 0.0:
+            # Stagnant Diffusive Boundary Layer (DBL) of thickness delta_val (m)
+            # In free water overlying sediment, tortuosity is 1.0.
+            # Boudreau (1996) tortuosity factor: theta^2 = 1 - ln(phi^2)
+            theta2 = max(1.0 - np.log(max(phi_top, 1e-4) ** 2), 1.0)
+            d_free_0 = d_cell_0 * theta2
+            # Combined series resistance across sediment half-cell and DBL:
+            # 1 / D_top = r_sed + r_dbl = (d_top / (phi * D_sed)) + (delta / D_free)
+            r_sed = d_top / (phi_top * d_cell_0)
+            r_dbl = delta_val / d_free_0
+            D_top = 1.0 / (r_sed + r_dbl)
+        else:
+            D_top = (phi_top * d_cell_0) / d_top
+
         F_top = phi_top * w_arr[0]
         Pe_top = F_top / np.maximum(D_top, 1e-30)
         A_top = np.maximum(0.0, (1.0 - 0.1 * np.abs(Pe_top))**5)
@@ -485,6 +511,7 @@ class MonolithicNewtonSystem:
                 bc_props=props,
                 D_irr=D_irr_val,
                 solid_scheme=solid_scheme,
+                mp=mp,
             )
 
             # ab has shape (3, N):

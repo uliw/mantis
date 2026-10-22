@@ -897,21 +897,13 @@ class EquationSystemGenerator:
 
         master_parent = self.validator.get_parent_species(master_sp)
 
-        ref_sp = None
-        ref_coeff = 1.0
-        if r.get("ref_species"):
-            ref_sp = r["ref_species"]
-            ref_coeff = float(r.get("stoich_ref", 1.0))
-        else:
+        ref_sp = r.get("ref_species")
+        ref_coeff = float(r.get("stoich_ref", 1.0))
+        if ref_sp and "stoich_ref" not in r:
             for coeff, sp in reactants:
-                p_sp = self.validator.get_parent_species(sp)
-                if isinstance(k_name, str) and (p_sp in k_name or sp in k_name):
-                    ref_sp = p_sp
+                if self.validator.get_parent_species(sp) == ref_sp or sp == ref_sp:
                     ref_coeff = float(coeff)
                     break
-            if not ref_sp:
-                ref_sp = master_parent
-                ref_coeff = float(master_coeff)
 
         other_reactants_entries = []
         for coeff, sp in reactants:
@@ -1590,19 +1582,13 @@ class EquationSystemGenerator:
 
         ref_sp = None
         ref_coeff = 1.0
-        if r.get("ref_species"):
-            ref_sp = r["ref_species"]
-            ref_coeff = float(r.get("stoich_ref", 1.0))
-        else:
+        ref_sp = r.get("ref_species")
+        ref_coeff = float(r.get("stoich_ref", 1.0))
+        if ref_sp and "stoich_ref" not in r:
             for coeff, sp in reactants:
-                p_sp = self.validator.get_parent_species(sp)
-                if isinstance(k_name, str) and (p_sp in k_name or sp in k_name):
-                    ref_sp = p_sp
+                if self.validator.get_parent_species(sp) == ref_sp or sp == ref_sp:
                     ref_coeff = float(coeff)
                     break
-            if not ref_sp:
-                ref_sp = r_parents[0][2]
-                ref_coeff = float(r_parents[0][0])
 
         all_needed_parents = set([p for _, _, p in r_parents] + [p for _, _, p in p_parents])
         conds = [f'"{p}" in idx' for p in sorted(all_needed_parents)]
