@@ -254,6 +254,7 @@ When defining your model setup and boundary conditions:
     ```text
     "bc": {"top": 28.2, "type": "dissolved"}         # 28.2 mmol/L (seawater sulfate)
     "bc": {"top": "280 umol/L", "type": "dissolved"} # parsed automatically to 0.28 mmol/L
+    "bc": {"top": 28.2, "type": "dissolved", "dbl": "0.5 mm"} # Optional Diffusive Boundary Layer
     ```
   - **Particulate Solids (`type: "particulate"`)**:
     Deposition at the sediment-water interface is specified as a depositional surface flux:
@@ -623,6 +624,50 @@ $$D_b(z) = D_{b0} \exp\left(-\frac{z}{x_{\text{atten}}}\right)$$
   ```
 
 Both formulations are automatically converted into SI units ($\text{m}^2/\text{s}$ and $\text{m}$) by Pint, and are coupled into the particulate transport stencils.
+
+
+### Diffusive Boundary Layer (DBL) Setup
+
+In benthic environments, a thin, hydrodynamic boundary layer of stagnant or laminar water sits directly above the sediment-water interface ($z = 0$). This **Diffusive Boundary Layer (DBL)** has a characteristic thickness $\delta$ (typically $0.2 - 1.0\ \text{mm}$; in many benchmarks such as Du 2023, $\delta = 0.5\ \text{mm} = 0.05\ \text{cm}$).
+
+Within this viscous sublayer, turbulence from overlying bottom water currents is damped, meaning solute transport occurs solely via molecular diffusion through free water ($\phi = 1$, without tortuosity hindrance).
+
+#### 1. Why Model the DBL?
+- **Retention vs. Ventilation**: Without a DBL (i.e. pure Dirichlet $C(0) = C_{\mathrm{BW}}$), dissolved metabolic products (such as $\mathrm{Fe}^{2+}$ or $\mathrm{H_2S}$) are instantaneously flushed away into the well-mixed water column. With a DBL, solutes can build up slightly at the sediment-water interface, increasing interfacial concentration gradients and driving authigenic mineral precipitation (e.g., $\mathrm{FeS}$ or carbonate minerals).
+- **Benchmark Consistency**: Benchmark models like SedTrace (Du 2023) incorporate an explicit DBL Robin boundary condition ($-\phi_0 D_{\mathrm{sed}} \left.\frac{\partial C}{\partial z}\right|_0 = \frac{D_{\mathrm{free}}}{\delta} (C_0 - C_{\mathrm{BW}})$).
+
+#### 2. Physical & Mathematical Formulation in MANTIS
+MANTIS represents the DBL as an exact finite-volume series resistance between the center of the first sediment grid cell ($z_0$) and the overlying well-mixed bottom water ($z = -\delta$):
+
+$$\frac{1}{D_{\mathrm{top}}} = R_{\mathrm{sed}} + R_{\mathrm{DBL}} = \frac{z_0}{\phi_0 D_{\mathrm{sed}}} + \frac{\delta}{D_{\mathrm{free}}}$$
+
+$$\implies D_{\mathrm{top}} = \frac{1}{\frac{z_0}{\phi_0 D_{\mathrm{sed}}} + \frac{\delta}{D_{\mathrm{free}}}}$$
+
+- When $\delta = 0$, $R_{\mathrm{DBL}} = 0$, collapsing smoothly to the standard Dirichlet condition $D_{\mathrm{top}} = \frac{\phi_0 D_{\mathrm{sed}}}{z_0}$.
+- Free molecular diffusion $D_{\mathrm{free}}$ is related to the tortuous sediment porewater diffusion coefficient by Boudreau's relation: $D_{\mathrm{free}} = D_{\mathrm{sed}} \cdot (1 - \ln \phi_0^2)$.
+
+#### 3. How to Configure the DBL in MANTIS
+You can activate and set the DBL thickness globally across all dissolved solutes in your driver script via `model.configure()`:
+
+```python
+model.configure(
+    ...,
+    diffusive_boundary_layer="0.5 mm",  # Or "0.05 cm"; accepts any Pint length unit
+)
+```
+*(The alias `dbl="0.5 mm"` or `delta="0.5 mm"` is also accepted).*
+
+Alternatively, you can specify DBL parameters for individual species in `species.py`:
+```python
+"SO4": {
+    "phase": "liquid",
+    "bc": {
+        "top": 28.0,
+        "type": "dissolved",
+        "dbl": "0.5 mm",
+    },
+}
+```
 
 
 ### Spatial Grid Configuration & Reaction Zone Resolution
