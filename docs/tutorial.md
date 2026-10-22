@@ -552,7 +552,8 @@ if __name__ == "__main__":
         # Macrofaunal bioturbation mixing (sediment surface down to 6 cm)
         bioturbation={
             "BT0": "4 cm^2/year",      # Surface bio-diffusion coefficient
-            "depth": "6 cm",           # Mixed layer depth
+            "profile": "sigmoidal",    # "sigmoidal" (default) or "exponential"
+            "depth": "6 cm",           # Mixed layer depth (for sigmoidal)
             "attenuation": "2 cm",     # Transition attenuation width
         },
 
@@ -585,6 +586,43 @@ if __name__ == "__main__":
     # Render final publication plot
     result.plot_summary()
 ```
+
+### Bioturbation Mixing Profiles: Sigmoidal vs. Exponential
+
+Bioturbation represents the mechanical mixing of sediment particles (solids) by burrowing and deposit-feeding benthic macrofauna. MANTIS provides two standard formulations selectable via the `profile` parameter in the `bioturbation` dictionary:
+
+#### 1. Sigmoidal Profile (`profile="sigmoidal"`, Default)
+Based on the formulation of van de Velde and Meysman (2016), this profile represents a distinctly mixed surface layer of thickness $z_{\text{mix}}$ (`depth`) underlain by a smooth transition zone of width $x_{\text{atten}}$ (`attenuation`):
+
+$$D_b(z) = \frac{D_{b0}}{1 + \exp\left(\frac{z - z_{\text{mix}}}{0.25 \, x_{\text{atten}}}\right)}$$
+
+- **When to use**: Ideal for shallow coastal and shelf environments where continuous burrowing activity maintains a uniform, constant mixing intensity in the top few centimeters before tapering off sharply below the mixed layer.
+- **Configuration**:
+  ```python
+  bioturbation={
+      "BT0": "4 cm^2/year",      # Surface bio-diffusivity Db0
+      "profile": "sigmoidal",    # Default
+      "depth": "6 cm",           # Mixed layer thickness z_mix
+      "attenuation": "2 cm",     # Transition zone width x_atten
+  }
+  ```
+
+#### 2. Exponential Profile (`profile="exponential"`)
+A classical diagenetic formulation where bio-diffusive mixing intensity is highest at the sediment-water interface ($z = 0$) and continuously decays with depth without a flat shoulder:
+
+$$D_b(z) = D_{b0} \exp\left(-\frac{z}{x_{\text{atten}}}\right)$$
+
+- **When to use**: Widely used in benchmark reactive-transport models (such as SedTrace / SimpleFe; Du 2023) and deep-sea or low-activity sediments where faunal abundance and mixing frequency attenuate exponentially from the sediment surface.
+- **Configuration**:
+  ```python
+  bioturbation={
+      "BT0": "10 cm^2/year",     # Surface bio-diffusivity Db0
+      "profile": "exponential",
+      "attenuation": "3 cm",     # e-folding attenuation depth scale (also accepts "decay")
+  }
+  ```
+
+Both formulations are automatically converted into SI units ($\text{m}^2/\text{s}$ and $\text{m}$) by Pint, and are coupled into the particulate transport stencils.
 
 
 ### Spatial Grid Configuration & Reaction Zone Resolution

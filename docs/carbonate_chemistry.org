@@ -56,7 +56,52 @@ In MANTIS, reaction-transport equations for dissolved solutes are formulated in 
 
 $$K'_{sp}\ (\text{mol}^2 \cdot \text{m}^{-6}) = K'_{sp}\ (\text{mol}^2 \cdot \text{kg}_{\text{sw}}^{-2}) \times \rho_{\text{sw}}^2$$
 
-Because $[H^+] = 10^{-\text{pH}}$ is expressed on the standard Total pH scale, the dissociation constants $K_1^*$ and $K_2^*$ are preserved on the Total activity scale ($pK_1 \approx 6.00, pK_2 \approx 9.22$), ensuring that speciation fractions ($\alpha_1, \alpha_2$) remain dimensionless.
+Because $[H^+] = 10^{-\text{pH}}$ is evaluated on the active pH scale (=ph_scale=, default: ="free"=), the stoichiometric dissociation constants $K_1^*$ and $K_2^*$ are matched to this scale in $\text{mol} \cdot \text{kg}_{\text{sw}}^{-1}$, ensuring that speciation fractions ($\alpha_0, \alpha_1, \alpha_2$) remain dimensionless and exact.
+
+*** pH Scale Conventions: Free Scale vs. Total Scale
+
+In marine biogeochemistry and diagenetic modeling, the definition of porewater pH depends on whether sulfate ion-pairing is subsumed into the hydrogen ion definition:
+
+1. **Free pH Scale ($\text{pH}_F$) [MANTIS Default]**:
+   Considers only uncomplexed hydrated hydronium ions ($[H^+]_F$). This scale is widely adopted in geochemical reaction-transport models (e.g. Du 2023 / SedTrace) because mineral precipitation/dissolution and trace-metal speciation reactions are driven by free proton activities.
+
+2. **Total pH Scale ($\text{pH}_T$)**:
+   Includes bisulfate ion pairs ($[HSO_4^-]$) formed with abundant seawater sulfate ($SO_4^{2-}$):
+   $$[H^+]_T = [H^+]_F \left( 1 + \frac{S_T}{K_S} \right)$$
+   where $S_T$ is total seawater sulfate and $K_S$ is the stoichiometric acid dissociation constant of bisulfate. The Total scale is the standard convention for marine spectrophotometric measurements and ocean carbon inventory budgets (Dickson et al. 2007; Lueker et al. 2000).
+
+**** Total Sulfate Formulation
+Total sulfate $S_T$ ($\text{mol} \cdot \text{kg}_{\text{sw}}^{-1}$) is calculated from practical salinity $S$ following Morris and Riley (1966) and Dickson et al. (2007, Chapter 5):
+
+$$S_T = \frac{0.1400}{96.062} \times \frac{S}{1.80655} \approx 0.02824 \times \frac{S}{35} \quad (\text{mol} \cdot \text{kg}_{\text{sw}}^{-1})$$
+
+**** Bisulfate Dissociation Constant ($K_S$)
+The stoichiometric dissociation constant of $\text{HSO}_4^-$ on the free scale at 1 atm total pressure is calculated using the standard formulation of Dickson (1990):
+
+$$\ln K_S^0 = -\frac{4276.1}{T} + 141.328 - 23.093 \ln T + \left(-\frac{13856.0}{T} + 324.57 - 47.986 \ln T\right) \sqrt{I_F} + \left(\frac{35474.0}{T} - 771.54 + 114.723 \ln T\right) I_F - \frac{2698.0}{T} I_F^{1.5} + \frac{1776.0}{T} I_F^2 + \ln(1.0 - 0.001005 S)$$
+
+where $I_F = \frac{19.924 S}{1000 - 1.005 S}$ is ionic strength on the free scale. Hydrostatic pressure correction for $K_S$ at depth ($P > 1\ \text{bar}$) follows Millero (1995, Table 9):
+
+$$\ln \left( \frac{K_S(P)}{K_S^0} \right) = \frac{-\Delta V_S + 0.5 \kappa_S P}{R T} P$$
+
+with:
+
+$$\Delta V_S = -18.03 + 0.0466 T_C + 0.000316 T_C^2, \quad \kappa_S = (-4.53 + 0.09 T_C) \times 10^{-3}$$
+
+**** Constant Transformation Between Scales
+Because Lueker et al. (2000) formulated $K_1^0$ and $K_2^0$ on the Total scale, MANTIS converts the dissociation constants to the Free scale by dividing by the scale factor:
+
+$$\text{scale factor} = 1 + \frac{S_T}{K_S(P)}$$
+
+$$K_{1,F}^* = \frac{K_{1,T}^*}{\text{scale factor}}, \quad K_{2,F}^* = \frac{K_{2,T}^*}{\text{scale factor}}$$
+
+$$pK_{1,F}^* = pK_{1,T}^* + \log_{10}(\text{scale factor}), \quad pK_{2,F}^* = pK_{2,T}^* + \log_{10}(\text{scale factor})$$
+
+For typical marine porewater ($S \approx 34 - 35$, $T \approx 5 - 10\ ^\circ\text{C}$, $P \le 50\ \text{bar}$), $\log_{10}(\text{scale factor}) \approx +0.05$ to $+0.06$. Consequently, porewater pH values on the Free scale are higher than on the Total scale by this offset:
+
+$$\text{pH}_F = \text{pH}_T + \log_{10}(\text{scale factor})$$
+
+Calcite solubility ($K'_{sp} = [\text{Ca}^{2+}][\text{CO}_3^{2-}]$) does not involve protons and is therefore invariant with respect to the chosen pH scale.
 
 ** Choosing a calcite precipitation rate
 
@@ -92,6 +137,7 @@ model.configure(
     carbonate_equilibrium_chemistry={
         "pressure": 1.0,     # in bar (optional, default: 1.0)
         "salinity": 34.0,    # in PSU (optional, default: 34.0)
+        "ph_scale": "free",  # "free" (default) or "total"
         "TA": 2.4,           # in mol/m^3 = mmol/L
         "DIC": 2.2,          # in mol/m^3 = mmol/L
         "adjust_omega": True # in equilibrium with calcite (default: True)
@@ -137,6 +183,7 @@ Setting =adjust_omega = False= preserves boundary conditions as specified:
 
 * References
 
+- **Dickson, A. G.** (1990). Standard potential of the reaction: $\text{AgCl(s)} + \frac{1}{2}\text{H}_2\text{(g)} = \text{Ag(s)} + \text{HCl(aq)}$, and the standard acidity constant of the ion $\text{HSO}_4^-$ in synthetic seawater from 273.15 to 318.15 K. *The Journal of Chemical Thermodynamics*, 22(2), 113–127.
 - **Dickson, A. G., Sabine, C. L., and Christian, J. R.** (Eds.) (2007). *Guide to best practices for ocean CO2 measurements*. PICES Special Publication 3, 191 pp.
 - **Ingle, S. E.** (1975). Solubility of calcite in the ocean. *Marine Chemistry*, 3(4), 301–319.
 - **Jourabchi, P., Van Cappellen, P., and Regnier, P.** (2005). Quantitative interpretation of pH distributions in aquatic sediments: A reaction-transport modeling approach. *American Journal of Science*, 305(9), 919–956.
@@ -145,6 +192,7 @@ Setting =adjust_omega = False= preserves boundary conditions as specified:
 - **Millero, F. J.** (1979). The thermodynamics of the carbonate system in seawater. *Geochimica et Cosmochimica Acta*, 43(10), 1651–1661.
 - **Millero, F. J.** (1995). Thermodynamics of the carbon dioxide system in the oceans. *Geochimica et Cosmochimica Acta*, 59(4), 661–677.
 - **Millero, F. J., and Poisson, A.** (1981). International one-atmosphere equation of state of seawater. *Deep Sea Research Part A*, 28(6), 625–629.
+- **Morris, A. W., and Riley, J. P.** (1966). The bromide/chlorinity and sulphate/chlorinity ratio in sea water. *Deep Sea Research and Oceanographic Abstracts*, 13(4), 699–705.
 - **Morse, J. W., Arvidson, R. S., and Lüttge, A.** (2007). Calcium carbonate formation and dissolution. *Chemical Reviews*, 107(2), 342–381.
 - **Mucci, A.** (1983). The solubility of calcite and aragonite in seawater at various salinities and temperatures, and at one atmosphere total pressure. *American Journal of Science*, 283(7), 780–799.
 - **Wang, Y., and Van Cappellen, P.** (1996). A multicomponent reactive transport model of early diagenesis: Application to redox cycling in coastal marine sediments. *Geochimica et Cosmochimica Acta*, 60(16), 2993–3014.

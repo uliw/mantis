@@ -25,13 +25,24 @@ def test_seawater_density_unesco():
 
 
 def test_carbonate_constants_benchmarks():
-    """Test K1, K2, and Ksp calculations against oceanographic benchmarks."""
-    const = calc_carbonate_constants(temp_c=10.0, salinity=34.0, pressure_bar=1.0)
-    # Lueker et al. (2000): pK1 ~ 6.00, pK2 ~ 9.22
-    assert 5.95 < const.pK1 < 6.05
-    assert 9.15 < const.pK2 < 9.30
-    # Mucci (1983): Ksp_calcite in (mol/m^3)^2 ~ 0.44
-    assert 0.40 < const.Ksp_calcite < 0.48
+    """Test K1, K2, and Ksp calculations against oceanographic benchmarks on free and total scales."""
+    # 1. Default Free pH scale
+    const_free = calc_carbonate_constants(temp_c=10.0, salinity=34.0, pressure_bar=1.0)
+    assert const_free.ph_scale == "free"
+    assert 6.00 < const_free.pK1 < 6.12
+    assert 9.20 < const_free.pK2 < 9.35
+    assert 0.40 < const_free.Ksp_calcite < 0.48
+
+    # 2. Total pH scale (Lueker et al. 2000: pK1 ~ 6.00, pK2 ~ 9.22)
+    const_tot = calc_carbonate_constants(temp_c=10.0, salinity=34.0, pressure_bar=1.0, ph_scale="total")
+    assert const_tot.ph_scale == "total"
+    assert 5.95 < const_tot.pK1 < 6.05
+    assert 9.15 < const_tot.pK2 < 9.30
+    assert 0.40 < const_tot.Ksp_calcite < 0.48
+
+    # Scale factor check: pK_free - pK_total = log10(scale_factor)
+    assert const_free.pK1 == pytest.approx(const_tot.pK1 + np.log10(const_free.scale_factor), abs=1e-8)
+    assert const_free.pK2 == pytest.approx(const_tot.pK2 + np.log10(const_free.scale_factor), abs=1e-8)
 
 
 def test_adjust_for_calcite_equilibrium_combinations():
