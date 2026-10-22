@@ -90,7 +90,7 @@ def rxn_aerobic_respiration_fast(c, k_val, lim, LHS, RHS, RATES, CROSS, mp):
         products={'DIC': 1.0},
         coeff_master=coeff_master, rate_master=rate_master,
         has_solid=has_solid, reaction_name="aerobic_respiration_fast",
-        ref_species="POC_fast", stoich_ref=1.0,
+        ref_species="None", stoich_ref=1.0,
     )
 aerobic_respiration_fast = rxn_aerobic_respiration_fast
 
@@ -108,7 +108,7 @@ def rxn_aerobic_respiration_slow(c, k_val, lim, LHS, RHS, RATES, CROSS, mp):
         products={'DIC': 1.0},
         coeff_master=coeff_master, rate_master=rate_master,
         has_solid=has_solid, reaction_name="aerobic_respiration_slow",
-        ref_species="POC_slow", stoich_ref=1.0,
+        ref_species="None", stoich_ref=1.0,
     )
 aerobic_respiration_slow = rxn_aerobic_respiration_slow
 
@@ -127,7 +127,7 @@ def rxn_dissimilatory_iron_reduction_fast(c, k_val, lim, LHS, RHS, RATES, CROSS,
         products={'Fe2_total': 4.0, 'DIC': 1.0, 'TA': 8.0},
         coeff_master=coeff_master, rate_master=rate_master,
         has_solid=has_solid, reaction_name="dissimilatory_iron_reduction_fast",
-        ref_species="POC_fast", stoich_ref=1.0,
+        ref_species="None", stoich_ref=1.0,
     )
 dissimilatory_iron_reduction_fast = rxn_dissimilatory_iron_reduction_fast
 
@@ -146,7 +146,7 @@ def rxn_dissimilatory_iron_reduction_slow(c, k_val, lim, LHS, RHS, RATES, CROSS,
         products={'Fe2_total': 4.0, 'DIC': 1.0, 'TA': 8.0},
         coeff_master=coeff_master, rate_master=rate_master,
         has_solid=has_solid, reaction_name="dissimilatory_iron_reduction_slow",
-        ref_species="POC_slow", stoich_ref=1.0,
+        ref_species="None", stoich_ref=1.0,
     )
 dissimilatory_iron_reduction_slow = rxn_dissimilatory_iron_reduction_slow
 
@@ -166,7 +166,7 @@ def rxn_sulfate_reduction_fast(c, k_val, lim, LHS, RHS, RATES, CROSS, mp):
         products={'TS2': 1.0, 'DIC': 2.0, 'TA': 2.0},
         coeff_master=coeff_master, rate_master=rate_master,
         has_solid=has_solid, reaction_name="sulfate_reduction_fast",
-        ref_species="POC_fast", stoich_ref=2.0,
+        ref_species="None", stoich_ref=1.0,
     )
     if getattr(mp, "isotopes", False):
         _coeff_base_iso = k_num * getattr(c, "POC_fast") * _lim_SO4 * _inh_O2 * _inh_Fe3_diss_red
@@ -181,7 +181,7 @@ def rxn_sulfate_reduction_fast(c, k_val, lim, LHS, RHS, RATES, CROSS, mp):
             products={'TS2_32': 1.0},
             coeff_master=coeff_master_iso, rate_master=coeff_master_iso * getattr(c, "SO4_32"),
             has_solid=has_solid, reaction_name="sulfate_reduction_fast_iso",
-            ref_species="POC_fast", stoich_ref=2.0,
+            ref_species="None", stoich_ref=1.0,
         )
 sulfate_reduction_fast = rxn_sulfate_reduction_fast
 
@@ -201,7 +201,7 @@ def rxn_sulfate_reduction_slow(c, k_val, lim, LHS, RHS, RATES, CROSS, mp):
         products={'TS2': 1.0, 'DIC': 2.0, 'TA': 2.0},
         coeff_master=coeff_master, rate_master=rate_master,
         has_solid=has_solid, reaction_name="sulfate_reduction_slow",
-        ref_species="POC_slow", stoich_ref=2.0,
+        ref_species="None", stoich_ref=1.0,
     )
     if getattr(mp, "isotopes", False):
         _coeff_base_iso = k_num * getattr(c, "POC_slow") * _lim_SO4 * _inh_O2 * _inh_Fe3_diss_red
@@ -216,7 +216,7 @@ def rxn_sulfate_reduction_slow(c, k_val, lim, LHS, RHS, RATES, CROSS, mp):
             products={'TS2_32': 1.0},
             coeff_master=coeff_master_iso, rate_master=coeff_master_iso * getattr(c, "SO4_32"),
             has_solid=has_solid, reaction_name="sulfate_reduction_slow_iso",
-            ref_species="POC_slow", stoich_ref=2.0,
+            ref_species="None", stoich_ref=1.0,
         )
 sulfate_reduction_slow = rxn_sulfate_reduction_slow
 
@@ -234,7 +234,7 @@ def rxn_hs_oxidation(c, k_val, lim, LHS, RHS, RATES, CROSS, mp):
         products={'SO4': 1.0},
         coeff_master=coeff_master, rate_master=rate_master,
         has_solid=has_solid, reaction_name="hs_oxidation",
-        ref_species="TS2", stoich_ref=1.0,
+        ref_species="None", stoich_ref=1.0,
     )
     if getattr(mp, "isotopes", False):
         _coeff_base_iso = k_num * mp.hs_frac * getattr(c, "O2") * _lim_O2_TS2
@@ -249,7 +249,7 @@ def rxn_hs_oxidation(c, k_val, lim, LHS, RHS, RATES, CROSS, mp):
             products={'SO4_32': 1.0},
             coeff_master=coeff_master_iso, rate_master=coeff_master_iso * getattr(c, "TS2_32"),
             has_solid=has_solid, reaction_name="hs_oxidation_iso",
-            ref_species="TS2", stoich_ref=1.0,
+            ref_species="None", stoich_ref=1.0,
         )
 hs_oxidation = rxn_hs_oxidation
 
@@ -268,7 +268,7 @@ def rxn_sulfide_mediated_iron_reduction_velde(c, k_val, lim, LHS, RHS, RATES, CR
         products={'SO4': 1.0, 'Fe2_total': 8.0, 'TA': 15.0},
         coeff_master=coeff_master, rate_master=rate_master,
         has_solid=has_solid, reaction_name="sulfide_mediated_iron_reduction_velde",
-        ref_species="Fe3", stoich_ref=8.0,
+        ref_species="None", stoich_ref=1.0,
     )
     if getattr(mp, "isotopes", False):
         coeff_master_iso = k_num * mp.hs_frac * getattr(c, "Fe3") * _lim_Fe3 * _inh_O2
@@ -279,7 +279,7 @@ def rxn_sulfide_mediated_iron_reduction_velde(c, k_val, lim, LHS, RHS, RATES, CR
             products={'SO4_32': 1.0},
             coeff_master=coeff_master_iso, rate_master=coeff_master_iso * getattr(c, "TS2_32"),
             has_solid=has_solid, reaction_name="sulfide_mediated_iron_reduction_velde_iso",
-            ref_species="Fe3", stoich_ref=8.0,
+            ref_species="None", stoich_ref=1.0,
         )
 sulfide_mediated_iron_reduction_velde = rxn_sulfide_mediated_iron_reduction_velde
 
@@ -296,7 +296,7 @@ def rxn_Fe2_oxidation(c, k_val, lim, LHS, RHS, RATES, CROSS, mp):
         products={'Fe3': 4.0},
         coeff_master=coeff_master, rate_master=rate_master,
         has_solid=has_solid, reaction_name="Fe2_oxidation",
-        ref_species="O2", stoich_ref=1.0,
+        ref_species="None", stoich_ref=1.0,
     )
 Fe2_oxidation = rxn_Fe2_oxidation
 
@@ -313,7 +313,7 @@ def rxn_FeS_oxidation(c, k_val, lim, LHS, RHS, RATES, CROSS, mp):
         products={'Fe3': 4.0, 'SO4': 4.0},
         coeff_master=coeff_master, rate_master=rate_master,
         has_solid=has_solid, reaction_name="FeS_oxidation",
-        ref_species="FeS", stoich_ref=4.0,
+        ref_species="None", stoich_ref=1.0,
     )
     if getattr(mp, "isotopes", False):
         coeff_master_iso = k_num * getattr(c, "O2")
@@ -324,7 +324,7 @@ def rxn_FeS_oxidation(c, k_val, lim, LHS, RHS, RATES, CROSS, mp):
             products={'SO4_32': 4.0},
             coeff_master=coeff_master_iso, rate_master=coeff_master_iso * getattr(c, "FeS_32"),
             has_solid=has_solid, reaction_name="FeS_oxidation_iso",
-            ref_species="FeS", stoich_ref=4.0,
+            ref_species="None", stoich_ref=1.0,
         )
 FeS_oxidation = rxn_FeS_oxidation
 
@@ -452,7 +452,7 @@ def rxn_calcite_dissolution(c, k_val, lim, LHS, RHS, RATES, CROSS, mp):
         products={'Ca2': 1.0, 'DIC': 1.0, 'TA': 2.0},
         coeff_master=coeff_master, rate_master=rate_master,
         has_solid=has_solid, reaction_name="calcite_dissolution",
-        ref_species="CaCO3", stoich_ref=1.0,
+        ref_species="None", stoich_ref=1.0,
     )
 calcite_dissolution = rxn_calcite_dissolution
 
@@ -470,7 +470,7 @@ def rxn_calcite_precipitation(c, k_val, lim, LHS, RHS, RATES, CROSS, mp):
         products={'CaCO3': 1.0},
         coeff_master=coeff_master, rate_master=rate_master,
         has_solid=has_solid, reaction_name="calcite_precipitation",
-        ref_species="Ca2", stoich_ref=1.0,
+        ref_species="None", stoich_ref=1.0,
     )
 calcite_precipitation = rxn_calcite_precipitation
 
@@ -677,7 +677,7 @@ def compute_chemical_jacobian(c, mp, k, species_names):
         _lim_SO4 = lim.get("SO4_implicit", lim.get("SO4", 1.0))
         _inh_O2 = lim.get("O2_inhibit", lim.get("O2_inhib", 1.0))
         _inh_Fe3_diss_red = lim.get("Fe3_diss_red_inhibit", lim.get("Fe3_diss_red_inhib", 1.0))
-        d_POC_fast_sulfate_reduction_fast = solid_fac * (k_num_sulfate_reduction_fast / 2.0) * c_SO4 * _lim_SO4 * _inh_O2 * _inh_Fe3_diss_red
+        d_POC_fast_sulfate_reduction_fast = solid_fac * (k_num_sulfate_reduction_fast / 1.0) * c_SO4 * _lim_SO4 * _inh_O2 * _inh_Fe3_diss_red
         J[:, idx["POC_fast"], idx["POC_fast"]] -= 2.0 * d_POC_fast_sulfate_reduction_fast
         J[:, idx["SO4"], idx["POC_fast"]] -= 1.0 * d_POC_fast_sulfate_reduction_fast
         J[:, idx["TS2"], idx["POC_fast"]] += 1.0 * d_POC_fast_sulfate_reduction_fast
@@ -690,7 +690,7 @@ def compute_chemical_jacobian(c, mp, k, species_names):
                 J[:, idx["SO4_32"], idx["POC_fast"]] -= 1.0 * d_POC_fast_sulfate_reduction_fast * _f_iso
             if "TS2_32" in idx:
                 J[:, idx["TS2_32"], idx["POC_fast"]] += 1.0 * d_POC_fast_sulfate_reduction_fast * _f_iso
-        d_SO4_sulfate_reduction_fast = solid_fac * (k_num_sulfate_reduction_fast / 2.0) * c_POC_fast * _lim_SO4 * _inh_O2 * _inh_Fe3_diss_red
+        d_SO4_sulfate_reduction_fast = solid_fac * (k_num_sulfate_reduction_fast / 1.0) * c_POC_fast * _lim_SO4 * _inh_O2 * _inh_Fe3_diss_red
         J[:, idx["POC_fast"], idx["SO4"]] -= 2.0 * d_SO4_sulfate_reduction_fast
         J[:, idx["SO4"], idx["SO4"]] -= 1.0 * d_SO4_sulfate_reduction_fast
         J[:, idx["TS2"], idx["SO4"]] += 1.0 * d_SO4_sulfate_reduction_fast
@@ -714,7 +714,7 @@ def compute_chemical_jacobian(c, mp, k, species_names):
         _lim_SO4 = lim.get("SO4_implicit", lim.get("SO4", 1.0))
         _inh_O2 = lim.get("O2_inhibit", lim.get("O2_inhib", 1.0))
         _inh_Fe3_diss_red = lim.get("Fe3_diss_red_inhibit", lim.get("Fe3_diss_red_inhib", 1.0))
-        d_POC_slow_sulfate_reduction_slow = solid_fac * (k_num_sulfate_reduction_slow / 2.0) * c_SO4 * _lim_SO4 * _inh_O2 * _inh_Fe3_diss_red
+        d_POC_slow_sulfate_reduction_slow = solid_fac * (k_num_sulfate_reduction_slow / 1.0) * c_SO4 * _lim_SO4 * _inh_O2 * _inh_Fe3_diss_red
         J[:, idx["POC_slow"], idx["POC_slow"]] -= 2.0 * d_POC_slow_sulfate_reduction_slow
         J[:, idx["SO4"], idx["POC_slow"]] -= 1.0 * d_POC_slow_sulfate_reduction_slow
         J[:, idx["TS2"], idx["POC_slow"]] += 1.0 * d_POC_slow_sulfate_reduction_slow
@@ -727,7 +727,7 @@ def compute_chemical_jacobian(c, mp, k, species_names):
                 J[:, idx["SO4_32"], idx["POC_slow"]] -= 1.0 * d_POC_slow_sulfate_reduction_slow * _f_iso
             if "TS2_32" in idx:
                 J[:, idx["TS2_32"], idx["POC_slow"]] += 1.0 * d_POC_slow_sulfate_reduction_slow * _f_iso
-        d_SO4_sulfate_reduction_slow = solid_fac * (k_num_sulfate_reduction_slow / 2.0) * c_POC_slow * _lim_SO4 * _inh_O2 * _inh_Fe3_diss_red
+        d_SO4_sulfate_reduction_slow = solid_fac * (k_num_sulfate_reduction_slow / 1.0) * c_POC_slow * _lim_SO4 * _inh_O2 * _inh_Fe3_diss_red
         J[:, idx["POC_slow"], idx["SO4"]] -= 2.0 * d_SO4_sulfate_reduction_slow
         J[:, idx["SO4"], idx["SO4"]] -= 1.0 * d_SO4_sulfate_reduction_slow
         J[:, idx["TS2"], idx["SO4"]] += 1.0 * d_SO4_sulfate_reduction_slow
@@ -782,7 +782,7 @@ def compute_chemical_jacobian(c, mp, k, species_names):
         c_TS2 = np.asarray(c["TS2"].value if hasattr(c["TS2"], "value") else c["TS2"])
         _lim_Fe3 = lim.get("Fe3_implicit", lim.get("Fe3", 1.0))
         _inh_O2 = lim.get("O2_inhibit", lim.get("O2_inhib", 1.0))
-        d_TS2_sulfide_mediated_iron_reduction_velde = solid_fac * (k_num_sulfide_mediated_iron_reduction_velde / 8.0) * (mp.hs_frac) * c_Fe3 * _lim_Fe3 * _inh_O2
+        d_TS2_sulfide_mediated_iron_reduction_velde = solid_fac * (k_num_sulfide_mediated_iron_reduction_velde / 1.0) * (mp.hs_frac) * c_Fe3 * _lim_Fe3 * _inh_O2
         J[:, idx["TS2"], idx["TS2"]] -= 1.0 * d_TS2_sulfide_mediated_iron_reduction_velde
         J[:, idx["Fe3"], idx["TS2"]] -= 8.0 * d_TS2_sulfide_mediated_iron_reduction_velde
         J[:, idx["SO4"], idx["TS2"]] += 1.0 * d_TS2_sulfide_mediated_iron_reduction_velde
@@ -793,7 +793,7 @@ def compute_chemical_jacobian(c, mp, k, species_names):
                 J[:, idx["TS2_32"], idx["TS2_32"]] -= 1.0 * d_TS2_sulfide_mediated_iron_reduction_velde
             if "SO4_32" in idx:
                 J[:, idx["SO4_32"], idx["TS2_32"]] += 1.0 * d_TS2_sulfide_mediated_iron_reduction_velde
-        d_Fe3_sulfide_mediated_iron_reduction_velde = solid_fac * (k_num_sulfide_mediated_iron_reduction_velde / 8.0) * (c_TS2 * (mp.hs_frac)) * _lim_Fe3 * _inh_O2
+        d_Fe3_sulfide_mediated_iron_reduction_velde = solid_fac * (k_num_sulfide_mediated_iron_reduction_velde / 1.0) * (c_TS2 * (mp.hs_frac)) * _lim_Fe3 * _inh_O2
         J[:, idx["TS2"], idx["Fe3"]] -= 1.0 * d_Fe3_sulfide_mediated_iron_reduction_velde
         J[:, idx["Fe3"], idx["Fe3"]] -= 8.0 * d_Fe3_sulfide_mediated_iron_reduction_velde
         J[:, idx["SO4"], idx["Fe3"]] += 1.0 * d_Fe3_sulfide_mediated_iron_reduction_velde
@@ -835,7 +835,7 @@ def compute_chemical_jacobian(c, mp, k, species_names):
         c_O2 = np.asarray(c["O2"].value if hasattr(c["O2"], "value") else c["O2"])
         c_SO4 = np.asarray(c["SO4"].value if hasattr(c["SO4"], "value") else c["SO4"])
         c_TA = np.asarray(c["TA"].value if hasattr(c["TA"], "value") else c["TA"])
-        d_FeS_FeS_oxidation = solid_fac * (k_num_FeS_oxidation / 4.0) * c_O2
+        d_FeS_FeS_oxidation = solid_fac * (k_num_FeS_oxidation / 1.0) * c_O2
         J[:, idx["FeS"], idx["FeS"]] -= 4.0 * d_FeS_FeS_oxidation
         J[:, idx["O2"], idx["FeS"]] -= 9.0 * d_FeS_FeS_oxidation
         J[:, idx["TA"], idx["FeS"]] -= 8.0 * d_FeS_FeS_oxidation
@@ -846,7 +846,7 @@ def compute_chemical_jacobian(c, mp, k, species_names):
                 J[:, idx["FeS_32"], idx["FeS_32"]] -= 4.0 * d_FeS_FeS_oxidation
             if "SO4_32" in idx:
                 J[:, idx["SO4_32"], idx["FeS_32"]] += 4.0 * d_FeS_FeS_oxidation
-        d_O2_FeS_oxidation = solid_fac * (k_num_FeS_oxidation / 4.0) * c_FeS
+        d_O2_FeS_oxidation = solid_fac * (k_num_FeS_oxidation / 1.0) * c_FeS
         J[:, idx["FeS"], idx["O2"]] -= 4.0 * d_O2_FeS_oxidation
         J[:, idx["O2"], idx["O2"]] -= 9.0 * d_O2_FeS_oxidation
         J[:, idx["TA"], idx["O2"]] -= 8.0 * d_O2_FeS_oxidation

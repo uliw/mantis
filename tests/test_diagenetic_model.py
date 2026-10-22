@@ -340,4 +340,45 @@ def test_all_species_exported_and_saved(tmp_path):
     assert np.all(loaded["Fe2_liq"] > 0.0)
 
 
+def test_diffusive_boundary_layer_stencil():
+    """Verify that a diffusive boundary layer (DBL) reduces interfacial conductance."""
+    import numpy as np
+    from mantis.monolithic_solver import build_native_1d_transport_stencil
+
+    z = np.linspace(0.001, 0.1, 10)
+    dx = np.full(10, 0.01)
+    phi = 0.8
+    D = np.full(10, 1e-9)
+    w = 1e-10
+
+    # 1. Pure Dirichlet (no DBL)
+    bc_dirichlet = {"type": "dissolved", "top": 28.0}
+    ab_dir, b_dir = build_native_1d_transport_stencil(
+        z=z, dx=dx, phi=phi, D_cell=D, w=w, bc_props=bc_dirichlet
+    )
+
+    # 2. Robin with DBL (delta = 0.5 mm = 0.0005 m)
+    bc_dbl = {"type": "dissolved", "top": 28.0, "dbl": 0.0005}
+    ab_dbl, b_dbl = build_native_1d_transport_stencil(
+        z=z, dx=dx, phi=phi, D_cell=D, w=w, bc_props=bc_dbl
+    )
+
+    assert ab_dir.shape == (3, 10)
+    assert ab_dbl.shape == (3, 10)
+    # The added DBL series resistance must lower interfacial exchange conductance
+    assert b_dbl[0] < b_dir[0]
+    assert ab_dbl[1, 0] < ab_dir[1, 0]
+
+
+def test_diffusive_boundary_layer_configure():
+    """Verify that model.configure correctly parses and converts DBL units."""
+    import numpy as np
+    from mantis import DiageneticModel
+    model = DiageneticModel()
+    model.configure(diffusive_boundary_layer="0.05 cm")
+    assert np.isclose(model.p_dict["diffusive_boundary_layer"], 0.0005)
+    assert np.isclose(model.p_dict["dbl"], 0.0005)
+
+
+
 

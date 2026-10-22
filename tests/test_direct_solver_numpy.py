@@ -71,6 +71,16 @@ def test_build_native_1d_transport_stencil():
     assert b[0] > 0.0  # Dirichlet boundary flux on RHS
     assert np.all(b[1:] == 0.0)
 
+    # Test Diffusive Boundary Layer (DBL) Robin condition
+    bc_dbl = {"type": "dissolved", "top": 28.0, "dbl": 0.0005}  # 0.5 mm DBL
+    ab_dbl, b_dbl = build_native_1d_transport_stencil(
+        z=z, dx=dx, phi=phi, D_cell=D, w=w, bc_props=bc_dbl
+    )
+    assert ab_dbl.shape == (3, 10)
+    # With DBL series resistance, boundary flux conductance is lower than pure surface Dirichlet
+    assert b_dbl[0] < b[0]
+    assert ab_dbl[1, 0] < ab[1, 0]
+
     # Test Robin particulate species
     bc_robin = {"type": "particulate", "top": 1e-6}
     ab_r, b_r = build_native_1d_transport_stencil(
