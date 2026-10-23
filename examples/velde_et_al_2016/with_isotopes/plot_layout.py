@@ -20,7 +20,7 @@ def get_layout(df):
 
     lt = 2
 
-    if "d_SO4" in df.columns:
+    if "d34S_SO4" in df.columns or "d_SO4" in df.columns:
         isotopes = True
     else:
         isotopes = False
@@ -127,9 +127,9 @@ def get_layout(df):
             "third_subplot": {
                 "xaxis": [df.z, "Depth [m]"],
                 "left": [
-                    [df.d_SO4, r"SO$_{4}$", SO4_attr_nf],
-                    [df.d_TS2, r"TS$^{2-}$", TS2_attr],
-                    [df.d_FeS, r"FeS", FeS_attr],
+                    [df.d34S_SO4 if "d34S_SO4" in df.columns else df.d_SO4, r"SO$_{4}$", SO4_attr_nf],
+                    [df.d34S_TS2 if "d34S_TS2" in df.columns else df.d_TS2, r"TS$^{2-}$", TS2_attr],
+                    [df.d34S_FeS if "d34S_FeS" in df.columns else df.d_FeS, r"FeS", FeS_attr],
                 ],
                 "left_ylabel": r"$\delta^{34}$ [mUr VCDT]",
                 "xscale": "log",

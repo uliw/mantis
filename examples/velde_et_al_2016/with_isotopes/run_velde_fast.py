@@ -40,7 +40,7 @@ if __name__ == "__main__":
         phi=0.8,
         isotopes=True,
         # VCDT=0.044162589, # should be set in species file. 
-        dt_tolerance = 1e-7,
+        dt_tolerance = 1e-9,
         bioturbation={
             "BT0": "4 cm^2/year",
             "depth": "6 cm",
@@ -50,8 +50,8 @@ if __name__ == "__main__":
             "BI0": 0.0,  # explicitly disabled
             "depth": "0 cm",
         },
-        reaction_zone=("0.1 cm", "1.0 cm"), # Critical depth window of sharp redox fronts
-        reaction_zone_spacing="0.01 mm",    # Dense, uniform spacing in the reaction zone
+        reaction_zone=("0.1 cm", "4.0 cm"), # Critical depth window of sharp redox fronts
+        reaction_zone_spacing="0.05 mm",    # Dense, uniform spacing in the reaction zone
         initial_spacing="0.1 mm",
         max_spacing="10 cm",
     )

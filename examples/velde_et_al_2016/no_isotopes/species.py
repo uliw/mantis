@@ -22,9 +22,11 @@ Each key in the `species` dictionary represents a chemical species name:
     * str pointing to another species name to inherit its diffusion coefficient.
     * None for solid species (which only transport via sediment burial and bioturbation).
 - bc: (Optional) Default boundary condition dict:
-    * {'top': float or pint-string, 'type': 'dissolved' or 'particulate'}
+- bc: (Optional) Default boundary condition dict:
+    * {'top/bottom': float or pint-string, 'type': 'Dirichlet', 'Robin' or 'Neumann'}
+    * unless specified, bottom bc defaults to Neumann 
     * For Hplus: {'pH': 7.5} sets porewater pH as the single source of truth.
-- isotope: (Optional) Name of corresponding isotopic companion species (e.g., 'SO4_32').
+- isotopes: (Optional){"isotope_species_name": "element"}
 - isotope_of: (Optional) Base species name if this entry is an isotope companion.
 - delta_threshold: (Optional) Minimum concentration threshold for calculating delta values (mmol/L).
 """
@@ -34,9 +36,9 @@ import numpy as np
 
 """
 Most species are covered by the diff_coeff function with the m0, m1 parameter listed in
-Boudreau 1996. If no parameters are availble, please provide any custom functions here.
-Note that diffusions coefficients are only needed for species that are par of the
-reaction-transport martrix (i.e., where include = True).
+Table 4.8 in Boudreau 1996.  If no parameters are availble, please provide any custom
+functions here.  Note that diffusions coefficients are only needed for species that are
+par of the reaction-transport martrix (i.e., where include = True).
 """
 def boudreau_o2(T_profile, phi):
     """Temperature porosity corrected O2 molecular diffusion."""
@@ -58,7 +60,7 @@ species = {
         "formula": "SO4",
         "diff_coeff_function": "diff_coeff",
         "diffusion": {"m0": 4.88, "m1": 0.232},
-        "bc": {"top": 28.2, "type": "dissolved"},
+        "bc_top": {"Dirichlet": 28.2},
         "prefill": True,
     },
     "TS2": {
@@ -66,8 +68,8 @@ species = {
         "include": True,
         "formula": "H2S",
         "diff_coeff_function": "diff_coeff",
-        "diffusion": {"m0": 43.3, "m1": 0.85},
-        "bc": {"top": 0.0, "type": "dissolved"},
+        "diffusion": {"m0": 10.4, "m1": 0.273},
+        "bc_top": {"Neumann": 0.0},  # If Neumann, 0.0 refers to gradient
     },
     "O2": {
         "phase": "liquid",
@@ -75,7 +77,7 @@ species = {
         "formula": "O2",
         "diff_coeff_function": "boudreau_o2",
         "diffusion": None,
-        "bc": {"top": 0.28, "type": "dissolved"},
+        "bc_top": {"Dirichlet": 0.28},
         "prefill": True,
     },
 
@@ -86,7 +88,7 @@ species = {
         "phase": "liquid",
         "include": False,
         "formula": "H",
-        "bc": {"pH": 7.5},  # Single source of truth for porewater pH
+        "bc_top": {"Dirichlet": 7.5},  # Single source of truth for porewater pH
         "prefill": True,
     },
     "HS": {
@@ -119,7 +121,7 @@ species = {
         },
         "diff_coeff_function": "diff_coeff",
         "diffusion": {"m0": 27.7, "m1": 1.0},
-        "bc": {"top": 0.0, "type": "dissolved"},
+        "bc_top": {"Dirichlet": 0.0},
     },
     "Fe2_liq": {
         "phase": "liquid",
@@ -142,28 +144,28 @@ species = {
         "include": True,
         "formula": "CH2O6",
         "diffusion": None,
-        "bc": {"top": "365 umol/(cm^2 * yr)", "type": "particulate"},
+        "bc_top": {"Robin": "365 umol/(cm^2 * yr)"},
     },
     "POC_slow": {
         "phase": "solid",
         "include": True,
         "formula": "CH2O6",
         "diffusion": None,
-        "bc": {"top": "183 umol/(cm^2 * yr)", "type": "particulate"},
+        "bc_top": {"Robin": "183 umol/(cm^2 * yr)"},
     },
     "Fe3": {
         "phase": "solid",
         "include": True,
         "formula": "FeOOH",
         "diffusion": None,
-        "bc": {"top": "12 umol/(cm^2 * yr)", "type": "particulate"},
+        "bc_top": {"Robin": "12 umol/(cm^2 * yr)"},
     },
     "FeS": {
         "phase": "solid",
         "include": True,
         "formula": "FeS",
         "diffusion": None,
-        "bc": {"top": 0.0, "type": "particulate"},
+        "bc_top": {"Robin": 0.0},
     },
     # External / Reaction Balance Species (Excluded from transport)
     "CO2": {"phase": "liquid", "include": False, "formula": "CO2"},
