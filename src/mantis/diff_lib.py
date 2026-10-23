@@ -757,36 +757,37 @@ def _save_data_to_disk(mp, c, k, species_list, z, D_mol, f_final):
 
     if isinstance(species_defs, dict):
         for base, meta in species_defs.items():
-            iso = meta.get("isotope")
-            if not iso or f"c_{base}" not in data or f"c_{iso}" not in data:
+            iso_dict = meta.get("isotopes")
+            if not iso_dict or not isinstance(iso_dict, dict):
                 continue
 
             stoich = float(meta.get("stoichiometry", 1.0))
+            if f"c_{base}" not in data:
+                continue
             tot = data[f"c_{base}"] * stoich
-            c_iso = data[f"c_{iso}"]
 
-            std_key = meta.get("isotope_standard", "S")
-            if (
-                std_key in iso_stds
-                and isinstance(iso_stds[std_key], dict)
-                and "ratio" in iso_stds[std_key]
-            ):
+            for iso, iso_ref in iso_dict.items():
+                if f"c_{iso}" not in data:
+                    continue
+                c_iso = data[f"c_{iso}"]
+
+                # Resolve standard key
+                std_key = iso_ref if iso_ref in iso_stds else None
+                if not std_key:
+                    for k_std, v_std in iso_stds.items():
+                        if isinstance(v_std, dict) and v_std.get("element") == iso_ref:
+                            std_key = k_std
+                            break
+                if not std_key or std_key not in iso_stds or "ratio" not in iso_stds[std_key]:
+                    raise ValueError(
+                        f"[MANTIS ERROR] Standard '{iso_ref}' with a valid 'ratio' is not defined in isotope_standards in species.py."
+                    )
                 std_ratio = float(iso_stds[std_key]["ratio"])
-            elif hasattr(mp, "VCDT") and std_key == "S":
-                std_ratio = float(mp.VCDT)
-            else:
-                raise ValueError(
-                    f"[MANTIS ERROR] Standard '{std_key}' with a valid 'ratio' is not defined in isotope_standards in species.py."
-                )
+                thresh = get_species_delta_threshold(base, mp=mp, phi=phi_val)
+                delta_val = get_delta(tot, c_iso, std_ratio, threshold=thresh)
 
-            thresh = get_species_delta_threshold(base, mp=mp, phi=phi_val)
-            delta_val = get_delta(tot, c_iso, std_ratio, threshold=thresh)
-
-            # Record standard d_<base> column for backwards compatibility
-            data[f"d_{base}"] = delta_val
-            # Also record explicit delta_name if declared (e.g. d34S_FeS2)
-            if "delta_name" in meta:
-                data[meta["delta_name"]] = delta_val
+                col_name = f"{std_key}_{base}"
+                data[col_name] = delta_val
     else:
         # Fallback if species_defs is not passed on mp
         for base in species_list:
@@ -1835,7 +1836,7 @@ def get_total_delta(
                         std_ratio = float(entry)
                 else:
                     for k_std, entry in iso_stds.items():
-                        if str(k_std).lower() == std_arg.lower():
+                        if str(k_std).lower() == std_arg.lower() or (isinstance(entry, dict) and entry.get("element") == std_arg):
                             if isinstance(entry, dict) and "ratio" in entry:
                                 std_ratio = float(entry["ratio"])
                             elif isinstance(entry, (int, float, np.floating, np.integer)):
@@ -1922,15 +1923,30 @@ def get_total_delta(
         c_base = _extract_at_index(val_base_raw, index)
 
         # 2. Companion isotope concentration
-        iso_name = meta.get("isotope")
+        iso_name = None
+        iso_dict = meta.get("isotopes")
+        if isinstance(iso_dict, dict):
+            for cand_iso, cand_ref in iso_dict.items():
+                if cand_ref == std_arg or cand_iso == std_arg:
+                    iso_name = cand_iso
+                    break
+                entry = iso_stds.get(cand_ref, {})
+                if isinstance(entry, dict) and (entry.get("element") == std_arg or cand_ref == std_arg):
+                    iso_name = cand_iso
+                    break
+            if not iso_name and len(iso_dict) == 1:
+                iso_name = next(iter(iso_dict.keys()))
+
         if not iso_name:
-            candidates = [f"{sp}_32", f"{sp}_12", f"{sp}_18"]
+            iso_name = meta.get("isotope")
+        if not iso_name:
+            candidates = [f"{sp}_S32", f"{sp}_32", f"{sp}_12", f"{sp}_18"]
             for cand in candidates:
                 if _get_c_val(c, cand) is not None:
                     iso_name = cand
                     break
             if not iso_name:
-                iso_name = f"{sp}_32"
+                iso_name = f"{sp}_S32"
 
         val_iso_raw = _get_c_val(c, iso_name)
         if val_iso_raw is None:

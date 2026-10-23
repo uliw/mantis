@@ -655,7 +655,7 @@ model.configure(
     diffusive_boundary_layer="0.5 mm",  # Or "0.05 cm"; accepts any Pint length unit
 )
 ```
-*(The alias `dbl="0.5 mm"` or `delta="0.5 mm"` is also accepted).*
+*(The alias `dbl="0.5 mm"` is also accepted; `"delta"` is strictly reserved for isotopic composition in species definitions).*
 
 Alternatively, you can specify DBL parameters for individual species in `species.py`:
 ```python

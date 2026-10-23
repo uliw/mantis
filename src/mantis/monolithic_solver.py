@@ -227,7 +227,8 @@ def build_native_1d_transport_stencil(
         b_transport: shape (N,) boundary flux vector
     """
     N = len(z)
-    is_dissolved = (bc_props.get("type", "dissolved") == "dissolved")
+    bc_type = bc_props.get("type", "Dirichlet")
+    is_dissolved = (bc_props.get("phase", "liquid") == "liquid")
     eff_phi_val = np.asarray(phi.value if hasattr(phi, "value") else phi)
     eff_phi = eff_phi_val if is_dissolved else (1.0 - eff_phi_val)
     if eff_phi.ndim == 0:
@@ -272,34 +273,37 @@ def build_native_1d_transport_stencil(
     ab[1, -1] = a_W[-1]
 
     # Left boundary (z=0):
-    top_val = bc_props.get("top", 0.0)
+    top_val = float(bc_props.get("top", 0.0))
     d_top = z[0]
     phi_top = eff_phi_arr[0]
+    d_cell_0 = max(float(D_cell_arr[0]), 1e-30)
 
-    if is_dissolved:
-        delta_val = float(
-            bc_props.get(
-                "delta",
+    if bc_type in ("Dirichlet", "dissolved"):
+        if is_dissolved:
+            delta_val = float(
                 bc_props.get(
                     "dbl",
-                    getattr(mp, "diffusive_boundary_layer", getattr(mp, "dbl", 0.0))
-                    if mp is not None
-                    else 0.0,
-                ),
+                    bc_props.get(
+                        "diffusive_boundary_layer",
+                        getattr(mp, "diffusive_boundary_layer", getattr(mp, "dbl", 0.0))
+                        if mp is not None
+                        else 0.0,
+                    ),
+                )
             )
-        )
-        d_cell_0 = max(float(D_cell_arr[0]), 1e-30)
-        if delta_val > 0.0:
-            # Stagnant Diffusive Boundary Layer (DBL) of thickness delta_val (m)
-            # In free water overlying sediment, tortuosity is 1.0.
-            # Boudreau (1996) tortuosity factor: theta^2 = 1 - ln(phi^2)
-            theta2 = max(1.0 - np.log(max(phi_top, 1e-4) ** 2), 1.0)
-            d_free_0 = d_cell_0 * theta2
-            # Combined series resistance across sediment half-cell and DBL:
-            # 1 / D_top = r_sed + r_dbl = (d_top / (phi * D_sed)) + (delta / D_free)
-            r_sed = d_top / (phi_top * d_cell_0)
-            r_dbl = delta_val / d_free_0
-            D_top = 1.0 / (r_sed + r_dbl)
+            if delta_val > 0.0:
+                # Stagnant Diffusive Boundary Layer (DBL) of thickness delta_val (m)
+                # In free water overlying sediment, tortuosity is 1.0.
+                # Boudreau (1996) tortuosity factor: theta^2 = 1 - ln(phi^2)
+                theta2 = max(1.0 - np.log(max(phi_top, 1e-4) ** 2), 1.0)
+                d_free_0 = d_cell_0 * theta2
+                # Combined series resistance across sediment half-cell and DBL:
+                # 1 / D_top = r_sed + r_dbl = (d_top / (phi * D_sed)) + (delta / D_free)
+                r_sed = d_top / (phi_top * d_cell_0)
+                r_dbl = delta_val / d_free_0
+                D_top = 1.0 / (r_sed + r_dbl)
+            else:
+                D_top = (phi_top * d_cell_0) / d_top
         else:
             D_top = (phi_top * d_cell_0) / d_top
 
@@ -310,11 +314,33 @@ def build_native_1d_transport_stencil(
         a_in_rhs = D_top * A_top + np.maximum(F_top, 0.0)
         ab[1, 0] += a_in_diag
         b_transport[0] += a_in_rhs * top_val
-    else:
+    elif bc_type in ("Robin", "particulate"):
         b_transport[0] += top_val
+    elif bc_type == "Neumann":
+        # Gradient dC/dz = top_val. Diffusive inflow flux = -eff_phi * D * dC/dz
+        b_transport[0] -= phi_top * d_cell_0 * top_val
 
-    # Right boundary (z=L): Neumann zero-gradient (advection carries mass out)
-    ab[1, -1] += eff_phi_arr[-1] * w_arr[-1]
+    # Right boundary (z=L):
+    bot_type = bc_props.get("bot_type", "Neumann")
+    bot_val = float(bc_props.get("bot", 0.0))
+
+    if bot_type == "Neumann":
+        # Outflow advection carries mass out
+        ab[1, -1] += eff_phi_arr[-1] * w_arr[-1]
+        if bot_val != 0.0:
+            b_transport[-1] -= eff_phi_arr[-1] * float(D_cell_arr[-1]) * bot_val
+    elif bot_type == "Dirichlet":
+        d_bot = (z[-1] - z[-2]) / 2.0
+        phi_bot = eff_phi_arr[-1]
+        d_cell_L = max(float(D_cell_arr[-1]), 1e-30)
+        D_bot = (phi_bot * d_cell_L) / d_bot
+        F_bot = phi_bot * w_arr[-1]
+        Pe_bot = F_bot / np.maximum(D_bot, 1e-30)
+        A_bot = np.maximum(0.0, (1.0 - 0.1 * np.abs(Pe_bot))**5)
+        a_out_diag = D_bot * A_bot + np.maximum(F_bot, 0.0)
+        a_out_rhs = D_bot * A_bot + np.maximum(-F_bot, 0.0)
+        ab[1, -1] += a_out_diag
+        b_transport[-1] += a_out_rhs * bot_val
 
     # Bio-irrigation (non-local exchange for dissolved species)
     if is_dissolved and D_irr is not None:

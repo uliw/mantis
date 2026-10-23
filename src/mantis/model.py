@@ -13,6 +13,7 @@ Provides a clean object-oriented entry point that:
 from __future__ import annotations
 
 import argparse
+import copy
 import importlib.util
 import inspect
 import os
@@ -375,7 +376,7 @@ class DiageneticModel:
                 self.p_dict["dt_tolerance"] = f_val
             elif key == "check_reactant_coexistence":
                 self.p_dict["check_reactant_coexistence"] = bool(val)
-            elif key in ("diffusive_boundary_layer", "dbl", "delta"):
+            elif key in ("diffusive_boundary_layer", "dbl"):
                 val_m = self._convert_value(val)
                 self.p_dict["diffusive_boundary_layer"] = float(val_m)
                 self.p_dict["dbl"] = float(val_m)
@@ -737,21 +738,23 @@ class DiageneticModel:
             self.mp.isotopes = True
 
         # 1. Parse species definitions & isotope standards
-        species_defs = self._load_species_definitions()
-        self.mp.species_defs = species_defs
+        raw_species = self._load_species_definitions()
+        raw_stds = getattr(self._species_mod, "isotope_standards", {})
 
-        iso_stds = getattr(self._species_mod, "isotope_standards", {})
+        from mantis.species_parser import parse_and_validate_species_dict
+        species_defs, self._parsed_bc_map, iso_stds = parse_and_validate_species_dict(
+            raw_species, raw_stds, ureg=self.Q_
+        )
+        self.mp.species_defs = species_defs
         self.mp.isotope_standards = iso_stds
-        # Backwards compatibility: if S in isotope_standards, expose VCDT
-        if "S" in iso_stds and isinstance(iso_stds["S"], dict):
-            if "ratio" in iso_stds["S"]:
-                self.mp.VCDT = float(iso_stds["S"]["ratio"])
-            else:
-                print(
-                    "\n[MANTIS ERROR] 'ratio' is missing for isotope standard 'S' in isotope_standards in species.py.\n",
-                    file=sys.stderr,
-                )
-                sys.exit(1)
+
+        # Expose standards on mp
+        for std_k, std_m in iso_stds.items():
+            setattr(self.mp, f"{std_k}_ratio", float(std_m["ratio"]))
+            if std_m.get("element") == "S":
+                self.mp.VCDT = float(std_m["ratio"])
+            elif std_m.get("element") == "O":
+                self.mp.VSMOW = float(std_m["ratio"])
 
         # 2. Extract pH and check carbonate system boundary consistency
         carb_cfg = self.p_dict.get("carbonate_equilibrium_chemistry")
@@ -761,12 +764,10 @@ class DiageneticModel:
         ph_val = None
         if "pH" in self.p_dict and self.p_dict["pH"] is not None:
             ph_val = float(self.p_dict["pH"])
-        else:
-            for sp_k, s_meta in species_defs.items():
-                s_bc = s_meta.get("bc")
-                if isinstance(s_bc, dict) and "pH" in s_bc and s_bc["pH"] is not None:
-                    ph_val = float(s_bc["pH"])
-                    break
+        elif "Hplus" in species_defs and "bc_top" in species_defs["Hplus"]:
+            h_bc = species_defs["Hplus"]["bc_top"]
+            if isinstance(h_bc, dict) and "Dirichlet" in h_bc:
+                ph_val = float(h_bc["Dirichlet"])
 
         if is_carbonate:
             from mantis.seawater_carbonate import (
@@ -1075,30 +1076,13 @@ class DiageneticModel:
                 if not is_iso or self.mp.isotopes:
                     species_transport.append(sp_name)
 
-            # Build default boundary conditions
-            bc_meta = meta.get("bc")
-            if bc_meta and isinstance(bc_meta, dict):
-                top_val = bc_meta.get("top", 0.0)
-                if isinstance(top_val, str):
-                    # convert flux or concentration units
-                    q_val = self.Q_(top_val)
-                    if "yr" in top_val or "year" in top_val or "second" in top_val:
-                        top_val = q_val.to("mol/(m^2 * second)").magnitude
-                    else:
-                        top_val = q_val.to("mol/m^3").magnitude
-                bc_type = bc_meta.get("type", "dissolved")
-                bc_entry = {
-                    "top": top_val,
-                    "type": bc_type,
-                }
-                dbl_val = float(self.p_dict.get("diffusive_boundary_layer", self.p_dict.get("dbl", 0.0)))
-                if dbl_val > 0.0 and bc_type == "dissolved":
-                    bc_entry["dbl"] = dbl_val
-                if isinstance(bc_meta, dict):
-                    for k_dbl in ("dbl", "delta", "diffusive_boundary_layer"):
-                        if k_dbl in bc_meta:
-                            bc_entry["dbl"] = float(self._convert_value(bc_meta[k_dbl]))
-                bc_map[sp_name] = bc_entry
+        # Build boundary conditions from strictly parsed bc_map
+        bc_map = copy.deepcopy(self._parsed_bc_map)
+        dbl_val = float(self.p_dict.get("diffusive_boundary_layer", self.p_dict.get("dbl", 0.0)))
+        if dbl_val > 0.0:
+            for sp_name, b_entry in bc_map.items():
+                if b_entry.get("phase") == "liquid" and "dbl" not in b_entry:
+                    b_entry["dbl"] = dbl_val
 
         # Apply any explicit user overrides to boundary conditions
         bc_overrides = self.mp.get("bc_overrides", {})
@@ -1197,53 +1181,9 @@ class DiageneticModel:
         else:
             D_mol.D_bio = compute_sigmoidal_db(z, self.mp.BT0, self.mp.BT_depth, self.mp.BT_attenuation)
 
-        # 9. Isotope boundary conditions companion setup (generalized across all species)
-        if self.mp.isotopes:
-            for sp_name, meta in species_defs.items():
-                iso_target = meta.get("isotope")
-                if not iso_target or iso_target not in species_defs:
-                    continue
-                # Determine delta value: from bc dict, or mp.<sp>_d, or 0.0 default
-                delta_val = None
-                sp_bc = meta.get("bc", {})
-                if isinstance(sp_bc, dict):
-                    if "delta" in sp_bc:
-                        delta_val = float(sp_bc["delta"])
-                if delta_val is None:
-                    delta_attr = f"{sp_name}_d"
-                    delta_val = float(getattr(self.mp, delta_attr, 0.0))
-
-                iso_meta = species_defs[iso_target]
-                iso_phase = iso_meta.get("phase", meta.get("phase", "liquid"))
-                iso_bc_type = "particulate" if iso_phase == "solid" else "dissolved"
-
-                # Standard ratio resolution
-                std_key = meta.get("isotope_standard", "S")
-                if (
-                    std_key in self.mp.isotope_standards
-                    and isinstance(self.mp.isotope_standards[std_key], dict)
-                    and "ratio" in self.mp.isotope_standards[std_key]
-                ):
-                    std_ratio = float(self.mp.isotope_standards[std_key]["ratio"])
-                elif hasattr(self.mp, "VCDT") and std_key == "S":
-                    std_ratio = float(self.mp.VCDT)
-                else:
-                    print(
-                        f"\n[MANTIS ERROR] Species '{sp_name}' defines isotope companion '{iso_target}', "
-                        f"but standard '{std_key}' with a valid 'ratio' is not defined in isotope_standards in species.py.\n",
-                        file=sys.stderr,
-                    )
-                    sys.exit(1)
-
-                stoich = float(meta.get("stoichiometry", 1.0))
-
-                if sp_name in bc_map and bc_map[sp_name]["top"] > 0.0:
-                    top_mass_comp = get_l_mass(bc_map[sp_name]["top"] * stoich, delta_val, std_ratio)
-                    setattr(self.mp, f"bc_{iso_target}", top_mass_comp)
-                    bc_map[iso_target] = {"top": top_mass_comp, "type": iso_bc_type}
-                else:
-                    setattr(self.mp, f"bc_{iso_target}", 0.0)
-                    bc_map[iso_target] = {"top": 0.0, "type": iso_bc_type}
+        # 9. Register boundary values on mp
+        for sp_k, b_entry in bc_map.items():
+            setattr(self.mp, f"bc_{sp_k}", b_entry.get("top", 0.0))
 
         # 10. Initial conditions and boundary constraints
         phi_top = phi_val[0] if hasattr(phi_val, "__getitem__") else phi_val
@@ -1253,7 +1193,7 @@ class DiageneticModel:
             w_top = float(self.mp.w) * (1.0 - phi_bottom) / np.maximum(1.0 - phi_top, 1e-6)
         for sp_name in species_transport:
             var = getattr(c, sp_name)
-            props = bc_map.get(sp_name, {"top": 0.0, "type": "dissolved"})
+            props = bc_map.get(sp_name, {"top": 0.0, "type": "Dirichlet", "phase": "liquid"})
             meta = species_defs.get(sp_name, {})
 
             # Determine prefill flag (default: False)
@@ -1264,10 +1204,13 @@ class DiageneticModel:
             else:
                 prefill = meta.get("prefill", False)
 
-            if props["type"] == "particulate":
-                # Convert bulk surface flux J_bulk to solid-phase flux: J_solid = J_bulk / (1 - phi)
-                J_solid = props["top"] / (1.0 - phi_top)
-                val = J_solid / w_top if w_top > 0 else 0.0
+            bc_type = props.get("type", "Dirichlet")
+            is_solid = (props.get("phase") == "solid")
+
+            if bc_type == "Robin":
+                eff_phi_top = (1.0 - phi_top) if is_solid else phi_top
+                J_flux = props["top"] / np.maximum(eff_phi_top, 1e-6)
+                val = J_flux / w_top if w_top > 0 else 0.0
 
                 if "init" in meta and meta["init"] is not None:
                     init_val = meta["init"]
@@ -1279,20 +1222,19 @@ class DiageneticModel:
                 else:
                     var.setValue(0.0)
 
-                D_total = getattr(D_mol, sp_name, 0.0) + D_mol.D_bio
+                D_total = getattr(D_mol, sp_name, 0.0) + (D_mol.D_bio if is_solid else 0.0)
                 if not isinstance(D_total, CellVariable):
                     D_total = CellVariable(mesh=mesh, value=D_total)
 
                 d_left = D_total.faceValue[mesh.facesLeft.value][0]
                 if d_left > 1e-20:
-                    # Robin BC: flux = w * C - D * dC/dx -> dC/dx = (w * C - J_solid) / D
                     var.faceGrad.constrain(
-                        [(self.mp.w * var.faceValue - J_solid) / D_total.faceValue],
+                        [(self.mp.w * var.faceValue - J_flux) / D_total.faceValue],
                         mesh.facesLeft,
                     )
                 else:
                     var.constrain(val, mesh.facesLeft)
-            else:
+            elif bc_type == "Dirichlet":
                 val = props["top"]
                 if "init" in meta and meta["init"] is not None:
                     init_val = meta["init"]
@@ -1304,8 +1246,21 @@ class DiageneticModel:
                 else:
                     var.setValue(0.0)
                 var.constrain(val, mesh.facesLeft)
+            elif bc_type == "Neumann":
+                grad = props["top"]
+                if "init" in meta and meta["init"] is not None:
+                    init_val = meta["init"]
+                    if isinstance(init_val, str):
+                        init_val = self.Q_(init_val).to("mol/m^3").magnitude
+                    var.setValue(init_val)
+                elif prefill:
+                    var.setValue(0.0)
+                else:
+                    var.setValue(0.0)
+                var.faceGrad.constrain([grad], mesh.facesLeft)
 
-            var.faceGrad.constrain([0.0], mesh.facesRight)
+            bot_val = float(props.get("bot", 0.0))
+            var.faceGrad.constrain([bot_val], mesh.facesRight)
 
         # Initialize carbonate speciation diagnostics across cells if carbonate system is active
         if getattr(self.mp, "is_carbonate", False) and hasattr(self.mp, "carb_spec_top"):

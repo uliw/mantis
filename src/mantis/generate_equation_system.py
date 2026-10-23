@@ -62,11 +62,13 @@ class ReactionSystemValidator:
         mod_species = importlib.util.module_from_spec(spec_species)
         spec_species.loader.exec_module(mod_species)
         if hasattr(mod_species, "species") and isinstance(mod_species.species, dict):
-            self.valid_species = set(mod_species.species.keys())
-            self.species_defs = mod_species.species
-            self.isotope_standards = getattr(mod_species, "isotope_standards", {})
+            raw_species = mod_species.species
+            raw_stds = getattr(mod_species, "isotope_standards", {})
+            from mantis.species_parser import parse_and_validate_species_dict
+            self.species_defs, self.bc_map, self.isotope_standards = parse_and_validate_species_dict(raw_species, raw_stds)
+            self.valid_species = set(self.species_defs.keys())
             # Also register dynamic/alias species if defined with equilibrium_of or alias_of
-            for sp_k, sp_meta in mod_species.species.items():
+            for sp_k, sp_meta in self.species_defs.items():
                 if isinstance(sp_meta, dict):
                     if "equilibrium_of" in sp_meta or "alias_of" in sp_meta or "fraction" in sp_meta:
                         self.valid_species.add(sp_k)
@@ -290,6 +292,30 @@ class ReactionSystemValidator:
         if isinstance(meta, dict):
             return bool(meta.get("include", True))
         return sp in self.valid_species
+
+    def get_isotope_standard_info(self, iso_sp: str, parent_sp: Optional[str] = None) -> Tuple[str, str, float]:
+        """Resolves (std_key, standard_name, ratio) for an isotope companion or parent species."""
+        meta = getattr(self, "species_defs", {}).get(iso_sp, {})
+        std_name = meta.get("isotope_standard")
+        if not std_name and parent_sp:
+            std_name = getattr(self, "species_defs", {}).get(parent_sp, {}).get("isotope_standard")
+
+        stds = getattr(self, "isotope_standards", {})
+        if std_name and std_name in stds:
+            info = stds[std_name]
+            return std_name, info.get("standard", "VCDT"), float(info["ratio"])
+
+        elem = meta.get("element", "S")
+        for k, v in stds.items():
+            if isinstance(v, dict) and v.get("element") == elem:
+                return k, v.get("standard", "VCDT"), float(v["ratio"])
+
+        if stds:
+            k = next(iter(stds))
+            v = stds[k]
+            return k, v.get("standard", "VCDT"), float(v["ratio"])
+
+        raise ValueError(f"[MANTIS ERROR] No isotope standard found for species '{iso_sp}'.")
 
     def validate_reaction(self, rxn_dict: Dict[str, Any]) -> List[str]:
         """Validates a single reaction dictionary. Returns a list of error messages (empty if valid)."""
@@ -899,11 +925,22 @@ class EquationSystemGenerator:
 
         ref_sp = r.get("ref_species")
         ref_coeff = float(r.get("stoich_ref", 1.0))
-        if ref_sp and "stoich_ref" not in r:
+        if ref_sp:
+            if "stoich_ref" not in r:
+                for coeff, sp in reactants:
+                    if self.validator.get_parent_species(sp) == ref_sp or sp == ref_sp:
+                        ref_coeff = float(coeff)
+                        break
+        else:
             for coeff, sp in reactants:
-                if self.validator.get_parent_species(sp) == ref_sp or sp == ref_sp:
+                p_sp = self.validator.get_parent_species(sp)
+                if isinstance(k_name, str) and (p_sp in k_name or sp in k_name):
+                    ref_sp = p_sp
                     ref_coeff = float(coeff)
                     break
+            if not ref_sp:
+                ref_sp = master_parent
+                ref_coeff = float(master_coeff)
 
         other_reactants_entries = []
         for coeff, sp in reactants:
@@ -1210,14 +1247,7 @@ class EquationSystemGenerator:
                 m_iso = iso_sp_map[mineral_parent]
 
                 # Determine isotope standard ratio dynamically
-                std_name = self.validator.species_defs.get(r_parent, {}).get("isotope_standard", "S")
-                std_info = getattr(self.validator, "isotope_standards", {}).get(std_name, {})
-                std_key = std_info.get("standard", "VCDT")
-                if "ratio" not in std_info:
-                    raise ValueError(
-                        f"[MANTIS ERROR] Isotope standard '{std_name}' is missing 'ratio' in species.py."
-                    )
-                std_ratio = float(std_info["ratio"])
+                std_name, std_key, std_ratio = self.validator.get_isotope_standard_info(r_iso, r_parent)
 
                 lines.extend([
                     '    if getattr(mp, "isotopes", False):',
@@ -1473,14 +1503,7 @@ class EquationSystemGenerator:
                 r_coeff, r_sp, r_parent = iso_r[0]
                 r_iso = iso_sp_map[r_parent]
                 m_iso = iso_sp_map[mineral_parent]
-                std_name = self.validator.species_defs.get(r_parent, {}).get("isotope_standard", "S")
-                std_info = getattr(self.validator, "isotope_standards", {}).get(std_name, {})
-                std_key = std_info.get("standard", "VCDT")
-                if "ratio" not in std_info:
-                    raise ValueError(
-                        f"[MANTIS ERROR] Isotope standard '{std_name}' is missing 'ratio' in species.py."
-                    )
-                std_ratio = float(std_info["ratio"])
+                std_name, std_key, std_ratio = self.validator.get_isotope_standard_info(r_iso, r_parent)
 
                 r_spec = self.validator.get_speciation_factor_expr(r_sp)
                 other_eq_species = [
@@ -1580,15 +1603,24 @@ class EquationSystemGenerator:
             if self.validator.is_transport_species(self.validator.get_parent_species(sp))
         ]
 
-        ref_sp = None
-        ref_coeff = 1.0
         ref_sp = r.get("ref_species")
         ref_coeff = float(r.get("stoich_ref", 1.0))
-        if ref_sp and "stoich_ref" not in r:
+        if ref_sp:
+            if "stoich_ref" not in r:
+                for coeff, sp in reactants:
+                    if self.validator.get_parent_species(sp) == ref_sp or sp == ref_sp:
+                        ref_coeff = float(coeff)
+                        break
+        else:
             for coeff, sp in reactants:
-                if self.validator.get_parent_species(sp) == ref_sp or sp == ref_sp:
+                p_sp = self.validator.get_parent_species(sp)
+                if isinstance(k_name, str) and (p_sp in k_name or sp in k_name):
+                    ref_sp = p_sp
                     ref_coeff = float(coeff)
                     break
+            if not ref_sp:
+                ref_sp = r_parents[0][2]
+                ref_coeff = float(r_parents[0][0])
 
         all_needed_parents = set([p for _, _, p in r_parents] + [p for _, _, p in p_parents])
         conds = [f'"{p}" in idx' for p in sorted(all_needed_parents)]
@@ -1700,9 +1732,7 @@ class EquationSystemGenerator:
                 if iso_r_candidates:
                     iso_master_parent = iso_r_candidates[0][2]
                     iso_master = iso_sp_map[iso_master_parent]
-                    std_name = self.validator.species_defs.get(iso_master_parent, {}).get("isotope_standard", "S")
-                    std_info = getattr(self.validator, "isotope_standards", {}).get(std_name, {})
-                    std_ratio = float(std_info.get("ratio", 0.044162589))
+                    std_name, std_key, std_ratio = self.validator.get_isotope_standard_info(iso_master, iso_master_parent)
                     f_iso_default = float(1.0 / (1.0 + std_ratio))
 
                     if diff_p in iso_sp_map:
