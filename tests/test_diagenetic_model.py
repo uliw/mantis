@@ -66,16 +66,16 @@ def test_diagenetic_model_setup(tmp_path):
     assert hasattr(mp, "get_limiters")
     assert callable(mp.get_limiters)
     assert hasattr(mp, "isotope_standards")
-    assert "S" in mp.isotope_standards
-    assert mp.isotope_standards["S"]["unit"] == "mUr"
-    assert hasattr(mp, "bc_SO4_32")
-    assert mp.bc_SO4_32 > 0.0
+    assert "d34S" in mp.isotope_standards
+    assert mp.isotope_standards["d34S"]["unit"] == "mUr"
+    assert hasattr(mp, "bc_SO4_S32")
+    assert mp.bc_SO4_S32 > 0.0
 
-    # Verify save_data produces both d_<species> and d34S_<species>
+    # Verify save_data produces d34S_<species>
     from mantis.diff_lib import save_data
     df, _ = save_data(mp, c, k, species_transport, z, D_mol, rxn_fn)
-    assert "d_SO4" in df.columns
     assert "d34S_SO4" in df.columns
+    assert "d34S_TS2" in df.columns
     assert "d34S_FeS" in df.columns
 
 

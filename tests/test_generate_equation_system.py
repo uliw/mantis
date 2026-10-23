@@ -56,7 +56,7 @@ def test_validation_valid_reaction():
         "reaction": "2 POC_fast + SO4 -> TS2",
         "k_value_name": "POC_fast",
         "limiters": {"SO4": ["O2_inhibit", "SO4_implicit", "Fe3_diss_red_inhib"]},
-        "isotope_species": {"SO4": "SO4_32", "TS2": "TS2_32"},
+        "isotope_species": {"SO4": "SO4_S32", "TS2": "TS2_S32"},
     }
     errors = validator.validate_reaction(rxn)
     assert errors == []
@@ -277,7 +277,7 @@ def test_fes2_precipitation_ts2_generation():
             "reaction": "1 FeS + 1 HS -> 1 FeS2",
             "k_value_name": "FeS_TS2",
             "dynamic_variables": {"HS": "c.TS2 * mp.hs_frac"},
-            "isotope_species": {"TS2": "TS2_32", "FeS": "FeS_32", "HS": "HS_32"},
+            "isotope_species": {"TS2": "TS2_S32", "FeS": "FeS_S32", "HS": "HS_S32"},
         },
     ]
 

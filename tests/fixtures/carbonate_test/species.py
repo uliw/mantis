@@ -91,7 +91,7 @@ species = {
         "include": True,
         "formula": "H2S",
         "diff_coeff_function": "diff_coeff",
-        "diffusion": {"m0": 43.3, "m1": 0.85},
+        "diffusion": {"m0": 10.4, "m1": 0.273},
         "bc": {"top": 0.0, "type": "dissolved", "delta": 0.0},
         "isotope": "TS2_32",
         "isotope_standard": "S",
