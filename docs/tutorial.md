@@ -721,74 +721,91 @@ model.configure(
 Geochemists usually want to see:
 
 -   Dissolved porewater concentrations in $\text{mmol/L}$ (or $\mu\text{mol/L}$).
--   Solid minerals and organic carbon in **dry weight percent** ($\text{wt}\%$) or $&mu;\text{mol/g}$.
--   Stable isotopes in per mil ($\delta^{34}\text{S}$ in $\text{\permil}$).
+-   Solid minerals and organic carbon in **dry weight percent** ($\text{wt}\%$) or $\mu\text{mol/g}$.
+-   Reaction rates and physical transport (e.g., bioturbation coefficient $D_{\text{bio}}$).
+-   Stable isotopes in per mil or milli-urey ($\delta^{34}\text{S}$, $\delta^{18}\text{O}$, $\delta^{13}\text{C}$).
 
-The `plot_layout.py` file gives you complete control over figure layout, colors, and line attributes.
-
-
-### Converting Model Units to Geochemical Units
-
-In the model solver, all concentrations are tracked in volumetric $\text{mmol/L}$. To convert them to $\text{wt}\%$ for your figures, MANTIS provides helper functions:
-
-```python
-from mantis.diff_lib import solid_conc_to_wt_percent, liquid_conc_to_wt_percent
-
-# Convert solid FeS (in mmol/L) to wt% dry sediment:
-# solid_conc_to_wt_percent(C_solid, molecular_weight, grain_density_g_cm3, porosity)
-FeS_wt_percent = solid_conc_to_wt_percent(df.c_FeS, mw=56.0, d=2.6, phi=df.phi)
-```
+MANTIS uses a clean, purely declarative layout schema in `plot_layout.py`. You do not need to write procedural parsing functions or manually convert units—MANTIS automatically converts solid concentrations to $\text{wt}\%$, links color palettes across related elements, and formats axes.
 
 
-### Defining Multi-Panel Profiles
+### Declarative Schema Overview
 
-In `get_layout(df)`, you return a dictionary defining the figure geometry:
+A typical `plot_layout.py` defines the following sections:
 
 ```python
-def get_layout(df):
-    phi = df.phi
-    FeS_fe = solid_conc_to_wt_percent(df.c_FeS, 56, 2.6, phi)
-    FeS2_fe = solid_conc_to_wt_percent(df.c_FeS2, 56, 2.6, phi)
+"""plot_layout.py - Declarative plot configuration."""
 
-    plot_description = {
-        "figsize": (12, 8),
-        "panels": [
-            # Panel 1: Dissolved Oxidants (O2 and Sulfate)
-            {
-                "title": "Porewater Oxidants",
-                "xlabel": "Concentration (mmol/L)",
-                "curves": [
-                    {"data": df.c_O2, "label": "O2", "color": "purple", "lw": 2},
-                    {"data": df.c_SO4, "label": "SO4", "color": "blue", "lw": 2},
-                ],
-                "xlim": (0, 30),
-            },
+# ---- 1. Color Map and Style Setup ----
+# Standard colormap name ('default', 'tab10', 'Set1'), a dict of species colors,
+# or per-species overrides.
+colormap = "default"
 
-            # Panel 2: Authigenic Iron Minerals
-            {
-                "title": "Iron Minerals (wt% Fe)",
-                "xlabel": "wt % Fe",
-                "curves": [
-                    {"data": FeS_fe, "label": "FeS", "color": "crimson", "lw": 2},
-                    {"data": FeS2_fe, "label": "FeS2 (Pyrite)", "color": "darkorange", "lw": 2},
-                ],
-                "xlim": (0, 1.5),
-            },
+# Override styles for specific species (colors, line widths, background fills, etc.)
+colormap_override = {
+    "D_bio": {"color": "#bbbbbb", "lw": 2, "fill_only": True, "zorder": -10},
+}
 
-            # Panel 3: Sulfur Isotope Composition
-            {
-                "title": "d34S (VCDT)",
-                "xlabel": "d34S (permil)",
-                "curves": [
-                    {"data": df.d_SO4, "label": "d34S-SO4", "color": "blue", "lw": 2},
-                    {"data": df.d_TS2, "label": "d34S-Sulfide", "color": "orange", "lw": 2},
-                ],
-                "xlim": (-40, 40),
-            },
-        ],
+# ---- 2. Concentration Data Panel (First Subplot) ----
+# Left axis: Dissolved porewater species
+liquid_species = {
+    "scale": "log",                              # 'log' or 'lin' / 'linear'
+    "species": ["SO4", "O2", "TS2", "Fe2_liq"],
+    "lim": (1e-6, 50),                           # Axis limits
+    "units": "mmol/l",                           # Axis label
+}
+
+# Right axis: Solid minerals and particulates (supports multiple right axes)
+# MANTIS automatically converts volumetric concentration (mmol/L) to wt% dry sediment!
+solid_species = [
+    {
+        "scale": "lin",
+        "units": ["wt"],                         # Automatic wt% conversion
+        "relative_to": "Fe",                     # Molecular weight reference (e.g. Fe, S, C)
+        "species": ["FeS", "Fe3"],
+        "lim": (0, 1),
     }
-    return plot_description
+]
+
+# ---- 3. Reaction Rate Panel (Second Subplot) ----
+# Defaults to symlog scale to handle both positive (production) and negative (consumption) rates
+reaction_rates = {
+    "scale": "symlog",
+    "species": ["POC", "SO4", "TS2", "Fe3", "FeS", "D_bio"],
+}
+
+# ---- 4. Isotope Data Panel (Third Subplot - Optional) ----
+# Multiple isotope systems (e.g. d34S and d18O) automatically create twin Y-axes.
+# 4-element tuples specify broken axes: (min_lower, max_lower, min_upper, max_upper)
+isotopes = {
+    "species": ["d34S_SO4", "d34S_TS2", "d34S_FeS"],
+    "lim": (-45, -37, 20, 30),                   # Broken y-axis excluding [-37, 20]
+}
+
+# ---- 5. Optional Comparison Against Measured Data ----
+# comparison_data = "measured_core_data.csv"
+# species_mapping = {
+#     "z": ["depth_cm", 1 / 100],                # Map depth column with unit conversion
+#     "SO4": ["C_SO4", 1.0],                     # Map porewater sulfate
+#     "FeS": ["C_FeS", "wt"],                    # Map solid FeS with automatic wt% conversion
+# }
 ```
+
+
+### Key Features of the Declarative Layout
+
+1. **Unified Color Palette Across Panels**:
+   Plot elements that relate to the same chemical entity share the exact same color throughout the entire figure. For example, `SO4` in porewater, `SO4` in reaction rates, and `d34S_SO4` in isotopes all automatically share the same color.
+
+2. **Automatic Solid Weight Percent ($\text{wt}\%$) Conversion**:
+   When `"units": ["wt"]` (or `"wt%"`) and `"relative_to": "Fe"` are defined, MANTIS uses sediment porosity ($\phi$) and dry grain density ($\rho_s = 2.6\text{ g/cm}^3$) to convert volumetric concentrations ($\text{mmol/L}$) to dry weight percent:
+   $$\text{wt}\% = \frac{C_{\text{solid}} \cdot M_{\text{rel}} \cdot (1 - \phi)}{\rho_s \cdot 10^4}$$
+
+3. **Multi-Axis and Broken Axis Support**:
+   - Secondary solid mineral groups (e.g. iron minerals vs. sulfur minerals) or secondary isotope systems (e.g. $\delta^{34}\text{S}$ on left and $\delta^{18}\text{O}$ on right) automatically create twin axes.
+   - Broken axes can be declared cleanly via a 4-tuple `lim=(min1, max1, min2, max2)` to zoom into separate upper and lower isotope ranges.
+
+4. **Background Fills (`fill_only`)**:
+   Physical parameters like bioturbation mixing ($D_{\text{bio}}$) or porosity can be plotted as shaded background areas behind lines by setting `"fill_only": True` (or `"fillonly": True`) and a negative `"zorder"`.
 
 
 ## Step 6: Running the Model & Producing Time-Lapse Videos

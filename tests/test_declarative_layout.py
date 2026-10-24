@@ -349,3 +349,91 @@ isotopes = {
         assert os.path.exists(pdf_path)
         assert os.path.getsize(pdf_path) > 0
 
+
+def test_shared_color_for_related_species_across_panels(sample_df):
+    with tempfile.TemporaryDirectory() as tmpdir:
+        layout_content = """
+liquid_species = {
+    "species": ["SO4"],
+}
+solid_species = [
+    {
+        "species": ["FeS"],
+        "relative_to": "Fe",
+    }
+]
+reaction_rates = {
+    "species": ["FeS", "SO4"],
+}
+isotopes = {
+    "species": ["d34S_SO4", "d34S_FeS"],
+}
+"""
+        layout_path = os.path.join(tmpdir, "plot_layout.py")
+        with open(layout_path, "w") as f:
+            f.write(layout_content)
+
+        plt_desc = load_layout_from_file(sample_df, layout_path)
+        
+        # Panel 1: SO4 (left) and FeS (right1)
+        so4_p1_color = plt_desc["first_subplot"]["left"][0][2]["color"]
+        fes_p1_color = plt_desc["first_subplot"]["right1"][0][2]["color"]
+
+        # Panel 2: FeS (index 0) and SO4 (index 1)
+        fes_p2_color = plt_desc["second_subplot"]["left"][0][2]["color"]
+        so4_p2_color = plt_desc["second_subplot"]["left"][1][2]["color"]
+
+        # Panel 3: d34S_SO4 (index 0) and d34S_FeS (index 1)
+        d_so4_p3_color = plt_desc["third_subplot"]["left"][0][2]["color"]
+        d_fes_p3_color = plt_desc["third_subplot"]["left"][1][2]["color"]
+
+        # Assert shared color across all panels
+        assert so4_p1_color == so4_p2_color == d_so4_p3_color, (
+            f"SO4 colors mismatch: P1={so4_p1_color}, P2={so4_p2_color}, P3={d_so4_p3_color}"
+        )
+        assert fes_p1_color == fes_p2_color == d_fes_p3_color, (
+            f"FeS colors mismatch: P1={fes_p1_color}, P2={fes_p2_color}, P3={d_fes_p3_color}"
+        )
+
+
+def test_shared_color_with_custom_colormap_cycling(sample_df):
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Create a dataframe with novel species names not in geochem defaults
+        df_custom = sample_df.copy()
+        df_custom["c_NovelA"] = df_custom["c_SO4"]
+        df_custom["c_NovelB"] = df_custom["c_HS"]
+        df_custom["f_NovelA"] = df_custom["f_SO4"]
+        df_custom["f_NovelB"] = df_custom["f_FeS"]
+        df_custom["d34S_NovelA"] = df_custom["d34S_SO4"]
+
+        layout_content = """
+colormap = "Set1"
+liquid_species = {
+    "species": ["NovelA", "NovelB"],
+}
+reaction_rates = {
+    "species": ["NovelB", "NovelA"],
+}
+isotopes = {
+    "species": ["d34S_NovelA"],
+}
+"""
+        layout_path = os.path.join(tmpdir, "plot_layout.py")
+        with open(layout_path, "w") as f:
+            f.write(layout_content)
+
+        plt_desc = load_layout_from_file(df_custom, layout_path)
+
+        a_p1_color = plt_desc["first_subplot"]["left"][0][2]["color"]
+        b_p1_color = plt_desc["first_subplot"]["left"][1][2]["color"]
+
+        b_p2_color = plt_desc["second_subplot"]["left"][0][2]["color"]
+        a_p2_color = plt_desc["second_subplot"]["left"][1][2]["color"]
+
+        d_a_p3_color = plt_desc["third_subplot"]["left"][0][2]["color"]
+
+        assert a_p1_color == a_p2_color == d_a_p3_color
+        assert b_p1_color == b_p2_color
+        assert a_p1_color != b_p1_color
+
+

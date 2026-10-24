@@ -41,6 +41,7 @@ Custom Plot Description:
 import argparse
 import importlib.util
 import pathlib as pl
+import re
 import warnings
 
 import matplotlib.patches as mpatches
@@ -684,15 +685,232 @@ def _unpack_species_entry(entry):
     return entry, {}
 
 
-def _get_species_style(species_name, colormap_spec, colormap_override, color_idx_state):
+def _extract_base_entity(name):
+    """
+    Extract the canonical chemical entity/species from a variable name.
+    Examples:
+        'd34S_SO4' -> 'SO4'
+        'd18O_SO4' -> 'SO4'
+        'd_SO4'    -> 'SO4'
+        'f_SO4'    -> 'SO4'
+        'c_SO4'    -> 'SO4'
+        'SO4'      -> 'SO4'
+        'D_bio'    -> 'D_bio'
+        'POC'      -> 'POC'
+    """
+    if not isinstance(name, str):
+        return str(name)
+
+    if name.lower() in ("d_bio", "d_irr", "phi", "porosity", "w", "temp", "temperature"):
+        return name
+
+    # 1. Strip rate or concentration prefix (f_SO4 -> SO4, c_SO4 -> SO4)
+    if (name.startswith("f_") or name.startswith("c_")) and len(name) > 2:
+        return _extract_base_entity(name[2:])
+
+    # 2. Strip delta isotope prefix (d34S_SO4 -> SO4, d_SO4 -> SO4, d18O_SO4 -> SO4)
+    m_iso = re.match(r"^d[0-9]*[A-Za-z]*_(.+)$", name)
+    if m_iso:
+        return m_iso.group(1)
+
+    # 3. Strip isotope companion suffix (SO4_S32 -> SO4, SO4_iso -> SO4)
+    m_suf = re.match(r"^(.+)_(?:S32|32|iso|S34|34|12|13|16|18)$", name)
+    if m_suf:
+        return m_suf.group(1)
+
+    return name
+
+
+def _build_layout_palette(module, colormap_spec, colormap_override):
+    """
+    Collect all data/species names that will be plotted across all layout panels,
+    establish entity groupings so related elements (e.g. SO4, f_SO4, d34S_SO4)
+    share color attributes, and assign unified styles before building panels.
+    """
+    # 1. Collect all data names that will be plotted by the layout file
+    collected_names = []
+
+    def _collect(entries):
+        for entry in entries:
+            sp, _ = _unpack_species_entry(entry)
+            if sp and sp not in collected_names:
+                collected_names.append(sp)
+
+    if hasattr(module, "liquid_species") and module.liquid_species:
+        _collect(module.liquid_species.get("species", []))
+
+    if hasattr(module, "solid_species") and module.solid_species:
+        raw_solid = module.solid_species
+        solid_groups = raw_solid if isinstance(raw_solid, (list, tuple)) else [raw_solid]
+        for s_grp in solid_groups:
+            _collect(s_grp.get("species", []))
+
+    if hasattr(module, "reaction_rates") and module.reaction_rates:
+        _collect(module.reaction_rates.get("species", []))
+
+    if hasattr(module, "isotopes") and module.isotopes:
+        _collect(module.isotopes.get("species", []))
+
+    if hasattr(module, "species_mapping") and isinstance(module.species_mapping, dict):
+        for k in module.species_mapping.keys():
+            if k != "z" and k not in collected_names:
+                collected_names.append(k)
+
+    # 2. Group names by canonical base entity
+    entity_groups = {}  # base -> list of species names
+    for name in collected_names:
+        base = _extract_base_entity(name)
+        if base not in entity_groups:
+            entity_groups[base] = []
+        if name not in entity_groups[base]:
+            entity_groups[base].append(name)
+
+    # 3. Establish base color/style for each entity group
+    base_styles = {}
+    color_idx = 0
+    cmap_name = colormap_spec if isinstance(colormap_spec, str) and colormap_spec != "default" else "tab10"
+
+    is_species_dict = isinstance(colormap_override, dict) and any(
+        k not in ("color", "lw", "linestyle", "fill_only", "fillonly", "zorder", "alpha", "marker")
+        for k in colormap_override.keys()
+    )
+
+    for base, members in entity_groups.items():
+        base_st = {}
+
+        # Check colormap_override
+        override_match = None
+        if isinstance(colormap_override, dict):
+            if is_species_dict:
+                if base in colormap_override:
+                    override_match = colormap_override[base]
+                else:
+                    for k, v in colormap_override.items():
+                        if k.lower() == base.lower():
+                            override_match = v
+                            break
+                if override_match is None:
+                    for m in members:
+                        if m in colormap_override:
+                            override_match = colormap_override[m]
+                            break
+                        for k, v in colormap_override.items():
+                            if k.lower() == m.lower():
+                                override_match = v
+                                break
+                        if override_match is not None:
+                            break
+            else:
+                override_match = colormap_override
+
+        if override_match is not None:
+            if not isinstance(override_match, dict):
+                base_st["color"] = override_match
+            else:
+                base_st.update(override_match)
+
+        # Check colormap_spec if dict
+        if "color" not in base_st and isinstance(colormap_spec, dict):
+            cmap_dict_match = None
+            if base in colormap_spec:
+                cmap_dict_match = colormap_spec[base]
+            else:
+                for k, v in colormap_spec.items():
+                    if k.lower() == base.lower():
+                        cmap_dict_match = v
+                        break
+            if cmap_dict_match is not None:
+                if isinstance(cmap_dict_match, dict):
+                    base_st.update(cmap_dict_match)
+                else:
+                    base_st["color"] = cmap_dict_match
+
+        # Check DEFAULT_GEOCHEM_COLORS
+        if "color" not in base_st:
+            geochem_color = None
+            if base in DEFAULT_GEOCHEM_COLORS:
+                geochem_color = DEFAULT_GEOCHEM_COLORS[base]
+            else:
+                for k, v in DEFAULT_GEOCHEM_COLORS.items():
+                    if k.lower() == base.lower():
+                        geochem_color = v
+                        break
+
+            if geochem_color is not None and (
+                colormap_spec is None or colormap_spec == "default" or colormap_spec == "tab10"
+            ):
+                base_st["color"] = geochem_color
+
+        # Fallback to colormap cycle
+        if "color" not in base_st:
+            try:
+                cmap = plt.get_cmap(cmap_name)
+                num_colors = getattr(cmap, "N", 10)
+                base_st["color"] = cmap(color_idx % num_colors)
+                color_idx += 1
+            except Exception:
+                base_st["color"] = DEFAULT_GEOCHEM_COLORS.get(base, "black")
+
+        if "lw" not in base_st:
+            base_st["lw"] = 2
+
+        base_styles[base] = base_st
+
+    # 4. Construct final styles for all plotted species
+    palette = {}
+    for name in collected_names:
+        base = _extract_base_entity(name)
+        st = dict(base_styles[base])
+
+        # If name has its own specific override in colormap_override, apply it
+        if isinstance(colormap_override, dict) and is_species_dict:
+            sp_ov = colormap_override.get(name)
+            if sp_ov is None:
+                for k, v in colormap_override.items():
+                    if k.lower() == name.lower():
+                        sp_ov = v
+                        break
+            if sp_ov is not None:
+                if isinstance(sp_ov, dict):
+                    st.update(sp_ov)
+                else:
+                    st["color"] = sp_ov
+
+        if "fillonly" in st:
+            st["fill_only"] = st.pop("fillonly")
+        if "lw" not in st:
+            st["lw"] = 2
+
+        palette[name] = st
+
+    return palette
+
+
+def _get_species_style(species_name, colormap_spec=None, colormap_override=None, color_idx_state=None, palette=None):
     """Determine line and color attributes for a species."""
+    if palette:
+        if species_name in palette:
+            return dict(palette[species_name])
+        for k, v in palette.items():
+            if k.lower() == species_name.lower():
+                return dict(v)
+        base = _extract_base_entity(species_name)
+        if base in palette:
+            return dict(palette[base])
+        for k, v in palette.items():
+            if k.lower() == base.lower():
+                return dict(v)
+
+    base = _extract_base_entity(species_name)
     override = {}
     if isinstance(colormap_override, dict):
         if species_name in colormap_override:
             override = colormap_override[species_name]
+        elif base in colormap_override:
+            override = colormap_override[base]
         else:
             for k, v in colormap_override.items():
-                if k.lower() == species_name.lower():
+                if k.lower() in (species_name.lower(), base.lower()):
                     override = v
                     break
 
@@ -705,10 +923,10 @@ def _get_species_style(species_name, colormap_spec, colormap_override, color_idx
 
     if "color" not in style:
         if isinstance(colormap_spec, dict):
-            val = colormap_spec.get(species_name)
+            val = colormap_spec.get(species_name) or colormap_spec.get(base)
             if val is None:
                 for k, v in colormap_spec.items():
-                    if k.lower() == species_name.lower():
+                    if k.lower() in (species_name.lower(), base.lower()):
                         val = v
                         break
             if val is not None:
@@ -719,13 +937,14 @@ def _get_species_style(species_name, colormap_spec, colormap_override, color_idx
                 else:
                     style["color"] = val
         if "color" not in style:
-            # Check default colors
             matched_default = None
             if species_name in DEFAULT_GEOCHEM_COLORS:
                 matched_default = DEFAULT_GEOCHEM_COLORS[species_name]
+            elif base in DEFAULT_GEOCHEM_COLORS:
+                matched_default = DEFAULT_GEOCHEM_COLORS[base]
             else:
                 for k, v in DEFAULT_GEOCHEM_COLORS.items():
-                    if k.lower() == species_name.lower():
+                    if k.lower() in (species_name.lower(), base.lower()):
                         matched_default = v
                         break
 
@@ -738,11 +957,12 @@ def _get_species_style(species_name, colormap_spec, colormap_override, color_idx
                 try:
                     cmap = plt.get_cmap(cmap_name)
                     num_colors = getattr(cmap, "N", 10)
-                    idx = color_idx_state[0] % num_colors
+                    idx = (color_idx_state[0] if color_idx_state else 0) % num_colors
                     style["color"] = cmap(idx)
-                    color_idx_state[0] += 1
+                    if color_idx_state:
+                        color_idx_state[0] += 1
                 except Exception:
-                    style["color"] = DEFAULT_GEOCHEM_COLORS.get(species_name, "black")
+                    style["color"] = DEFAULT_GEOCHEM_COLORS.get(base, DEFAULT_GEOCHEM_COLORS.get(species_name, "black"))
 
     if "lw" not in style:
         style["lw"] = 2
@@ -855,6 +1075,7 @@ def compile_declarative_layout(module, df, layout_path, measured_data_path=None)
 
     colormap_spec = getattr(module, "colormap", "default")
     colormap_override = getattr(module, "colormap_override", {})
+    palette = _build_layout_palette(module, colormap_spec, colormap_override)
     color_idx_state = [0]
 
     # 2. Comparison data & species mapping
@@ -958,7 +1179,7 @@ def compile_declarative_layout(module, df, layout_path, measured_data_path=None)
             for sp_entry in liq_species:
                 sp, inline_st = _unpack_species_entry(sp_entry)
                 col_data = _resolve_species_column(df, sp)
-                st = _get_species_style(sp, colormap_spec, colormap_override, color_idx_state)
+                st = _get_species_style(sp, colormap_spec, colormap_override, color_idx_state, palette=palette)
                 st.update(inline_st)
                 if "fillonly" in st:
                     st["fill_only"] = st.pop("fillonly")
@@ -1002,7 +1223,7 @@ def compile_declarative_layout(module, df, layout_path, measured_data_path=None)
                         converted_col = _convert_solid_to_wt(raw_col, rel_to, df)
                     else:
                         converted_col = raw_col
-                    st = _get_species_style(sp, colormap_spec, colormap_override, color_idx_state)
+                    st = _get_species_style(sp, colormap_spec, colormap_override, color_idx_state, palette=palette)
                     st.update(inline_st)
                     if "fillonly" in st:
                         st["fill_only"] = st.pop("fillonly")
@@ -1033,7 +1254,7 @@ def compile_declarative_layout(module, df, layout_path, measured_data_path=None)
         for sp_entry in rr_species:
             sp, inline_st = _unpack_species_entry(sp_entry)
             col_data = _resolve_rate_column(df, sp)
-            st = _get_species_style(sp, colormap_spec, colormap_override, color_idx_state)
+            st = _get_species_style(sp, colormap_spec, colormap_override, color_idx_state, palette=palette)
             st.update(inline_st)
             if "fillonly" in st:
                 st["fill_only"] = st.pop("fillonly")
@@ -1106,7 +1327,7 @@ def compile_declarative_layout(module, df, layout_path, measured_data_path=None)
             p0 = prefix_list[0]
             left_series = []
             for col, sp, inline_st in groups[p0]:
-                st = _get_species_style(sp, colormap_spec, colormap_override, color_idx_state)
+                st = _get_species_style(sp, colormap_spec, colormap_override, color_idx_state, palette=palette)
                 st.update(inline_st)
                 if "fillonly" in st:
                     st["fill_only"] = st.pop("fillonly")
@@ -1137,7 +1358,7 @@ def compile_declarative_layout(module, df, layout_path, measured_data_path=None)
                 p1 = prefix_list[1]
                 right_series = []
                 for col, sp, inline_st in groups[p1]:
-                    st = _get_species_style(sp, colormap_spec, colormap_override, color_idx_state)
+                    st = _get_species_style(sp, colormap_spec, colormap_override, color_idx_state, palette=palette)
                     st.update(inline_st)
                     if "fillonly" in st:
                         st["fill_only"] = st.pop("fillonly")
