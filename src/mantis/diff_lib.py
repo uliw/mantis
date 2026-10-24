@@ -788,6 +788,9 @@ def _save_data_to_disk(mp, c, k, species_list, z, D_mol, f_final):
 
                 col_name = f"{std_key}_{base}"
                 data[col_name] = delta_val
+                data[f"d_{base}"] = delta_val
+                if "delta_name" in meta:
+                    data[meta["delta_name"]] = delta_val
     else:
         # Fallback if species_defs is not passed on mp
         for base in species_list:
@@ -810,7 +813,9 @@ def _save_data_to_disk(mp, c, k, species_list, z, D_mol, f_final):
                         raise ValueError(
                             "[MANTIS ERROR] Standard ratio for 'S' is not defined in isotope_standards or mp.VCDT."
                         )
-                    data[f"d_{base}"] = get_delta(tot, c_iso, r_std, threshold=thresh)
+                    delta_val = get_delta(tot, c_iso, r_std, threshold=thresh)
+                    data[f"d_{base}"] = delta_val
+                    data[f"d34S_{base}"] = delta_val
 
     # 4. Carbonate system speciation diagnostics
     if hasattr(c, "TA") and hasattr(c, "DIC"):

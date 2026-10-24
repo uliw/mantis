@@ -340,38 +340,6 @@ def _load_measured_data(measured_data_path):
     return None
 
 
-class DataFrameWrapper:
-    """Wraps a DataFrame to dynamically delegate m_ attributes to a second DataFrame."""
-    def __init__(self, df, df2):
-        self._df = df
-        self._df2 = df2
-
-    def __getattr__(self, name):
-        if name.startswith("m_") and self._df2 is not None:
-            real_name = name[2:]
-            if hasattr(self._df2, real_name):
-                return getattr(self._df2, real_name)
-            for col in self._df2.columns:
-                if col.lower() == real_name.lower():
-                    return self._df2[col]
-        return getattr(self._df, name)
-
-    def __getitem__(self, key):
-        if isinstance(key, str) and key.startswith("m_") and self._df2 is not None:
-            real_name = key[2:]
-            if real_name in self._df2.columns:
-                return self._df2[real_name]
-            for col in self._df2.columns:
-                if col.lower() == real_name.lower():
-                    return self._df2[col]
-        return self._df[key]
-
-    def __len__(self):
-        return len(self._df)
-
-    @property
-    def columns(self):
-        return self._df.columns
 
 
 def _setup_subplot_axes(ax_main, subplot_config):
@@ -488,8 +456,8 @@ def _draw_series(ax, x_data, series_list, df2):
             else:
                 series_x_data = x_data
 
-        fill_only = kwargs.pop("fill_only", False)
-        fill = kwargs.pop("fill", False) or fill_only
+        fill_only = kwargs.pop("fill_only", False) or kwargs.pop("fillonly", False)
+        fill = kwargs.pop("fill", False) or kwargs.pop("fillonly", False) or fill_only
         fill_alpha = kwargs.pop("alpha", 0.3) if fill else None
         if fill_only:
             kwargs["lw"] = 0
@@ -501,9 +469,16 @@ def _draw_series(ax, x_data, series_list, df2):
         (line,) = ax.plot(series_x_data, y_data, label=plot_label, **kwargs)
 
         if fill:
+            fill_kwargs = {
+                "alpha": fill_alpha,
+                "color": line.get_color(),
+                "label": fill_label,
+            }
+            if "zorder" in kwargs:
+                fill_kwargs["zorder"] = kwargs["zorder"]
             ax.fill_between(
                 series_x_data, y_data,
-                alpha=fill_alpha, color=line.get_color(), label=fill_label,
+                **fill_kwargs,
             )
         lines.append(line)
         labels.append(label)
@@ -616,6 +591,579 @@ def _apply_all_options(ax_main, right_axes, subplot_config):
             )
 
 
+ATOMIC_WEIGHTS = {
+    "H": 1.008,
+    "C": 12.011,
+    "N": 14.007,
+    "O": 15.999,
+    "Na": 22.990,
+    "Mg": 24.305,
+    "Al": 26.982,
+    "Si": 28.085,
+    "P": 30.974,
+    "S": 32.06,
+    "Cl": 35.45,
+    "K": 39.098,
+    "Ca": 40.078,
+    "Mn": 54.938,
+    "Fe": 55.845,
+    "Cu": 63.546,
+    "Zn": 65.38,
+    "Ba": 137.327,
+}
+
+DEFAULT_GEOCHEM_COLORS = {
+    "SO4": "cornflowerblue",
+    "TS2": "slateblue",
+    "HS": "slateblue",
+    "H2S": "slateblue",
+    "O2": "#AA4499",
+    "Fe3": "saddlebrown",
+    "FeOOH": "saddlebrown",
+    "FeS": "#ee3377",
+    "FeS2": "darkorange",
+    "Fe2S": "darkorange",
+    "Fe2_total": "indianred",
+    "Fe2_liq": "#cc3311",
+    "Fe2_sorbed": "indianred",
+    "POC": "forestgreen",
+    "POC_fast": "goldenrod",
+    "POC_slow": "black",
+    "CH4": "teal",
+    "Hplus": "crimson",
+    "pH": "crimson",
+    "D_bio": "#bbbbbb",
+    "D_irr": "gold",
+    "phi": "darkcyan",
+}
+
+
+def _resolve_species_column(df, name):
+    """Find the concentration column in df corresponding to species name (e.g. c_SO4 or SO4)."""
+    if f"c_{name}" in df.columns:
+        return df[f"c_{name}"]
+    if name in df.columns:
+        return df[name]
+    for c in df.columns:
+        if c.lower() == f"c_{name}".lower() or c.lower() == name.lower():
+            return df[c]
+    raise KeyError(
+        f"Species '{name}' not found in simulation dataframe. Available columns: {list(df.columns)}"
+    )
+
+
+def _resolve_rate_column(df, name):
+    """Find reaction rate column in df (e.g. f_SO4, or f_POC_slow + f_POC_fast)."""
+    if name == "POC":
+        if "f_POC_slow" in df.columns and "f_POC_fast" in df.columns:
+            return df["f_POC_slow"] + df["f_POC_fast"]
+        if "f_POC" in df.columns:
+            return df["f_POC"]
+    if f"f_{name}" in df.columns:
+        return df[f"f_{name}"]
+    if name in df.columns:
+        if name == "D_bio":
+            return df["D_bio"] * 1e6
+        return df[name]
+    for c in df.columns:
+        if c.lower() == f"f_{name}".lower():
+            return df[c]
+    raise KeyError(
+        f"Reaction rate species '{name}' not found in simulation dataframe. Available columns: {list(df.columns)}"
+    )
+
+
+def _unpack_species_entry(entry):
+    """Unpack species entry which may be a string, (name, dict), or {'species': name, ...}."""
+    if isinstance(entry, tuple) and len(entry) == 2 and isinstance(entry[1], dict):
+        return entry[0], dict(entry[1])
+    elif isinstance(entry, dict):
+        sp_name = entry.get("name") or entry.get("species")
+        inline_st = {k: v for k, v in entry.items() if k not in ("name", "species")}
+        return sp_name, inline_st
+    return entry, {}
+
+
+def _get_species_style(species_name, colormap_spec, colormap_override, color_idx_state):
+    """Determine line and color attributes for a species."""
+    override = {}
+    if isinstance(colormap_override, dict):
+        if species_name in colormap_override:
+            override = colormap_override[species_name]
+        else:
+            for k, v in colormap_override.items():
+                if k.lower() == species_name.lower():
+                    override = v
+                    break
+
+    if not isinstance(override, dict):
+        override = {"color": override}
+
+    style = dict(override)
+    if "fillonly" in style:
+        style["fill_only"] = style.pop("fillonly")
+
+    if "color" not in style:
+        if isinstance(colormap_spec, dict):
+            val = colormap_spec.get(species_name)
+            if val is None:
+                for k, v in colormap_spec.items():
+                    if k.lower() == species_name.lower():
+                        val = v
+                        break
+            if val is not None:
+                if isinstance(val, dict):
+                    style.update(val)
+                    if "fillonly" in style:
+                        style["fill_only"] = style.pop("fillonly")
+                else:
+                    style["color"] = val
+        if "color" not in style:
+            # Check default colors
+            matched_default = None
+            if species_name in DEFAULT_GEOCHEM_COLORS:
+                matched_default = DEFAULT_GEOCHEM_COLORS[species_name]
+            else:
+                for k, v in DEFAULT_GEOCHEM_COLORS.items():
+                    if k.lower() == species_name.lower():
+                        matched_default = v
+                        break
+
+            if matched_default is not None and (
+                colormap_spec is None or colormap_spec == "default" or colormap_spec == "tab10"
+            ):
+                style["color"] = matched_default
+            else:
+                cmap_name = colormap_spec if isinstance(colormap_spec, str) and colormap_spec != "default" else "tab10"
+                try:
+                    cmap = plt.get_cmap(cmap_name)
+                    num_colors = getattr(cmap, "N", 10)
+                    idx = color_idx_state[0] % num_colors
+                    style["color"] = cmap(idx)
+                    color_idx_state[0] += 1
+                except Exception:
+                    style["color"] = DEFAULT_GEOCHEM_COLORS.get(species_name, "black")
+
+    if "lw" not in style:
+        style["lw"] = 2
+    return style
+
+
+def _convert_solid_to_wt(series, relative_to, df):
+    """Convert solid concentration (mmol/L_solid) to wt% dry sediment."""
+    from mantis.diff_lib import solid_conc_to_wt_percent
+
+    rel_elem = str(relative_to).strip()
+    if rel_elem in ATOMIC_WEIGHTS:
+        mw = ATOMIC_WEIGHTS[rel_elem]
+    else:
+        try:
+            mw = float(rel_elem)
+        except ValueError:
+            mw = 55.845  # default to Fe
+
+    rho_solid = getattr(df, "rho_solid", 2.6)
+    if hasattr(rho_solid, "iloc"):
+        rho_solid = float(rho_solid.iloc[0])
+    elif not isinstance(rho_solid, (int, float)):
+        rho_solid = 2.6
+
+    phi = df["phi"] if "phi" in df.columns else 0.8
+    return solid_conc_to_wt_percent(series, mw, rho_solid, phi)
+
+
+def _pretty_species_label(name, rel_elem=None):
+    """Format chemical species nicely with subscripts/superscripts."""
+    label_map = {
+        "SO4": r"SO$_{4}$",
+        "O2": r"O$_{2}$",
+        "TS2": "TS$^{2-}$",
+        "HS": "HS$^{-}$",
+        "H2S": r"H$_{2}$S",
+        "Fe3": r"Fe$^{3+}$",
+        "FeOOH": "FeOOH",
+        "FeS": "FeS",
+        "FeS2": r"FeS$_{2}$",
+        "Fe2S": r"FeS$_{2}$",
+        "Fe2_liq": r"Fe$^{2+}_{liq}$",
+        "Fe2_total": r"Fe$^{2+}_{tot}$",
+        "Fe2_dis": r"Fe$^{2+}_{dis}$",
+        "POC": "POC",
+        "POC_fast": "POC$_{fast}$",
+        "POC_slow": "POC$_{slow}$",
+        "D_bio": r"1e6 $\times$ D$_{bio}$ [$m^{2}/s$]",
+    }
+    base = label_map.get(name, name)
+    if rel_elem:
+        return f"{base} [wt% {rel_elem}]"
+    return base
+
+
+def _apply_lim_and_scale(config, lim, scale, axis_prefix="left"):
+    """Apply scale and limits (including broken axis) to subplot config."""
+    if scale:
+        s_low = str(scale).lower()
+        if "log" in s_low and "sym" not in s_low:
+            scale_val = "log"
+        elif "sym" in s_low:
+            scale_val = "symlog"
+        else:
+            scale_val = "linear"
+
+        if axis_prefix == "left":
+            config["yscale"] = scale_val
+        else:
+            config[f"{axis_prefix}_yscale"] = scale_val
+
+    if lim is not None:
+        if isinstance(lim, (list, tuple)):
+            if len(lim) == 2:
+                if axis_prefix == "left":
+                    config["ylim"] = tuple(lim)
+                else:
+                    config[f"{axis_prefix}_ylim"] = tuple(lim)
+            elif len(lim) == 4:
+                # Broken axis syntax (-45, -37, 20, 30)
+                opt_key = f"options-{axis_prefix}"
+                cmd = f"broken_axis({lim[0]}, {lim[1]}, {lim[2]}, {lim[3]})"
+                if opt_key in config:
+                    if isinstance(config[opt_key], list):
+                        config[opt_key].append(cmd)
+                    else:
+                        config[opt_key] = [config[opt_key], cmd]
+                else:
+                    config[opt_key] = [cmd]
+
+
+def compile_declarative_layout(module, df, layout_path, measured_data_path=None):
+    """
+    Compile a declarative layout module into a plot_description dictionary.
+    """
+    # 1. Global settings
+    depth_scale = getattr(module, "depth_scale", "log")
+    if str(depth_scale).lower() in ("lin", "linear"):
+        depth_scale = "linear"
+    else:
+        depth_scale = "log"
+
+    depth_lim = getattr(module, "depth_lim", None)
+    if depth_lim is None and depth_scale == "log":
+        depth_lim = (1e-4, None)
+
+    fig_width = getattr(module, "fig_width", 8)
+    xaxis = [df.z, "Depth [m]"]
+
+    colormap_spec = getattr(module, "colormap", "default")
+    colormap_override = getattr(module, "colormap_override", {})
+    color_idx_state = [0]
+
+    # 2. Comparison data & species mapping
+    comp_file = getattr(module, "comparison_data", None) or measured_data_path
+    mapped_external_series = {}
+
+    if comp_file:
+        layout_dir = pl.Path(layout_path).resolve().parent
+        comp_path = layout_dir / comp_file
+        if not comp_path.exists():
+            comp_path = pl.Path(comp_file)
+        if not comp_path.exists():
+            raise FileNotFoundError(f"Comparison data file not found: '{comp_file}' (searched in '{layout_dir}')")
+
+        ext_df = pd.read_csv(comp_path)
+        mapping = getattr(module, "species_mapping", {})
+        if not mapping or not isinstance(mapping, dict):
+            raise ValueError("When 'comparison_data' is provided, 'species_mapping' must be defined as a dict.")
+
+        # z mapping
+        if "z" not in mapping:
+            for col in ["depth_cm", "depth", "z", "Depth_cm", "Depth"]:
+                if col in ext_df.columns:
+                    factor = 1 / 100 if "cm" in col.lower() else 1.0
+                    mapping["z"] = [col, factor]
+                    break
+        if "z" not in mapping:
+            raise KeyError(f"'species_mapping' must contain a mapping for 'z'. Comparison columns: {list(ext_df.columns)}")
+
+        z_spec = mapping["z"]
+        z_col = z_spec[0]
+        z_conv = z_spec[1] if len(z_spec) > 1 else 1.0
+        if z_col not in ext_df.columns:
+            raise KeyError(f"External depth column '{z_col}' not found in comparison data '{comp_file}'.")
+        if callable(z_conv):
+            ext_z = z_conv(ext_df[z_col])
+        else:
+            ext_z = ext_df[z_col] * float(z_conv)
+
+        # Process mapped species
+        for sp_key, spec_val in mapping.items():
+            if sp_key == "z":
+                continue
+            ext_col = spec_val[0]
+            conv = spec_val[1] if len(spec_val) > 1 else 1.0
+
+            # Validation: key and value must exist in respective dataframes
+            if f"c_{sp_key}" not in df.columns and sp_key not in df.columns and f"f_{sp_key}" not in df.columns:
+                raise KeyError(f"Species mapping key '{sp_key}' does not exist in mantis dataframe.")
+            if ext_col not in ext_df.columns:
+                raise KeyError(
+                    f"Mapped external column '{ext_col}' does not exist in comparison data '{comp_file}'. "
+                    f"Available columns: {list(ext_df.columns)}"
+                )
+
+            raw_val = ext_df[ext_col]
+            if callable(conv):
+                try:
+                    converted_val = conv(raw_val, ext_df, df)
+                except TypeError:
+                    try:
+                        converted_val = conv(raw_val, df)
+                    except TypeError:
+                        converted_val = conv(raw_val)
+            elif isinstance(conv, (int, float)):
+                converted_val = raw_val * float(conv)
+            elif isinstance(conv, str) and conv.lower() in ("wt", "wt%"):
+                from mantis.diff_lib import solid_conc_to_wt_percent
+
+                mw = 55.845
+                v_phi = (
+                    ext_df["phi"].values
+                    if "phi" in ext_df.columns
+                    else (df.phi.values[0] if "phi" in df.columns else 0.8)
+                )
+                converted_val = solid_conc_to_wt_percent(raw_val, mw, 2.6, v_phi)
+            else:
+                converted_val = raw_val
+
+            mapped_external_series[sp_key] = (ext_z, converted_val, f"{_pretty_species_label(sp_key)} (data)")
+
+    # 3. Build subplots
+    plt_desc = {}
+
+    has_liquid = hasattr(module, "liquid_species") and module.liquid_species
+    has_solid = hasattr(module, "solid_species") and module.solid_species
+
+    if has_liquid or has_solid:
+        conc_subplot = {
+            "fig_width": fig_width,
+            "xaxis": xaxis,
+            "xscale": depth_scale,
+            "xlim": depth_lim,
+        }
+
+        # Left axis (liquid species)
+        if has_liquid:
+            liq_cfg = module.liquid_species
+            liq_species = liq_cfg.get("species", [])
+            left_series = []
+            for sp_entry in liq_species:
+                sp, inline_st = _unpack_species_entry(sp_entry)
+                col_data = _resolve_species_column(df, sp)
+                st = _get_species_style(sp, colormap_spec, colormap_override, color_idx_state)
+                st.update(inline_st)
+                if "fillonly" in st:
+                    st["fill_only"] = st.pop("fillonly")
+                lbl = _pretty_species_label(sp)
+                left_series.append([col_data, lbl, st])
+                if sp in mapped_external_series:
+                    ez, ey, elbl = mapped_external_series[sp]
+                    est = dict(st)
+                    est["linestyle"] = ":"
+                    est.pop("fill_only", None)
+                    est.pop("fill", None)
+                    est.pop("fillonly", None)
+                    left_series.append([ez, ey, elbl, est])
+
+            conc_subplot["left"] = left_series
+            units = liq_cfg.get("units", "mmol/L")
+            conc_subplot["left_ylabel"] = (
+                f"Concentration [{units}]" if "mmol" in str(units).lower() else f"[{units}]"
+            )
+            _apply_lim_and_scale(conc_subplot, liq_cfg.get("lim"), liq_cfg.get("scale", "log"), "left")
+            if "broken_axis" in liq_cfg:
+                _apply_lim_and_scale(conc_subplot, liq_cfg["broken_axis"], None, "left")
+
+        # Right axes (solid species groups)
+        if has_solid:
+            raw_solid = module.solid_species
+            solid_groups = raw_solid if isinstance(raw_solid, (list, tuple)) else [raw_solid]
+            for idx, s_grp in enumerate(solid_groups):
+                right_key = f"right{idx+1}"
+                s_list = s_grp.get("species", [])
+                rel_to = s_grp.get("relative_to", "Fe")
+                units = s_grp.get("units", "wt%")
+                if isinstance(units, (list, tuple)):
+                    units = units[0]
+
+                right_series = []
+                for sp_entry in s_list:
+                    sp, inline_st = _unpack_species_entry(sp_entry)
+                    raw_col = _resolve_species_column(df, sp)
+                    if "wt" in str(units).lower():
+                        converted_col = _convert_solid_to_wt(raw_col, rel_to, df)
+                    else:
+                        converted_col = raw_col
+                    st = _get_species_style(sp, colormap_spec, colormap_override, color_idx_state)
+                    st.update(inline_st)
+                    if "fillonly" in st:
+                        st["fill_only"] = st.pop("fillonly")
+                    lbl = _pretty_species_label(sp, rel_elem=rel_to)
+                    right_series.append([converted_col, lbl, st])
+                    if sp in mapped_external_series:
+                        ez, ey, elbl = mapped_external_series[sp]
+                        est = dict(st)
+                        est["linestyle"] = ":"
+                        est.pop("fill_only", None)
+                        est.pop("fill", None)
+                        est.pop("fillonly", None)
+                        right_series.append([ez, ey, elbl, est])
+
+                conc_subplot[right_key] = right_series
+                conc_subplot[f"{right_key}_ylabel"] = f"[{units} {rel_to}]"
+                _apply_lim_and_scale(conc_subplot, s_grp.get("lim"), s_grp.get("scale", "linear"), right_key)
+                if "broken_axis" in s_grp:
+                    _apply_lim_and_scale(conc_subplot, s_grp["broken_axis"], None, right_key)
+
+        plt_desc["first_subplot"] = conc_subplot
+
+    # Subplot 2: Reaction rates
+    if hasattr(module, "reaction_rates") and module.reaction_rates:
+        rr_cfg = module.reaction_rates
+        rr_species = rr_cfg.get("species", [])
+        rr_series = []
+        for sp_entry in rr_species:
+            sp, inline_st = _unpack_species_entry(sp_entry)
+            col_data = _resolve_rate_column(df, sp)
+            st = _get_species_style(sp, colormap_spec, colormap_override, color_idx_state)
+            st.update(inline_st)
+            if "fillonly" in st:
+                st["fill_only"] = st.pop("fillonly")
+            lbl = _pretty_species_label(sp)
+            rr_series.append([col_data, lbl, st])
+
+        rr_subplot = {
+            "fig_width": fig_width,
+            "xaxis": xaxis,
+            "left": rr_series,
+            "left_ylabel": rr_cfg.get("ylabel", r"reaction rate [mol m$^{-3}s^{-1}$]"),
+            "xscale": depth_scale,
+            "xlim": depth_lim,
+        }
+        _apply_lim_and_scale(rr_subplot, rr_cfg.get("lim"), rr_cfg.get("scale", "symlog"), "left")
+        if "options-left" not in rr_subplot and str(rr_cfg.get("scale", "symlog")).lower() == "symlog":
+            rr_subplot["options-left"] = "set_yscale('symlog', linthresh=1e-9, linscale=0.5, base=10)"
+
+        plt_desc["second_subplot"] = rr_subplot
+
+    # Subplot 3: Isotopes
+    if hasattr(module, "isotopes") and module.isotopes:
+        iso_cfg = module.isotopes
+        iso_species = iso_cfg.get("species", [])
+        if iso_species:
+            import re
+
+            groups = {}
+            for sp_entry in iso_species:
+                sp, inline_st = _unpack_species_entry(sp_entry)
+                m = re.match(r"^(d[0-9]+[A-Za-z]+|d_[A-Za-z]+|d)(.*)$", sp)
+                prefix = m.group(1) if m else "d"
+                suffix = m.group(2) if m else ""
+                base = suffix.lstrip("_")
+
+                if prefix not in groups:
+                    groups[prefix] = []
+
+                # Find column in df
+                col = None
+                candidates = [
+                    sp,
+                    f"d_{sp}",
+                    f"d_{base}" if base else None,
+                    f"d34S_{base}" if base else None,
+                    f"d18O_{base}" if base else None,
+                    f"d13C_{base}" if base else None,
+                ]
+                for cand in candidates:
+                    if cand and cand in df.columns:
+                        col = cand
+                        break
+
+                if col is None:
+                    for cand in candidates:
+                        if not cand:
+                            continue
+                        matches = [c for c in df.columns if c.lower() == cand.lower()]
+                        if matches:
+                            col = matches[0]
+                            break
+
+                if col is None:
+                    raise KeyError(
+                        f"Isotope species '{sp}' not found in simulation dataframe columns: {list(df.columns)}"
+                    )
+                groups[prefix].append((col, sp, inline_st))
+
+            prefix_list = list(groups.keys())
+            p0 = prefix_list[0]
+            left_series = []
+            for col, sp, inline_st in groups[p0]:
+                st = _get_species_style(sp, colormap_spec, colormap_override, color_idx_state)
+                st.update(inline_st)
+                if "fillonly" in st:
+                    st["fill_only"] = st.pop("fillonly")
+                lbl = _pretty_species_label(sp)
+                left_series.append([df[col], lbl, st])
+
+            iso_subplot = {
+                "fig_width": fig_width,
+                "xaxis": xaxis,
+                "left": left_series,
+                "xscale": depth_scale,
+                "xlim": depth_lim,
+            }
+            if "34S" in p0:
+                iso_subplot["left_ylabel"] = r"$\delta^{34}$ [mUr VCDT]"
+            elif "18O" in p0:
+                iso_subplot["left_ylabel"] = r"$\delta^{18}$O [mUr VSMOW]"
+            elif "13C" in p0:
+                iso_subplot["left_ylabel"] = r"$\delta^{13}$C [mUr VPDB]"
+            else:
+                iso_subplot["left_ylabel"] = rf"$\delta$ [{p0}]"
+
+            _apply_lim_and_scale(iso_subplot, iso_cfg.get("lim"), iso_cfg.get("scale", "linear"), "left")
+            if "broken_axis" in iso_cfg:
+                _apply_lim_and_scale(iso_subplot, iso_cfg["broken_axis"], None, "left")
+
+            if len(prefix_list) > 1:
+                p1 = prefix_list[1]
+                right_series = []
+                for col, sp, inline_st in groups[p1]:
+                    st = _get_species_style(sp, colormap_spec, colormap_override, color_idx_state)
+                    st.update(inline_st)
+                    if "fillonly" in st:
+                        st["fill_only"] = st.pop("fillonly")
+                    lbl = _pretty_species_label(sp)
+                    right_series.append([df[col], lbl, st])
+                iso_subplot["right1"] = right_series
+                if "18O" in p1:
+                    iso_subplot["right1_ylabel"] = r"$\delta^{18}$O [mUr VSMOW]"
+                elif "34S" in p1:
+                    iso_subplot["right1_ylabel"] = r"$\delta^{34}$ [mUr VCDT]"
+                elif "13C" in p1:
+                    iso_subplot["right1_ylabel"] = r"$\delta^{13}$C [mUr VPDB]"
+                else:
+                    iso_subplot["right1_ylabel"] = rf"$\delta$ [{p1}]"
+
+            plt_desc["third_subplot"] = iso_subplot
+
+    if not plt_desc:
+        raise ValueError(
+            f"Layout file '{layout_path}' must define at least one of "
+            f"'liquid_species', 'solid_species', 'reaction_rates', or 'isotopes'."
+        )
+
+    return plt_desc
+
+
 def load_layout_from_file(df, layout_path, measured_data_path=None):
     """
     Load a plot layout from a Python file.
@@ -630,12 +1178,10 @@ def load_layout_from_file(df, layout_path, measured_data_path=None):
     -------
     dict: The plot description dictionary.
     """
-    df2 = _load_measured_data(measured_data_path)
-    df_wrapped = DataFrameWrapper(df, df2)
-
     path = pl.Path(layout_path)
     if not path.exists():
         import sys
+
         argv0_dir = pl.Path(sys.argv[0]).parent
         fallback_cwd = pl.Path.cwd() / path.name
         fallback_argv0 = argv0_dir / path.name
@@ -650,36 +1196,14 @@ def load_layout_from_file(df, layout_path, measured_data_path=None):
                 f"and script directory ({argv0_dir})."
             )
 
-    # Use importlib to load the module from a file path
-    spec = importlib.util.spec_from_file_location("dynamic_layout", path)
+    spec = importlib.util.spec_from_file_location("declarative_layout", path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Could not load module specification from '{path}'")
     module = importlib.util.module_from_spec(spec)
-    
-    # Inject df2 and df_wrapped into module globals to support both direct access to df2
-    # and legacy calls that query df.m_c_O2
-    module.df = df_wrapped
-    module.df2 = df2
-
     spec.loader.exec_module(module)
 
-    if not hasattr(module, "get_layout"):
-        raise AttributeError(
-            f"Layout file {layout_path} must contain a 'get_layout(df)' function."
-        )
+    return compile_declarative_layout(module, df, path, measured_data_path=measured_data_path)
 
-    import inspect
-    sig = inspect.signature(module.get_layout)
-    has_df2_param = False
-    params = list(sig.parameters.values())
-    if len(params) >= 2:
-        if params[1].kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD):
-            has_df2_param = True
-    if any(p.kind == inspect.Parameter.VAR_POSITIONAL for p in params):
-        has_df2_param = True
-
-    if has_df2_param:
-        return module.get_layout(df_wrapped, df2)
-    else:
-        return module.get_layout(df_wrapped)
 
 
 class BrokenYTransform(mtransforms.Transform):

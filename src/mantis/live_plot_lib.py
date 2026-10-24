@@ -535,33 +535,40 @@ def capture_state(
 
     if isinstance(species_defs, dict):
         for base, meta in species_defs.items():
-            iso = meta.get("isotope")
-            if not iso or f"c_{base}" not in data or f"c_{iso}" not in data:
+            iso_dict = meta.get("isotopes")
+            if not iso_dict or not isinstance(iso_dict, dict):
                 continue
 
             stoich = float(meta.get("stoichiometry", 1.0))
+            if f"c_{base}" not in data:
+                continue
             tot = data[f"c_{base}"] * stoich
-            c_iso = data[f"c_{iso}"]
 
-            std_key = meta.get("isotope_standard", "S")
-            if (
-                std_key in iso_stds
-                and isinstance(iso_stds[std_key], dict)
-                and "ratio" in iso_stds[std_key]
-            ):
+            for iso, iso_ref in iso_dict.items():
+                if f"c_{iso}" not in data:
+                    continue
+                c_iso = data[f"c_{iso}"]
+
+                # Resolve standard key
+                std_key = iso_ref if iso_ref in iso_stds else None
+                if not std_key:
+                    for k_std, v_std in iso_stds.items():
+                        if isinstance(v_std, dict) and v_std.get("element") == iso_ref:
+                            std_key = k_std
+                            break
+                if not std_key or std_key not in iso_stds or "ratio" not in iso_stds[std_key]:
+                    raise ValueError(
+                        f"[MANTIS ERROR] Standard '{iso_ref}' with a valid 'ratio' is not defined in isotope_standards in species.py."
+                    )
                 std_ratio = float(iso_stds[std_key]["ratio"])
-            elif hasattr(mp_params, "VCDT") and std_key == "S":
-                std_ratio = float(mp_params.VCDT)
-            else:
-                raise ValueError(
-                    f"[MANTIS ERROR] Standard '{std_key}' with a valid 'ratio' is not defined in isotope_standards in species.py."
-                )
+                thresh = diff_lib.get_species_delta_threshold(base, mp=mp_params, phi=phi_val)
+                delta_val = diff_lib.get_delta(tot, c_iso, std_ratio, threshold=thresh)
 
-            thresh = diff_lib.get_species_delta_threshold(base, mp=mp_params, phi=phi_val)
-            delta_val = diff_lib.get_delta(tot, c_iso, std_ratio, threshold=thresh)
-            data[f"d_{base}"] = delta_val
-            if "delta_name" in meta:
-                data[meta["delta_name"]] = delta_val
+                col_name = f"{std_key}_{base}"
+                data[col_name] = delta_val
+                data[f"d_{base}"] = delta_val
+                if "delta_name" in meta:
+                    data[meta["delta_name"]] = delta_val
     else:
         for base in species_list:
             for iso in [f"{base}_32", f"{base}_iso"]:
@@ -582,7 +589,9 @@ def capture_state(
                         raise ValueError(
                             "[MANTIS ERROR] Standard ratio for 'S' is not defined in isotope_standards or mp.VCDT."
                         )
-                    data[f"d_{base}"] = diff_lib.get_delta(tot, c_iso, r_std, threshold=thresh)
+                    delta_val = diff_lib.get_delta(tot, c_iso, r_std, threshold=thresh)
+                    data[f"d_{base}"] = delta_val
+                    data[f"d34S_{base}"] = delta_val
 
     # 4. Carbonate system speciation diagnostics
     if hasattr(c, "TA") and hasattr(c, "DIC"):

@@ -61,17 +61,13 @@ def test_indexed_video_queue():
 @pytest.mark.skipif(not has_ffmpeg, reason="ffmpeg is not installed on this system")
 def test_parallel_video_manager_end_to_end():
     with tempfile.TemporaryDirectory() as tmpdir:
-        # Create a minimal layout file
+        # Create a minimal declarative layout file
         layout_code = """
-def get_layout(df):
-    return {
-        "fig_width": 6,
-        "Subplot1": {
-            "height": 4,
-            "xaxis": [df.z, "Depth [m]"],
-            "left": [[df.c_SO4, "SO4", {"color": "blue"}]],
-        }
-    }
+liquid_species = {
+    "scale": "lin",
+    "species": ["c_SO4"],
+    "units": "mmol/l",
+}
 """
         layout_file = os.path.join(tmpdir, "test_layout.py")
         with open(layout_file, "w") as f:
@@ -114,15 +110,11 @@ def get_layout(df):
 def test_live_plotter_parallel_video_and_pdf():
     with tempfile.TemporaryDirectory() as tmpdir:
         layout_code = """
-def get_layout(df):
-    return {
-        "fig_width": 6,
-        "Subplot1": {
-            "height": 4,
-            "xaxis": [df.z, "Depth [m]"],
-            "left": [[df.c_SO4, "SO4", {"color": "blue"}]],
-        }
-    }
+liquid_species = {
+    "scale": "lin",
+    "species": ["c_SO4"],
+    "units": "mmol/l",
+}
 """
         layout_file = os.path.join(tmpdir, "test_layout.py")
         with open(layout_file, "w") as f:
