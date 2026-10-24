@@ -82,7 +82,7 @@ species = {
     },
 
     # -------------------------------------------------------------------------
-    # Dynamic Speciation & Acid-Base Equilibrium
+    # Diagnostic Speciation Solutes
     # -------------------------------------------------------------------------
     "Hplus": {
         "phase": "liquid",
@@ -90,23 +90,6 @@ species = {
         "formula": "H",
         "bc_top": {"Dirichlet": 7.5},  # Single source of truth for porewater pH
         "prefill": True,
-    },
-    "HS": {
-        "phase": "liquid",
-        "include": False,
-        "formula": "HS",
-        "equilibrium_of": "TS2",
-        "fraction": "Ka1 / (Hplus + Ka1)",
-        "constants": {"pKa1": 7.0},
-        "include_in_TA": 1.0,
-    },
-    "H2S": {
-        "phase": "liquid",
-        "include": False,
-        "formula": "H2S",
-        "equilibrium_of": "TS2",
-        "fraction": "Hplus / (Hplus + Ka1)",
-        "constants": {"pKa1": 7.0},
     },
 
     # -------------------------------------------------------------------------
@@ -116,25 +99,9 @@ species = {
         "phase": "mixed",
         "include": True,
         "formula": "Fe2",
-        "partition": {
-            "dissolved": "1.0 / (1.0 + k.Fe2_p_eq)",
-            "sorbed": "k.Fe2_p_eq / (1.0 + k.Fe2_p_eq)",
-        },
         "diff_coeff_function": "diff_coeff",
         "diffusion": {"m0": 27.7, "m1": 1.0},
         "bc_top": {"Dirichlet": 0.0},
-    },
-    "Fe2_liq": {
-        "phase": "liquid",
-        "include": False,
-        "formula": "Fe",
-        "alias_of": "Fe2_total.dissolved",
-    },
-    "Fe2_sorbed": {
-        "phase": "solid",
-        "include": False,
-        "formula": "Fe",
-        "alias_of": "Fe2_total.sorbed",
     },
 
     # -------------------------------------------------------------------------
@@ -171,4 +138,39 @@ species = {
     # External / Reaction Balance Species (Excluded from transport)
     "CO2": {"phase": "liquid", "include": False, "formula": "CO2"},
     "H2O": {"phase": "liquid", "include": False, "formula": "H2O"},
+}
+
+
+# =============================================================================
+# Unified Speciation & Phase Partitioning
+# =============================================================================
+speciation: Dict[str, Dict[str, Any]] = {
+    "sulfide_acid_base": {
+        "type": "acid_base",
+        "primary": "TS2",
+        "constants": {"pKa1": 7.0},
+        "species": {
+            "HS": {
+                "phase": "liquid",
+                "fraction": "Ka1 / (Hplus + Ka1)",
+                "include_in_TA": 1.0,
+            },
+            "H2S": {
+                "phase": "liquid",
+                "fraction": "Hplus / (Hplus + Ka1)",
+            },
+        },
+    },
+    "fe2_partitioning": {
+        "type": "partition",
+        "primary": "Fe2_total",
+        "fractions": {
+            "dissolved": "1.0 / (1.0 + k.Fe2_p_eq)",
+            "sorbed": "k.Fe2_p_eq / (1.0 + k.Fe2_p_eq)",
+        },
+        "species": {
+            "Fe2_liq": {"phase": "liquid", "alias_of": "Fe2_total.dissolved"},
+            "Fe2_sorbed": {"phase": "solid", "alias_of": "Fe2_total.sorbed"},
+        },
+    },
 }
