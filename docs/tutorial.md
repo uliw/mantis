@@ -283,6 +283,92 @@ A frequent question is whether conservative ions like $\text{Ca}^{2+}$ and $\tex
 | **Non-Carbonate Weak Bases / Acids** | $\text{HS}^-$, $\text{NH}_3$, $\text{B(OH)}_4^-$, $\text{HPO}_4^{2-}$, $[\text{H}^+]$, $\text{HSO}_4^-$ | **Specify** (`1.0`, `-1.0`, etc.) | Deducted from $\text{TA}$ to yield the true carbonate alkalinity ($\text{CA} = \text{TA} - \sum \nu_i [S_i]$). |
 | **Conservative Ions** | $\text{Ca}^{2+}$, $\text{SO}_4^{2-}$, $\text{Na}^+$, $\text{Cl}^-$ | **Omit** (Do NOT specify) | Zero-alkalinity reference species at porewater $\text{pH}$ (6–9). Their alkalinity effects are handled 100% by reaction stoichiometry in `reactions.py`. |
 
+### Unified Speciation Framework
+
+In modern MANTIS models, chemical speciation and phase partitioning can be defined in a dedicated top-level **`speciation`** dictionary in `species.py`. This consolidates seawater carbonate chemistry, mixed-phase adsorption/partitioning, acid-base equilibria, and complexation into a single declarative structure.
+
+```python
+# species.py
+
+species = {
+    "POC": {"phase": "solid", "include": True, "formula": "CH2O", "bc_top": {"Robin": "0.31 mmol/(cm^2 * yr)"}},
+    "TS2": {"phase": "liquid", "include": True, "formula": "H2S", "bc_top": {"Dirichlet": 0}},
+    "Fe2_total": {
+        "phase": "mixed",
+        "include": True,
+        "formula": "Fe2",
+        "diff_coeff_function": "diff_coeff",
+        "diffusion": {"m0": 3.31, "m1": 0.150},
+        "bc_top": {"Dirichlet": "2.95e-5 mmol/l"},
+    },
+    "DIC": {"phase": "liquid", "include": True, "formula": "CO2", "diffusion": {"m0": 5.06, "m1": 0.275}, "bc_top": {"Dirichlet": 2.345}},
+    "TA": {"phase": "liquid", "include": True, "formula": "HCO3", "diffusion": "DIC", "bc_top": {"Dirichlet": 2.329}},
+}
+
+speciation = {
+    # 1. Marine Carbonate System (DIC + TA -> CO3, HCO3, Hplus, pH)
+    "carbonate_system": {
+        "type": "carbonate_system",
+        "primary": {"dic": "DIC", "ta": "TA"},
+        "species": ["Hplus", "CO3", "HCO3"],
+    },
+
+    # 2. Phase Partitioning (e.g. Total Ferrous Iron dissolved vs POC-adsorbed)
+    "fe2_partitioning": {
+        "type": "partition",
+        "primary": "Fe2_total",
+        "fractions": {
+            "dissolved": "1.0 / (1.0 + k.Fe2_p_eq)",
+            "sorbed": "k.Fe2_p_eq / (1.0 + k.Fe2_p_eq)",
+        },
+        "species": {
+            "Fe2_dis": {"phase": "liquid", "alias_of": "Fe2_total.dissolved"},
+            "Fe2_liq": {"phase": "liquid", "alias_of": "Fe2_total.dissolved"},
+        },
+    },
+
+    # 3. Acid-Base Equilibrium (e.g. Total Sulfide -> HS- + H2S)
+    "sulfide_acid_base": {
+        "type": "acid_base",
+        "primary": "TS2",
+        "constants": {"pKa1": 7.0},
+        "species": {
+            "HS": {"fraction": "Ka1 / (Hplus + Ka1)", "include_in_TA": 1.0},
+            "H2S": {"fraction": "Hplus / (Hplus + Ka1)"},
+        },
+    },
+}
+```
+
+#### Backward Compatibility
+MANTIS maintains 100% backward compatibility with legacy declarations. If sub-species are defined directly inside `species` using `partition: {...}`, `equilibrium_of: "..."`, or `fraction: "..."`, MANTIS's parser automatically normalizes them into the unified internal speciation schema.
+
+---
+
+### Chemical Jacobian Strategy Selection: Analytical vs. Numerical
+
+MANTIS features two complementary chemical Jacobian engines for the monolithic Newton-Raphson solver:
+1. **Symbolic Analytical Jacobian (SymPy)**: Differentiates reaction rate laws algebraically with respect to each primary PDE variable. Has zero finite-difference truncation error and near-zero runtime overhead.
+2. **Vectorized Numerical Jacobian (Finite-Difference)**: Perturbs each primary species vector $C_j \to C_j + \epsilon$ across all grid cells simultaneously and recomputes the full reaction and speciation network to obtain the total derivative $\frac{\mathrm{d}R_i}{\mathrm{d}C_j}$.
+
+#### Automatic 3-Tier Selection Heuristic
+At initialization, MANTIS inspects the geochemical reaction network and speciation dependencies:
+
+- **Tier 1 (Static / Uncoupled Speciation $\to$ Analytical SymPy Jacobian)**:
+  In models where pH is fixed and partition coefficients are constant (e.g. Velde et al. 2016), $[H^+] = \text{const}$ and $K_{\text{eq}} = \text{const}$. Speciation fractions $\alpha_i$ are invariant with respect to changing solute concentrations:
+  $$\frac{\partial \alpha_i}{\partial C_j} = 0 \implies \frac{\mathrm{d}R}{\mathrm{d}C_j} = \alpha_i \frac{\partial R}{\partial S_i}$$
+  The single-species analytical derivatives are mathematically exact. MANTIS automatically selects the **Analytical SymPy Jacobian** for maximum speed.
+
+- **Tier 2 (Coupled / Implicit Speciation $\to$ Vectorized Numerical Jacobian)**:
+  In models with dynamic carbonate equilibrium, non-linear multi-ligand complexation ($\beta_{\text{FeHS}}$), or non-carbonate alkalinity coupling ($[H^+] = f(\text{TA} - [\text{HS}^-], \text{DIC})$), a change in one primary variable (e.g. $\text{TS2}$) alters $[H^+]$, which in turn changes the speciation fractions $\alpha_{\text{HS}}$ and $\alpha_{\text{Fe2\_liq}}$ of other species:
+  $$\frac{\mathrm{d}R}{\mathrm{d}C_j} = \sum_k \frac{\partial R}{\partial S_k} \frac{\partial S_k}{\partial C_j} \neq \frac{\partial R}{\partial C_j}\Big|_{\alpha = \text{const}}$$
+  Treating speciation fractions as static constants in the analytical Jacobian leads to derivative errors $>300\%$, triggering Newton-Raphson divergence and $dt_{\min}$ crashes. MANTIS detects cross-species coupling and automatically enables the **Vectorized Numerical Jacobian**, ensuring robust quadratic convergence.
+
+- **Manual Override**:
+  Users can explicitly force either engine at any time in `model.configure(use_numerical_jacobian=True/False)` or via CLI `--numerical-jacobian` / `--no-numerical-jacobian`.
+
+---
+
 
 ### Handling Diffusion Coefficients
 

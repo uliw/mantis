@@ -19,6 +19,7 @@ import inspect
 import os
 from pathlib import Path
 import sys
+import re
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import numpy as np
@@ -207,6 +208,7 @@ class DiageneticModel:
         # Master parameter container
         self.mp = data_container()
         self.p_dict: Dict[str, Any] = {}
+        self._user_configured_keys: set = set()
 
         # Default parameters
         self._init_defaults()
@@ -365,6 +367,7 @@ class DiageneticModel:
 
         Nested structures (dicts, lists, tuples) are handled recursively.
         """
+        self._user_configured_keys.update(kwargs.keys())
         for key, val in kwargs.items():
             if key in ("video", "video_dt"):
                 self.p_dict["video_dt"] = None if str(val).lower() in ("none", "null", "false") else val
@@ -642,6 +645,7 @@ class DiageneticModel:
             self.p_dict["newton_tol"] = float(parsed.solver_tol)
         if parsed.numerical_jacobian:
             self.p_dict["use_numerical_jacobian"] = True
+            self._user_configured_keys.add("use_numerical_jacobian")
         if parsed.max_newton_iters is not None:
             self.p_dict["max_newton_iters"] = parsed.max_newton_iters
         if parsed.newton_norm is not None:
@@ -695,6 +699,95 @@ class DiageneticModel:
         self._species_mod = mod
         return mod.species
 
+    def classify_jacobian_strategy(self) -> Tuple[bool, str]:
+        """Classifies whether the model requires the vectorized numerical Jacobian
+        or can safely and optimally use the analytical SymPy Jacobian.
+
+        Classification Heuristic:
+          - Tier 1 (Static / Uncoupled Speciation, e.g. Velde 2016 with fixed pH):
+            All speciation fractions are constant scalars or depend only on fixed constants.
+            -> Algebraic SymPy Jacobian is mathematically exact, fastest, 0% FD error.
+          - Tier 2 (Implicit / Iterative / Coupled Speciation, e.g. SimpleFe, dynamic carbonate):
+            Speciation fractions dynamically couple multiple primary state variables,
+            or dynamic carbonate equilibrium is coupled to mineral saturation.
+            -> Vectorized Numerical Jacobian provides exact total derivatives, preventing
+               Newton divergence, dt cutbacks, and solver failure.
+
+        Returns:
+            (requires_numerical: bool, rationale: str)
+        """
+        species_defs = getattr(self.mp, "species_defs", {})
+        speciation_defs = getattr(self.mp, "speciation", {})
+        transport_species = {
+            name for name, meta in species_defs.items()
+            if isinstance(meta, dict) and meta.get("include", True)
+        }
+
+        # 1. Procedural speciation hooks (e.g. Du 2023 iron speciation)
+        if self.p_dict.get("enable_iron_speciation", False) or "beta_FeHS" in self.p_dict or hasattr(self.mp, "beta_FeHS"):
+            return True, "coupled non-linear iron speciation (enable_iron_speciation/beta_FeHS)"
+
+        # 2. Check speciation systems for cross-species dependencies
+        for sys_name, sys_cfg in speciation_defs.items():
+            primary = sys_cfg.get("primary") or sys_cfg.get("parent")
+            parent_names = set()
+            if isinstance(primary, str):
+                parent_names.add(primary)
+            elif isinstance(primary, dict):
+                parent_names.update(primary.values())
+            elif isinstance(primary, (list, tuple)):
+                parent_names.update(primary)
+
+            # Check sub-species fractions
+            sub_species = sys_cfg.get("species", {})
+            if isinstance(sub_species, dict):
+                for sp_k, sp_v in sub_species.items():
+                    if isinstance(sp_v, dict):
+                        frac_expr = sp_v.get("fraction", "")
+                        if isinstance(frac_expr, str):
+                            for tsp in transport_species:
+                                if tsp not in parent_names and re.search(r'\b' + re.escape(tsp) + r'\b', frac_expr):
+                                    return True, f"speciation '{sys_name}.{sp_k}' dynamically couples transport species '{tsp}'"
+
+            # Check phase partition fractions
+            fractions = sys_cfg.get("fractions", {})
+            if isinstance(fractions, dict):
+                for f_k, f_expr in fractions.items():
+                    if isinstance(f_expr, str):
+                        for tsp in transport_species:
+                            if tsp not in parent_names and re.search(r'\b' + re.escape(tsp) + r'\b', f_expr):
+                                return True, f"phase partition '{sys_name}.{f_k}' dynamically couples transport species '{tsp}'"
+
+        # 3. Dynamic carbonate chemistry coupling to mineral saturation
+        is_carbonate = getattr(self.mp, "is_carbonate", False) or "carbonate_equilibrium_chemistry" in self.p_dict
+        has_ta_dic = "TA" in transport_species and "DIC" in transport_species
+        if is_carbonate and has_ta_dic:
+            has_non_carb_ta = False
+            non_carb_species = []
+            for sp_k, sp_v in species_defs.items():
+                if isinstance(sp_v, dict) and sp_v.get("include_in_TA") is not None:
+                    has_non_carb_ta = True
+                    non_carb_species.append(sp_k)
+
+            # Check if reactions contain mineral saturation
+            has_saturation = False
+            sat_rxn_name = ""
+            for r in getattr(self, "_raw_reactions", []):
+                rtype = r.get("type", "")
+                rname = r.get("reaction_name", "")
+                if rtype == "reversible_saturation" or "saturation" in rname.lower() or "caco3" in rname.lower() or "fes" in rname.lower():
+                    has_saturation = True
+                    sat_rxn_name = rname
+                    break
+
+            if has_non_carb_ta and has_saturation:
+                return True, f"non-carbonate alkalinity ({', '.join(non_carb_species)}) coupled to carbonate equilibrium and mineral saturation ({sat_rxn_name})"
+            if has_saturation:
+                return True, f"dynamic carbonate equilibrium coupled to mineral saturation ({sat_rxn_name})"
+
+        # 4. Otherwise, all speciation fractions are static scalars (fixed pH, constant Kd)
+        return False, "all speciation fractions are static scalars / uncoupled (analytical SymPy Jacobian is mathematically exact)"
+
     def setup(self, plot_queue=None) -> Tuple[data_container, data_container, data_container, List[str], np.ndarray, data_container, Any]:
         """Assembles grid, species variables, transport coefficients, and compiles reaction equations."""
         self.validate_simulation_files()
@@ -740,12 +833,15 @@ class DiageneticModel:
         # 1. Parse species definitions & isotope standards
         raw_species = self._load_species_definitions()
         raw_stds = getattr(self._species_mod, "isotope_standards", {})
+        raw_speciation = getattr(self._species_mod, "speciation", None)
 
-        from mantis.species_parser import parse_and_validate_species_dict
+        from mantis.species_parser import parse_and_validate_species_dict, validate_and_normalize_speciation
         species_defs, self._parsed_bc_map, iso_stds = parse_and_validate_species_dict(
             raw_species, raw_stds, ureg=self.Q_
         )
+        speciation_defs = validate_and_normalize_speciation(raw_speciation, species_defs, ureg=self.Q_)
         self.mp.species_defs = species_defs
+        self.mp.speciation = speciation_defs
         self.mp.isotope_standards = iso_stds
 
         # Expose standards on mp
@@ -942,14 +1038,18 @@ class DiageneticModel:
         if hasattr(eq_mod, "get_limiters"):
             self.mp.get_limiters = eq_mod.get_limiters
 
-        # Extract reaction_parameters or fractionation_factors from reactions module or file
+        # Extract reaction_parameters, fractionation_factors, and raw reaction definitions
         rxn_params = getattr(eq_mod, "reaction_parameters", None) or getattr(eq_mod, "fractionation_factors", None)
-        if rxn_params is None and hasattr(self, "reactions_file") and self.reactions_file.exists():
+        if hasattr(self, "reactions_file") and self.reactions_file.exists():
             spec_rxn = importlib.util.spec_from_file_location("rxn_param_mod", self.reactions_file)
             if spec_rxn and spec_rxn.loader:
                 mod_rxn = importlib.util.module_from_spec(spec_rxn)
                 spec_rxn.loader.exec_module(mod_rxn)
-                rxn_params = getattr(mod_rxn, "reaction_parameters", None) or getattr(mod_rxn, "fractionation_factors", None)
+                self._raw_reactions = getattr(mod_rxn, "reactions", [])
+                if rxn_params is None:
+                    rxn_params = getattr(mod_rxn, "reaction_parameters", None) or getattr(mod_rxn, "fractionation_factors", None)
+        else:
+            self._raw_reactions = []
 
         if isinstance(rxn_params, dict):
             for rp_k, rp_v in rxn_params.items():
@@ -968,7 +1068,21 @@ class DiageneticModel:
         else:
             raise AttributeError(f"{self.constants_file} must define get_reaction_constants(pH, phi, k_values).")
 
-        # 5. Grid generation
+        # 5. Chemical Jacobian strategy selection (heuristic switching between analytical and numerical)
+        if "use_numerical_jacobian" not in getattr(self, "_user_configured_keys", set()):
+            requires_num, reason = self.classify_jacobian_strategy()
+            if requires_num:
+                self.p_dict["use_numerical_jacobian"] = True
+                self.mp.use_numerical_jacobian = True
+                print(
+                    f"\n[MANTIS] Coupled non-linear speciation detected ({reason}).\n"
+                    "         Automatically enabled vectorized finite-difference chemical Jacobian for exact cross-coupling.\n"
+                )
+            else:
+                self.p_dict["use_numerical_jacobian"] = False
+                self.mp.use_numerical_jacobian = False
+
+        # 6. Grid generation
         mesh, z = make_grid2(
             self.mp.max_depth,
             self.mp.initial_spacing,
@@ -1016,10 +1130,6 @@ class DiageneticModel:
         D_mol = data_container()
         c = data_container()
 
-        # Porosity volume ratios
-        phi_val = self.mp.phi.value if hasattr(self.mp.phi, "value") else self.mp.phi
-        self.mp.fac_s = phi_val / (1.0 - phi_val)
-
         # Dynamic speciation & phase partition calculations from species_defs
         Hplus = 10.0 ** (-float(self.mp.pH))
         eval_ctx: Dict[str, Any] = {
@@ -1028,7 +1138,6 @@ class DiageneticModel:
             "np": np,
             "Hplus": Hplus,
             "pH": float(self.mp.pH),
-            "fac_s": self.mp.fac_s,
         }
 
         for sp_name, meta in species_defs.items():
@@ -1039,16 +1148,16 @@ class DiageneticModel:
                     val = float(raw_val) if np.ndim(raw_val) == 0 else np.asarray(raw_val, dtype=np.float64)
                     setattr(self.mp, f"{sp_name}_{p_key}", val)
                     eval_ctx[f"{sp_name}_{p_key}"] = val
-                    # Backwards compatibility alias for Fe2_total.dissolved -> Fe2_diss
+                    # Alias for Fe2_total.dissolved / sorbed
                     if sp_name == "Fe2_total" and p_key == "dissolved":
                         self.mp.Fe2_diss = val
                         eval_ctx["Fe2_diss"] = val
                     elif sp_name == "Fe2_total" and p_key == "sorbed":
-                        self.mp.Fe2_sorb = val * self.mp.fac_s
-                        eval_ctx["Fe2_sorb"] = self.mp.Fe2_sorb
+                        self.mp.Fe2_sorb = val
+                        eval_ctx["Fe2_sorb"] = val
 
             # Check fraction for equilibrium speciation (e.g. HS: Ka1 / (Hplus + Ka1))
-            if "fraction" in meta:
+            if meta.get("fraction") is not None:
                 frac_ctx = dict(eval_ctx)
                 if "constants" in meta and isinstance(meta["constants"], dict):
                     for c_name, c_val in meta["constants"].items():
@@ -1056,7 +1165,11 @@ class DiageneticModel:
                         if c_name.startswith("pK"):
                             base_c = c_name[1:]
                             frac_ctx[base_c] = 10.0 ** (-float(c_val))
-                f_val = float(eval(meta["fraction"], frac_ctx))
+                frac_raw = meta["fraction"]
+                if isinstance(frac_raw, (int, float)):
+                    f_val = float(frac_raw)
+                else:
+                    f_val = float(eval(str(frac_raw), frac_ctx))
                 setattr(self.mp, f"{sp_name.lower()}_frac", f_val)
                 eval_ctx[f"{sp_name.lower()}_frac"] = f_val
 
@@ -1188,6 +1301,7 @@ class DiageneticModel:
             setattr(self.mp, f"bc_{sp_k}", b_entry.get("top", 0.0))
 
         # 10. Initial conditions and boundary constraints
+        phi_val = self.mp.phi.value if hasattr(self.mp.phi, "value") else self.mp.phi
         phi_top = phi_val[0] if hasattr(phi_val, "__getitem__") else phi_val
         phi_bottom = phi_val[-1] if hasattr(phi_val, "__getitem__") else phi_val
         w_top = self.mp.w

@@ -64,8 +64,10 @@ class ReactionSystemValidator:
         if hasattr(mod_species, "species") and isinstance(mod_species.species, dict):
             raw_species = mod_species.species
             raw_stds = getattr(mod_species, "isotope_standards", {})
-            from mantis.species_parser import parse_and_validate_species_dict
+            raw_speciation = getattr(mod_species, "speciation", None)
+            from mantis.species_parser import parse_and_validate_species_dict, validate_and_normalize_speciation
             self.species_defs, self.bc_map, self.isotope_standards = parse_and_validate_species_dict(raw_species, raw_stds)
+            self.speciation_defs = validate_and_normalize_speciation(raw_speciation, self.species_defs)
             self.valid_species = set(self.species_defs.keys())
             # Also register dynamic/alias species if defined with equilibrium_of or alias_of
             for sp_k, sp_meta in self.species_defs.items():
@@ -1465,7 +1467,7 @@ class EquationSystemGenerator:
         if has_hplus:
             lines.extend([
                 '        if has_carb:',
-                '            _Ka1_h2s = float(getattr(mp, "K_a1_h2s", 10.0 ** (-7.0)))',
+                '            _Ka1_h2s = 10.0 ** (-float(getattr(mp, "pKa1_H2S", 7.0))) if hasattr(mp, "pKa1_H2S") else float(getattr(mp, "K_a1_h2s", 10.0 ** (-7.0)))',
                 '            _domega_dh = -omega * (1.0 / (_h + 1e-30) + 1.0 / (_h + _Ka1_h2s + 1e-30))',
                 '            _d_net_dTA = (dR_prec_domega * diss_fac - dR_diss_domega * solid_fac) * _domega_dh * _dh_dta',
                 '            _d_net_dDIC = (dR_prec_domega * diss_fac - dR_diss_domega * solid_fac) * _domega_dh * _dh_ddic',
@@ -1867,18 +1869,21 @@ class EquationSystemGenerator:
             '    if has_carb:',
             '        _ta_val = np.maximum(np.asarray(c["TA"].value if hasattr(c["TA"], "value") else c["TA"]), 1e-12)',
             '        _dic_val = np.maximum(np.asarray(c["DIC"].value if hasattr(c["DIC"], "value") else c["DIC"]), 1e-12)',
+            '        _ta_carb = _ta_val',
+            '        if hasattr(c, "ta_carb"):',
+            '            _ta_carb = np.maximum(np.asarray(c["ta_carb"].value if hasattr(c["ta_carb"], "value") else c["ta_carb"]), 1e-12)',
             '        _pK1 = getattr(mp, "pK1_carb", 5.86)',
             '        _pK2 = getattr(mp, "pK2_carb", 8.92)',
             '        _K1 = 10.0 ** (-float(_pK1))',
             '        _K2 = 10.0 ** (-float(_pK2))',
-            '        _b = _K1 * (_ta_val - _dic_val)',
-            '        _c_term = _K1 * _K2 * (_ta_val - 2.0 * _dic_val)',
-            '        _disc = np.maximum(_b**2 - 4.0 * _ta_val * _c_term, 0.0)',
-            '        _h = (-_b + np.sqrt(_disc)) / (2.0 * _ta_val)',
+            '        _b = _K1 * (_ta_carb - _dic_val)',
+            '        _c_term = _K1 * _K2 * (_ta_carb - 2.0 * _dic_val)',
+            '        _disc = np.maximum(_b**2 - 4.0 * _ta_carb * _c_term, 0.0)',
+            '        _h = (-_b + np.sqrt(_disc)) / (2.0 * _ta_carb)',
             '        _h = np.maximum(_h, 1e-14)',
             '        _denom = _h**2 + _K1 * _h + _K1 * _K2',
             '        _co3 = _dic_val * (_K1 * _K2) / _denom',
-            '        _dF_dh = 2.0 * _ta_val * _h + _b',
+            '        _dF_dh = 2.0 * _ta_carb * _h + _b',
             '        _dF_dta = _h**2 + _K1 * _h + _K1 * _K2',
             '        _dF_ddic = -(_K1 * _h + 2.0 * _K1 * _K2)',
             '        _dh_dta = -_dF_dta / (_dF_dh + 1e-30)',

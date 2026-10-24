@@ -843,6 +843,7 @@ def run_non_steady_state_solver_monolithic(
 
                         # 7. Check convergence on actual projected step
                         raw_newton_err = 0.0
+                        err_by_sp = {}
                         is_wrms = (newton_norm == "wrms")
                         for s_idx in range(S):
                             atol_s = mono_system.atol_vec[s_idx]
@@ -860,6 +861,7 @@ def run_non_steady_state_solver_monolithic(
                                     inner_tol=newton_tol,
                                     atol=atol_s,
                                 )
+                            err_by_sp[mono_system.species_names[s_idx]] = float(err_s)
                             raw_newton_err = max(raw_newton_err, err_s)
 
                         u_curr[:] = u_best
@@ -886,14 +888,6 @@ def run_non_steady_state_solver_monolithic(
                             break
 
                     if not step_converged:
-                        err_by_sp = {
-                            mono_system.species_names[s]: float(
-                                compute_species_residual_wrms(u_best[:, s], u_curr[:, s], inner_tol=newton_tol, atol=mono_system.atol_vec[s])
-                                if is_wrms_ls
-                                else compute_species_residual_linf(u_best[:, s], u_curr[:, s], inner_tol=newton_tol, atol=mono_system.atol_vec[s])
-                            )
-                            for s in range(S)
-                        }
                         raise RuntimeError(
                             f"Newton iteration failed to converge in {max_newton_iters} iterations (err={raw_newton_err:.2e}, details={err_by_sp})"
                         )

@@ -2641,7 +2641,6 @@ def update_all_species(c: Any, mp: Any) -> None:
 
     # 2. Setup evaluation context for equilibrium and partition fractions
     phi_val = get_v(mp.phi) if hasattr(mp, "phi") else 0.8
-    fac_s = phi_val / np.maximum(1.0 - phi_val, 1e-6)
     ph_arr = get_v(c.pH) if hasattr(c, "pH") else float(getattr(mp, "pH", 7.0))
     h_arr = 10.0 ** (-ph_arr)
 
@@ -2652,8 +2651,21 @@ def update_all_species(c: Any, mp: Any) -> None:
         "np": np,
         "Hplus": h_arr,
         "pH": ph_arr,
-        "fac_s": fac_s,
     }
+    # Expose all species from c in evaluation context for dynamic speciation expressions
+    for s_name in dir(c):
+        if not s_name.startswith("_") and s_name not in eval_ctx:
+            v = getattr(c, s_name, None)
+            if hasattr(v, "value"):
+                eval_ctx[s_name] = np.asarray(v.value, dtype=np.float64)
+            elif isinstance(v, (np.ndarray, float, int)):
+                eval_ctx[s_name] = np.asarray(v, dtype=np.float64)
+    # Expose numeric constants and parameters from mp
+    for attr in dir(mp):
+        if not attr.startswith("_") and attr not in eval_ctx:
+            v = getattr(mp, attr, None)
+            if isinstance(v, (float, int, np.ndarray)):
+                eval_ctx[attr] = v
 
     # Evaluate dynamic / equilibrium species
     for sp_name, meta in species_defs.items():

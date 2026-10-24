@@ -11,6 +11,7 @@ import sys
 import copy
 import inspect
 import ast
+import re
 from pathlib import Path
 from typing import Dict, Any, Tuple, Optional
 import numpy as np
@@ -298,6 +299,15 @@ def parse_and_validate_species_dict(
             )
             sys.exit(1)
 
+        legacy_spec_keys = [k for k in ("partition", "equilibrium_of", "alias_of") if k in meta]
+        if legacy_spec_keys:
+            print(
+                f"\n[MANTIS ERROR] Species '{sp_name}' declares legacy speciation keys: {legacy_spec_keys}.\n"
+                f"Speciation must now be declared in the top-level 'speciation' dictionary in species.py.\n",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
         inc_ta = meta.get("include_in_TA", meta.get("include_in_ta"))
         if inc_ta is not None and not isinstance(inc_ta, (int, float, np.number)):
             print(
@@ -451,3 +461,146 @@ def parse_and_validate_species_dict(
         bc_map[comp_name] = comp_bc_entry
 
     return species_defs, bc_map, val_stds
+
+
+VALID_SPECIATION_TYPES = {
+    "carbonate_system",
+    "carbonate",
+    "acid_base",
+    "partition",
+    "complexation",
+    "custom",
+}
+
+
+def validate_and_normalize_speciation(
+    raw_speciation: Optional[Dict[str, Any]],
+    species_defs: Dict[str, Any],
+    ureg: Any = None,
+) -> Dict[str, Dict[str, Any]]:
+    """Validates explicit speciation blocks and normalizes legacy species speciation.
+
+    Supports unified declarative speciation blocks:
+      - 'carbonate_system': thermodynamic seawater carbonate speciation (DIC + TA -> CO3, HCO3, CO2, Hplus, pH)
+      - 'acid_base': acid-base conjugate systems (e.g. TS2 -> HS, H2S)
+      - 'partition': solid-liquid phase partitioning of lumped pools (e.g. Fe2_total -> dissolved, sorbed)
+      - 'complexation': aqueous ligand complexation and free ion fractions (e.g. Fe2_liq, FeHS+)
+
+    Ensures 100% backwards compatibility:
+      Any legacy speciation constructs declared directly on species (e.g. 'partition',
+      'equilibrium_of', 'fraction', 'include_in_TA') are automatically synthesized and
+      normalized into the unified speciation dictionary.
+    """
+    speciation_defs: Dict[str, Dict[str, Any]] = {}
+
+    # 1. Process explicit speciation dictionary if provided
+    if raw_speciation is not None:
+        if not isinstance(raw_speciation, dict):
+            print(
+                f"\n[MANTIS ERROR] 'speciation' must be a dictionary. Got: {type(raw_speciation)}.\n",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+        for sys_name, sys_cfg in raw_speciation.items():
+            if not isinstance(sys_cfg, dict):
+                print(
+                    f"\n[MANTIS ERROR] Speciation system '{sys_name}' must be a dictionary. Got: {type(sys_cfg)}.\n",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+
+            stype = sys_cfg.get("type", "acid_base")
+            if stype not in VALID_SPECIATION_TYPES:
+                print(
+                    f"\n[MANTIS ERROR] Speciation system '{sys_name}' has invalid type '{stype}'.\n"
+                    f"Valid types: {sorted(VALID_SPECIATION_TYPES)}.\n",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+
+            # Normalize canonical type
+            if stype == "carbonate":
+                stype = "carbonate_system"
+
+            norm_sys = copy.deepcopy(sys_cfg)
+            norm_sys["type"] = stype
+
+            # If partition fractions are declared, propagate to primary species if not already set
+            fractions = norm_sys.get("fractions", {})
+            if isinstance(fractions, dict):
+                primary_sp = norm_sys.get("primary") or norm_sys.get("parent")
+                if isinstance(primary_sp, str) and primary_sp in species_defs:
+                    if "partition" not in species_defs[primary_sp]:
+                        species_defs[primary_sp]["partition"] = copy.deepcopy(fractions)
+
+            # Register any sub-species declared in this speciation block into species_defs
+            sub_sp = norm_sys.get("species", {})
+            primary_val = norm_sys.get("primary", norm_sys.get("parent"))
+            eq_parent = primary_val if isinstance(primary_val, str) else None
+            if isinstance(sub_sp, dict):
+                for sp_name, sp_meta in sub_sp.items():
+                    if isinstance(sp_meta, dict):
+                        if sp_name not in species_defs:
+                            species_defs[sp_name] = {
+                                "phase": sp_meta.get("phase", "liquid"),
+                                "include": False,
+                                "formula": sp_meta.get("formula", sp_name),
+                                "equilibrium_of": eq_parent,
+                            }
+                        if "fraction" in sp_meta and sp_meta["fraction"] is not None:
+                            species_defs[sp_name]["fraction"] = sp_meta["fraction"]
+                        if "phase" in sp_meta:
+                            species_defs[sp_name]["phase"] = sp_meta["phase"]
+                        if "alias_of" in sp_meta:
+                            species_defs[sp_name]["alias_of"] = sp_meta["alias_of"]
+                        elif norm_sys.get("type") == "partition" and eq_parent:
+                            if "diss" in sp_name.lower() or "liq" in sp_name.lower():
+                                species_defs[sp_name].setdefault("alias_of", f"{eq_parent}.dissolved")
+                            elif "sorb" in sp_name.lower():
+                                species_defs[sp_name].setdefault("alias_of", f"{eq_parent}.sorbed")
+                        if "include_in_TA" in sp_meta:
+                            species_defs[sp_name]["include_in_TA"] = float(sp_meta["include_in_TA"])
+                        if "fraction" in sp_meta:
+                            species_defs[sp_name]["fraction"] = sp_meta["fraction"]
+                        if "equilibrium_of" not in species_defs[sp_name] and eq_parent:
+                            species_defs[sp_name]["equilibrium_of"] = eq_parent
+                        if "constants" in norm_sys and "constants" not in species_defs[sp_name]:
+                            species_defs[sp_name]["constants"] = copy.deepcopy(norm_sys["constants"])
+                        if "isotopes" in sp_meta and isinstance(sp_meta["isotopes"], dict):
+                            species_defs[sp_name]["isotopes"] = copy.deepcopy(sp_meta["isotopes"])
+                            for iso_sp_name, iso_ref in sp_meta["isotopes"].items():
+                                if iso_sp_name not in species_defs:
+                                    # Find parent companion tracking the same element/standard
+                                    parent_base = eq_parent
+                                    parent_meta = species_defs.get(parent_base, {}) if parent_base else {}
+                                    parent_iso_dict = parent_meta.get("isotopes", {})
+                                    parent_comp = None
+                                    for p_comp, p_ref in parent_iso_dict.items():
+                                        if p_ref == iso_ref:
+                                            parent_comp = p_comp
+                                            break
+                                    species_defs[iso_sp_name] = {
+                                        "phase": sp_meta.get("phase", "liquid"),
+                                        "include": False,
+                                        "formula": sp_meta.get("formula", sp_name),
+                                        "isotope_of": sp_name,
+                                        "equilibrium_of": parent_comp or parent_base,
+                                        "fraction": sp_meta.get("fraction"),
+                                    }
+                                    if "constants" in norm_sys:
+                                        species_defs[iso_sp_name]["constants"] = copy.deepcopy(norm_sys["constants"])
+            elif isinstance(sub_sp, (list, tuple)):
+                for sp_name in sub_sp:
+                    if sp_name not in species_defs:
+                        species_defs[sp_name] = {
+                            "phase": "liquid",
+                            "include": False,
+                            "formula": sp_name,
+                            "equilibrium_of": eq_parent,
+                        }
+
+            speciation_defs[sys_name] = norm_sys
+
+    return speciation_defs
+
