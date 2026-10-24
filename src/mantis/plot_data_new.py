@@ -631,6 +631,8 @@ DEFAULT_GEOCHEM_COLORS = {
     "POC_fast": "goldenrod",
     "POC_slow": "black",
     "CH4": "teal",
+    "CaCO3": "cadetblue",
+    "Calcite": "cadetblue",
     "Hplus": "crimson",
     "pH": "crimson",
     "D_bio": "#bbbbbb",
@@ -765,7 +767,7 @@ def _build_layout_palette(module, colormap_spec, colormap_override):
         if name not in entity_groups[base]:
             entity_groups[base].append(name)
 
-    # 3. Establish base color/style for each entity group
+    # 3. Establish base color/style for each entity group by rotating through the colormap
     base_styles = {}
     color_idx = 0
     cmap_name = colormap_spec if isinstance(colormap_spec, str) and colormap_spec != "default" else "tab10"
@@ -774,6 +776,13 @@ def _build_layout_palette(module, colormap_spec, colormap_override):
         k not in ("color", "lw", "linestyle", "fill_only", "fillonly", "zorder", "alpha", "marker")
         for k in colormap_override.keys()
     )
+
+    try:
+        cmap = plt.get_cmap(cmap_name)
+        num_colors = getattr(cmap, "N", 10)
+    except Exception:
+        cmap = plt.get_cmap("tab10")
+        num_colors = 10
 
     for base, members in entity_groups.items():
         base_st = {}
@@ -825,31 +834,15 @@ def _build_layout_palette(module, colormap_spec, colormap_override):
                 else:
                     base_st["color"] = cmap_dict_match
 
-        # Check DEFAULT_GEOCHEM_COLORS
+        # Rotate through the colormap
         if "color" not in base_st:
-            geochem_color = None
-            if base in DEFAULT_GEOCHEM_COLORS:
-                geochem_color = DEFAULT_GEOCHEM_COLORS[base]
-            else:
-                for k, v in DEFAULT_GEOCHEM_COLORS.items():
-                    if k.lower() == base.lower():
-                        geochem_color = v
-                        break
+            base_st["color"] = cmap(color_idx % num_colors)
+            color_idx += 1
 
-            if geochem_color is not None and (
-                colormap_spec is None or colormap_spec == "default" or colormap_spec == "tab10"
-            ):
-                base_st["color"] = geochem_color
+        if "lw" not in base_st:
+            base_st["lw"] = 2
 
-        # Fallback to colormap cycle
-        if "color" not in base_st:
-            try:
-                cmap = plt.get_cmap(cmap_name)
-                num_colors = getattr(cmap, "N", 10)
-                base_st["color"] = cmap(color_idx % num_colors)
-                color_idx += 1
-            except Exception:
-                base_st["color"] = DEFAULT_GEOCHEM_COLORS.get(base, "black")
+        base_styles[base] = base_st
 
         if "lw" not in base_st:
             base_st["lw"] = 2
@@ -937,32 +930,16 @@ def _get_species_style(species_name, colormap_spec=None, colormap_override=None,
                 else:
                     style["color"] = val
         if "color" not in style:
-            matched_default = None
-            if species_name in DEFAULT_GEOCHEM_COLORS:
-                matched_default = DEFAULT_GEOCHEM_COLORS[species_name]
-            elif base in DEFAULT_GEOCHEM_COLORS:
-                matched_default = DEFAULT_GEOCHEM_COLORS[base]
-            else:
-                for k, v in DEFAULT_GEOCHEM_COLORS.items():
-                    if k.lower() in (species_name.lower(), base.lower()):
-                        matched_default = v
-                        break
-
-            if matched_default is not None and (
-                colormap_spec is None or colormap_spec == "default" or colormap_spec == "tab10"
-            ):
-                style["color"] = matched_default
-            else:
-                cmap_name = colormap_spec if isinstance(colormap_spec, str) and colormap_spec != "default" else "tab10"
-                try:
-                    cmap = plt.get_cmap(cmap_name)
-                    num_colors = getattr(cmap, "N", 10)
-                    idx = (color_idx_state[0] if color_idx_state else 0) % num_colors
-                    style["color"] = cmap(idx)
-                    if color_idx_state:
-                        color_idx_state[0] += 1
-                except Exception:
-                    style["color"] = DEFAULT_GEOCHEM_COLORS.get(base, DEFAULT_GEOCHEM_COLORS.get(species_name, "black"))
+            cmap_name = colormap_spec if isinstance(colormap_spec, str) and colormap_spec != "default" else "tab10"
+            try:
+                cmap = plt.get_cmap(cmap_name)
+                num_colors = getattr(cmap, "N", 10)
+                idx = (color_idx_state[0] if color_idx_state else 0) % num_colors
+                style["color"] = cmap(idx)
+                if color_idx_state:
+                    color_idx_state[0] += 1
+            except Exception:
+                style["color"] = "black"
 
     if "lw" not in style:
         style["lw"] = 2
@@ -1210,7 +1187,7 @@ def compile_declarative_layout(module, df, layout_path, measured_data_path=None)
             for idx, s_grp in enumerate(solid_groups):
                 right_key = f"right{idx+1}"
                 s_list = s_grp.get("species", [])
-                rel_to = s_grp.get("relative_to", "Fe")
+                rel_to = s_grp.get("relative_to")
                 units = s_grp.get("units", "wt%")
                 if isinstance(units, (list, tuple)):
                     units = units[0]
@@ -1220,14 +1197,14 @@ def compile_declarative_layout(module, df, layout_path, measured_data_path=None)
                     sp, inline_st = _unpack_species_entry(sp_entry)
                     raw_col = _resolve_species_column(df, sp)
                     if "wt" in str(units).lower():
-                        converted_col = _convert_solid_to_wt(raw_col, rel_to, df)
+                        converted_col = _convert_solid_to_wt(raw_col, rel_to or "Fe", df)
                     else:
                         converted_col = raw_col
                     st = _get_species_style(sp, colormap_spec, colormap_override, color_idx_state, palette=palette)
                     st.update(inline_st)
                     if "fillonly" in st:
                         st["fill_only"] = st.pop("fillonly")
-                    lbl = _pretty_species_label(sp, rel_elem=rel_to)
+                    lbl = _pretty_species_label(sp, rel_elem=rel_to if "wt" in str(units).lower() else None)
                     right_series.append([converted_col, lbl, st])
                     if sp in mapped_external_series:
                         ez, ey, elbl = mapped_external_series[sp]
@@ -1239,7 +1216,12 @@ def compile_declarative_layout(module, df, layout_path, measured_data_path=None)
                         right_series.append([ez, ey, elbl, est])
 
                 conc_subplot[right_key] = right_series
-                conc_subplot[f"{right_key}_ylabel"] = f"[{units} {rel_to}]"
+                if rel_to:
+                    conc_subplot[f"{right_key}_ylabel"] = f"[{units} {rel_to}]"
+                elif units:
+                    conc_subplot[f"{right_key}_ylabel"] = f"[{units}]"
+                else:
+                    conc_subplot[f"{right_key}_ylabel"] = ""
                 _apply_lim_and_scale(conc_subplot, s_grp.get("lim"), s_grp.get("scale", "linear"), right_key)
                 if "broken_axis" in s_grp:
                     _apply_lim_and_scale(conc_subplot, s_grp["broken_axis"], None, right_key)

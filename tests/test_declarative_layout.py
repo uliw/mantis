@@ -437,3 +437,50 @@ isotopes = {
         assert a_p1_color != b_p1_color
 
 
+def test_solid_species_relative_to_none_or_missing(sample_df):
+    with tempfile.TemporaryDirectory() as tmpdir:
+        sample_df_with_ph = sample_df.copy()
+        sample_df_with_ph["pH"] = 7.5
+
+        layout_content = """
+solid_species = [
+    {
+        "scale": "lin",
+        "units": "wt",
+        "relative_to": "Fe",
+        "species": ["FeS"],
+    },
+    {
+        "scale": "lin",
+        "units": "pH",
+        "relative_to": None,
+        "species": ["pH"],
+    },
+    {
+        "scale": "lin",
+        "units": "dimensionless",
+        "species": ["phi"],
+    },
+]
+"""
+        layout_path = os.path.join(tmpdir, "plot_layout.py")
+        with open(layout_path, "w") as f:
+            f.write(layout_content)
+
+        plt_desc = load_layout_from_file(sample_df_with_ph, layout_path)
+        first_sp = plt_desc["first_subplot"]
+
+        # right1 has relative_to="Fe"
+        assert first_sp["right1_ylabel"] == "[wt Fe]"
+        assert first_sp["right1"][0][1] == "FeS [wt% Fe]"
+
+        # right2 has relative_to=None
+        assert first_sp["right2_ylabel"] == "[pH]"
+        assert first_sp["right2"][0][1] == "pH"
+
+        # right3 has missing relative_to
+        assert first_sp["right3_ylabel"] == "[dimensionless]"
+        assert first_sp["right3"][0][1] == "phi"
+
+
+
