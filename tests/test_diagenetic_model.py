@@ -380,5 +380,52 @@ def test_diffusive_boundary_layer_configure():
     assert np.isclose(model.p_dict["dbl"], 0.0005)
 
 
+def test_coupled_speciation_auto_numerical_jacobian(tmp_path):
+    """Verify that coupled non-linear speciation auto-enables numerical jacobian unless explicitly set."""
+    eq_file = tmp_path / "test_auto_jac_eq.py"
+    model = DiageneticModel(
+        base_dir=EXP_DIR,
+        species="species.py",
+        reactions="fes_reactions.py",
+        constants="kinetic_constants_fast.py",
+        equations=eq_file,
+    )
+    model.configure(enable_iron_speciation=True, beta_FeHS=251.2)
+    model.setup()
+    assert model.p_dict["use_numerical_jacobian"] is True
+    assert model.mp.use_numerical_jacobian is True
+
+    # When explicitly overridden to False by user, should respect user setting
+    model2 = DiageneticModel(
+        base_dir=EXP_DIR,
+        species="species.py",
+        reactions="fes_reactions.py",
+        constants="kinetic_constants_fast.py",
+        equations=eq_file,
+    )
+    model2.configure(enable_iron_speciation=True, beta_FeHS=251.2, use_numerical_jacobian=False)
+    model2.setup()
+    assert model2.p_dict["use_numerical_jacobian"] is False
+    assert getattr(model2.mp, "use_numerical_jacobian", False) is False
+
+
+def test_uncoupled_fixed_ph_selects_analytical_jacobian(tmp_path):
+    """Verify that uncoupled / static scalar speciation with fixed pH selects analytical Jacobian."""
+    eq_file = tmp_path / "test_ana_jac_eq.py"
+    model = DiageneticModel(
+        base_dir=EXP_DIR,
+        species="species.py",
+        reactions="fes_reactions.py",
+        constants="kinetic_constants_fast.py",
+        equations=eq_file,
+    )
+    # Default Velde 2016 has fixed pH, constant Fe2 partition -> uncoupled
+    model.setup()
+    assert model.p_dict["use_numerical_jacobian"] is False
+    assert model.mp.use_numerical_jacobian is False
+
+
+
+
 
 

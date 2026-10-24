@@ -63,32 +63,13 @@ species = {
     },
 
     # -------------------------------------------------------------------------
-    # Dynamic Speciation & Acid-Base Equilibrium
+    # Diagnostic Speciation Solutes
     # -------------------------------------------------------------------------
     "Hplus": {
         "phase": "liquid",
         "include": False,
         "formula": "H",
         "bc_top": {"Dirichlet": None},  # ph is derived from TA and DIC and set to be in Equilibrium with CaCO3
-    },
-    "HS": {
-        "phase": "liquid",
-        "include": False,
-        "formula": "HS",
-        "equilibrium_of": "TS2",
-        "fraction": "Ka1 / (Hplus + Ka1)",
-        "constants": {"pKa1": 7.0},
-        "include_in_TA": 1.0,
-        "isotopes": {"HS_S32": "S"},
-    },
-    "H2S": {
-        "phase": "liquid",
-        "include": False,
-        "formula": "H2S",
-        "equilibrium_of": "TS2",
-        "fraction": "Hplus / (Hplus + Ka1)",
-        "constants": {"pKa1": 7.0},
-        "isotopes": {"H2S_S32": "S"},
     },
 
     # -------------------------------------------------------------------------
@@ -98,25 +79,9 @@ species = {
         "phase": "mixed",
         "include": True,
         "formula": "Fe2",
-        "partition": {
-            "dissolved": "1.0 / (1.0 + k.Fe2_p_eq)",
-            "sorbed": "k.Fe2_p_eq / (1.0 + k.Fe2_p_eq)",
-        },
         "diff_coeff_function": "diff_coeff",
         "diffusion": {"m0": 27.7, "m1": 1.0},
         "bc_top": {"Dirichlet": 0.0},
-    },
-    "Fe2_liq": {
-        "phase": "liquid",
-        "include": False,
-        "formula": "Fe",
-        "alias_of": "Fe2_total.dissolved",
-    },
-    "Fe2_sorbed": {
-        "phase": "solid",
-        "include": False,
-        "formula": "Fe",
-        "alias_of": "Fe2_total.sorbed",
     },
 
     # -------------------------------------------------------------------------
@@ -214,16 +179,46 @@ species = {
         "bc_top": {"Robin": "20 umol/(cm^2 * yr)"},
         "prefill": True,
     },
-    "CO3": {
-        "phase": "liquid",
-        "include": False,
-        "formula": "CO3",
-        "prefill": True,
+}
+
+
+# =============================================================================
+# Unified Speciation & Phase Partitioning
+# =============================================================================
+speciation: Dict[str, Dict[str, Any]] = {
+    "carbonate_system": {
+        "type": "carbonate_system",
+        "primary": {"dic": "DIC", "ta": "TA"},
+        "species": ["Hplus", "CO3", "HCO3"],
     },
-    "HCO3": {
-        "phase": "liquid",
-        "include": False,
-        "formula": "HCO3",
-        "prefill": True,
+    "sulfide_acid_base": {
+        "type": "acid_base",
+        "primary": "TS2",
+        "constants": {"pKa1": 7.0},
+        "species": {
+            "HS": {
+                "phase": "liquid",
+                "fraction": "Ka1 / (Hplus + Ka1)",
+                "include_in_TA": 1.0,
+                "isotopes": {"HS_S32": "S"},
+            },
+            "H2S": {
+                "phase": "liquid",
+                "fraction": "Hplus / (Hplus + Ka1)",
+                "isotopes": {"H2S_S32": "S"},
+            },
+        },
+    },
+    "fe2_partitioning": {
+        "type": "partition",
+        "primary": "Fe2_total",
+        "fractions": {
+            "dissolved": "1.0 / (1.0 + k.Fe2_p_eq)",
+            "sorbed": "k.Fe2_p_eq / (1.0 + k.Fe2_p_eq)",
+        },
+        "species": {
+            "Fe2_liq": {"phase": "liquid", "alias_of": "Fe2_total.dissolved"},
+            "Fe2_sorbed": {"phase": "solid", "alias_of": "Fe2_total.sorbed"},
+        },
     },
 }

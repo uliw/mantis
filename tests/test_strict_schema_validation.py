@@ -11,6 +11,7 @@ from mantis.species_parser import (
     validate_isotope_standards,
     parse_and_validate_species_dict,
     parse_boundary_condition,
+    validate_and_normalize_speciation,
 )
 
 
@@ -185,3 +186,88 @@ def test_canonical_synthesis_and_bc_derivation():
     assert "FeS_S32" in bc_map
     assert bc_map["FeS_S32"]["type"] == "Robin"
     assert bc_map["FeS_S32"]["top"] == 0.0
+
+
+def test_validate_and_normalize_speciation_explicit():
+    """Verify explicit declarative speciation block validation."""
+    species = {
+        "TS2": {"phase": "liquid", "include": True, "bc_top": {"Dirichlet": 0.0}},
+        "Fe2_total": {"phase": "mixed", "include": True, "bc_top": {"Dirichlet": 0.0}},
+    }
+    raw_speciation = {
+        "carbonate": {
+            "type": "carbonate_system",
+            "primary": {"DIC": "DIC", "TA": "TA"},
+            "species": ["CO2", "HCO3", "CO3", "Hplus", "pH"],
+        },
+        "sulfide": {
+            "type": "acid_base",
+            "primary": "TS2",
+            "species": {
+                "HS": {"fraction": "Ka1 / (Hplus + Ka1)", "include_in_TA": 1.0},
+                "H2S": {"fraction": "Hplus / (Hplus + Ka1)"},
+            },
+            "constants": {"pKa1": 7.0},
+        },
+        "iron_partition": {
+            "type": "partition",
+            "primary": "Fe2_total",
+            "fractions": {
+                "dissolved": "1.0 / (1.0 + 0.001)",
+                "sorbed": "0.001 / (1.0 + 0.001)",
+            },
+            "species": {
+                "Fe2_dis": {"phase": "liquid", "fraction_of": "dissolved"},
+                "Fe2_sorb": {"phase": "solid", "fraction_of": "sorbed"},
+            },
+        },
+    }
+
+    norm = validate_and_normalize_speciation(raw_speciation, species)
+    assert "carbonate" in norm
+    assert norm["carbonate"]["type"] == "carbonate_system"
+    assert "sulfide" in norm
+    assert norm["sulfide"]["type"] == "acid_base"
+    assert "HS" in norm["sulfide"]["species"]
+    assert norm["sulfide"]["species"]["HS"]["include_in_TA"] == 1.0
+
+    # Sub-species are registered into species dictionary
+    assert "HS" in species
+    assert species["HS"]["include"] is False
+    assert "CO3" in species
+    assert species["CO3"]["include"] is False
+
+
+def test_legacy_speciation_keys_rejected(capsys):
+    """Verify that legacy speciation keys in species dictionary cause an immediate error."""
+    from mantis.species_parser import parse_and_validate_species_dict
+    species = {
+        "TS2": {"phase": "liquid", "include": True, "bc_top": {"Dirichlet": 0.0}},
+        "HS": {
+            "phase": "liquid",
+            "include": False,
+            "equilibrium_of": "TS2",
+            "bc_top": {"Dirichlet": 0.0},
+        },
+    }
+    with pytest.raises(SystemExit):
+        parse_and_validate_species_dict(species, {})
+    captured = capsys.readouterr()
+    assert "[MANTIS ERROR]" in captured.err
+    assert "declares legacy speciation keys" in captured.err
+
+
+def test_invalid_speciation_type_fails(capsys):
+    """Verify invalid speciation type causes an immediate exit with informative error."""
+    species = {"TS2": {"phase": "liquid", "include": True, "bc_top": {"Dirichlet": 0.0}}}
+    invalid_spec = {
+        "bad_system": {
+            "type": "quantum_field",
+        }
+    }
+    with pytest.raises(SystemExit):
+        validate_and_normalize_speciation(invalid_spec, species)
+    captured = capsys.readouterr()
+    assert "[MANTIS ERROR]" in captured.err
+    assert "invalid type 'quantum_field'" in captured.err
+
