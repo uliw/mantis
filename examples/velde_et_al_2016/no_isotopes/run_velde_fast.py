@@ -49,7 +49,7 @@ if __name__ == "__main__":
             "depth": "0 cm",
         },
         reaction_zone=("0.1 cm", "4.0 cm"), # Critical depth window of sharp redox fronts
-        reaction_zone_spacing="0.01 mm",    # Dense, uniform spacing in the reaction zone
+        reaction_zone_spacing="0.05 mm",    # Dense, uniform spacing in the reaction zone
         initial_spacing="0.1 mm",
         max_spacing="10 cm",
     )
