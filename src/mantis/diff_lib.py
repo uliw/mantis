@@ -2649,17 +2649,18 @@ def update_all_species(c: Any, mp: Any) -> None:
 
         elif not meta.get("include", True) and hasattr(c, sp_name):
             # Non-transported diagnostic species with constant top boundary (e.g. Ca2)
-            bc_meta = meta.get("bc")
-            if bc_meta and isinstance(bc_meta, dict) and "top" in bc_meta:
-                top_val = bc_meta["top"]
-                target = getattr(c, sp_name, None)
-                if target is not None:
-                    curr_val = get_v(target)
-                    if np.all(curr_val == 0.0) and top_val != 0.0:
-                        if hasattr(target, "setValue"):
-                            target.setValue(top_val)
-                        elif hasattr(target, "__setitem__"):
-                            target[:] = top_val
+            bc_meta = meta.get("bc_top", meta.get("bc"))
+            if bc_meta and isinstance(bc_meta, dict):
+                top_val = bc_meta.get("Dirichlet", bc_meta.get("top"))
+                if top_val is not None:
+                    target = getattr(c, sp_name, None)
+                    if target is not None:
+                        curr_val = get_v(target)
+                        if np.all(curr_val == 0.0) and top_val != 0.0:
+                            if hasattr(target, "setValue"):
+                                target.setValue(top_val)
+                            elif hasattr(target, "__setitem__"):
+                                target[:] = top_val
 
 
 def compute_porosity_profile(

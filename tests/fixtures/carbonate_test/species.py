@@ -1,34 +1,6 @@
 """species.py
 
-Declarative definition of all chemical species in the diagenetic system.
-
-Template Format & Structure:
-----------------------------
-Each key in the `species` dictionary represents a chemical species name:
-- phase: 'liquid', 'solid', or 'mixed'.
-    * 'liquid': Dissolved species in porewater (scaled by porosity phi).
-    * 'solid': Mineral or particulate species (scaled by 1 - phi).
-    * 'mixed': Lumped pool (e.g. Fe2_total) partitioned into porewater and sorbed phase.
-- include: bool.
-    * True: Active transport PDE variable solved by FiPy / Newton solver.
-    * False: Equilibrium, diagnostic, or fixed external species.
-- formula: Chemical formula string (e.g., 'FeS2', 'SO4', 'CH2O6').
-- equilibrium_of: (Optional) Parent species for fast dynamic speciation (e.g., 'TS2').
-- fraction: (Optional) Analytical expression or constant defining the fraction of parent.
-- partition: (Optional for 'mixed') Fractions partitioned into dissolved and sorbed phases.
-- diffusion: (Optional) Recipe for molecular diffusion coefficient calculation:
-    * dict with {'type': 'diff_coeff', 'm0': float, 'm1': float} (Boudreau 1996)
-    * dict with {'type': 'boudreau_o2'} (temperature & Archie porosity corrected O2 diffusion)
-    * str pointing to another species name to inherit its diffusion coefficient.
-    * None for solid species (which only transport via sediment burial and bioturbation).
-- bc: (Optional) Default boundary condition dict:
-    * {'top': float or pint-string, 'type': 'dissolved' or 'particulate'}
-    * For Hplus: {'pH': 7.5} sets porewater pH as the single source of truth.
-- isotope: (Optional) Name of corresponding isotopic companion species (e.g., 'SO4_32').
-- isotope_of: (Optional) Base species name if this entry is an isotope companion.
-- delta_threshold: (Optional) Minimum concentration threshold for calculating delta values (mmol/L).
-- prefill: whether to fill the initial vector with the concentration at the upper boundary, or with zero, defaults to False
-
+Declarative definition of all chemical species in the diagenetic system with carbonate chemistry.
 """
 
 import numpy as np
@@ -38,21 +10,15 @@ import numpy as np
 # Isotope Reference Standards
 # -----------------------------------------------------------------------------
 isotope_standards: dict = {
-    "S": {
+    "d34S": {
+        "element": "S",
         "standard": "VCDT",
         "ratio": 0.044162589,  # 34S / 32S
-        "symbol": "d34S",
         "unit": "mUr",
     },
 }
 
 
-"""
-Most species are covered by the diff_coeff function with the m0, m1 parameter listed in
-Boudreau 1996. If no parameters are availble, please provide any custom functions here.
-Note that diffusions coefficients are only needed for species that are par of the
-reaction-transport martrix (i.e., where include = True).
-"""
 def boudreau_o2(T_profile, phi):
     """Temperature porosity corrected O2 molecular diffusion."""
     phi_val = phi.value if hasattr(phi, "value") else phi
@@ -73,18 +39,9 @@ species = {
         "formula": "SO4",
         "diff_coeff_function": "diff_coeff",
         "diffusion": {"m0": 4.88, "m1": 0.232},
-        "bc": {"top": 28.2, "type": "dissolved", "delta": 21.0},
-        "isotope": "SO4_32",
-        "isotope_standard": "S",
-        "delta_name": "d34S_SO4",
+        "isotopes": {"SO4_S32": "S"},
+        "bc_top": {"Dirichlet": 28.2, "d34S": 21.0},
         "prefill": True,
-    },
-    "SO4_32": {
-        "phase": "liquid",
-        "include": True,
-        "formula": "SO4",
-        "isotope_of": "SO4",
-        "diffusion": "SO4",
     },
     "TS2": {
         "phase": "liquid",
@@ -92,17 +49,8 @@ species = {
         "formula": "H2S",
         "diff_coeff_function": "diff_coeff",
         "diffusion": {"m0": 10.4, "m1": 0.273},
-        "bc": {"top": 0.0, "type": "dissolved", "delta": 0.0},
-        "isotope": "TS2_32",
-        "isotope_standard": "S",
-        "delta_name": "d34S_TS2",
-    },
-    "TS2_32": {
-        "phase": "liquid",
-        "include": True,
-        "formula": "H2S",
-        "isotope_of": "TS2",
-        "diffusion": "TS2",
+        "isotopes": {"TS2_S32": "S"},
+        "bc_top": {"Dirichlet": 0.0, "d34S": 0.0},
     },
     "O2": {
         "phase": "liquid",
@@ -110,7 +58,7 @@ species = {
         "formula": "O2",
         "diff_coeff_function": "boudreau_o2",
         "diffusion": None,
-        "bc": {"top": 0.28, "type": "dissolved"},
+        "bc_top": {"Dirichlet": 0.28},
         "prefill": True,
     },
 
@@ -121,7 +69,7 @@ species = {
         "phase": "liquid",
         "include": False,
         "formula": "H",
-        "bc": {"pH": None},  # ph is derived from TA and DIC and set to be in Equilibrium with CaCO3
+        "bc_top": {"Dirichlet": None},  # ph is derived from TA and DIC and set to be in Equilibrium with CaCO3
     },
     "HS": {
         "phase": "liquid",
@@ -130,12 +78,7 @@ species = {
         "equilibrium_of": "TS2",
         "fraction": "Ka1 / (Hplus + Ka1)",
         "constants": {"pKa1": 7.0},
-    },
-    "HS_32": {
-        "phase": "liquid",
-        "include": False,
-        "formula": "HS",
-        "isotope_of": "HS",
+        "isotopes": {"HS_S32": "S"},
     },
     "H2S": {
         "phase": "liquid",
@@ -144,6 +87,7 @@ species = {
         "equilibrium_of": "TS2",
         "fraction": "Hplus / (Hplus + Ka1)",
         "constants": {"pKa1": 7.0},
+        "isotopes": {"H2S_S32": "S"},
     },
 
     # -------------------------------------------------------------------------
@@ -159,7 +103,7 @@ species = {
         },
         "diff_coeff_function": "diff_coeff",
         "diffusion": {"m0": 27.7, "m1": 1.0},
-        "bc": {"top": 0.0, "type": "dissolved"},
+        "bc_top": {"Dirichlet": 0.0},
     },
     "Fe2_liq": {
         "phase": "liquid",
@@ -182,7 +126,7 @@ species = {
         "include": True,
         "formula": "CH2O6",
         "diffusion": None,
-        "bc": {"top": "365 umol/(cm^2 * yr)", "type": "particulate"},
+        "bc_top": {"Robin": "365 umol/(cm^2 * yr)"},
         "prefill": False,
     },
     "POC_slow": {
@@ -190,7 +134,7 @@ species = {
         "include": True,
         "formula": "CH2O6",
         "diffusion": None,
-        "bc": {"top": "183 umol/(cm^2 * yr)", "type": "particulate"},
+        "bc_top": {"Robin": "183 umol/(cm^2 * yr)"},
         "prefill": False,
     },
     "Fe3": {
@@ -198,7 +142,7 @@ species = {
         "include": True,
         "formula": "FeOOH",
         "diffusion": None,
-        "bc": {"top": "12 umol/(cm^2 * yr)", "type": "particulate"},
+        "bc_top": {"Robin": "12 umol/(cm^2 * yr)"},
         "prefill": False,
     },
     "FeS": {
@@ -206,52 +150,25 @@ species = {
         "include": True,
         "formula": "FeS",
         "diffusion": None,
-        "bc": {"top": 0.0, "type": "particulate"},
-        "isotope": "FeS_32",
-        "isotope_standard": "S",
-        "delta_name": "d34S_FeS",
-    },
-    "FeS_32": {
-        "phase": "solid",
-        "include": True,
-        "formula": "FeS",
-        "isotope_of": "FeS",
-        "diffusion": None,
+        "isotopes": {"FeS_S32": "S"},
+        "bc_top": {"Robin": 0.0, "d34S": 0.0},
     },
     "FeS2": {
         "phase": "solid",
         "include": True,
         "formula": "FeS2",
         "diffusion": None,
-        "bc": {"top": 0.0, "type": "particulate"},
-        "isotope": "FeS2_32",
+        "isotopes": {"FeS2_S32": "S"},
         "stoichiometry": 2.0,
-        "isotope_standard": "S",
-        "delta_name": "d34S_FeS2",
-    },
-    "FeS2_32": {
-        "phase": "solid",
-        "include": True,
-        "formula": "FeS2",
-        "isotope_of": "FeS2",
-        "diffusion": None,
+        "bc_top": {"Robin": 0.0, "d34S": 0.0},
     },
     "S0": {
         "phase": "solid",
         "include": True,
         "formula": "S",
         "diffusion": None,
-        "bc": {"top": 0.0, "type": "particulate", "delta": 8.0},
-        "isotope": "S0_32",
-        "isotope_standard": "S",
-        "delta_name": "d34S_S0",
-    },
-    "S0_32": {
-        "phase": "solid",
-        "include": True,
-        "formula": "S",
-        "isotope_of": "S0",
-        "diffusion": None,
+        "isotopes": {"S0_S32": "S"},
+        "bc_top": {"Robin": 0.0, "d34S": 8.0},
     },
 
     # External / Reaction Balance Species (Excluded from transport)
@@ -267,7 +184,7 @@ species = {
         "formula": "CO2",
         "diff_coeff_function": "diff_coeff",
         "diffusion": {"m0": 5.06, "m1": 0.278},
-        "bc": {"top": 2.2, "type": "dissolved"},
+        "bc_top": {"Dirichlet": 2.2},
         "prefill": True,
     },
     "TA": {
@@ -276,7 +193,7 @@ species = {
         "formula": "HCO3",
         "diff_coeff_function": "diff_coeff",
         "diffusion": "DIC",
-        "bc": {"top": 2.4, "type": "dissolved"},
+        "bc_top": {"Dirichlet": 2.4},
         "prefill": True,
     },
     "Ca2": {
@@ -285,7 +202,7 @@ species = {
         "formula": "Ca",
         "diff_coeff_function": "diff_coeff",
         "diffusion": {"m0": 4.19, "m1": 0.231},
-        "bc": {"top": 10.3, "type": "dissolved"},
+        "bc_top": {"Dirichlet": 10.3},
         "prefill": True,
     },
     "CaCO3": {
@@ -293,7 +210,7 @@ species = {
         "include": True,
         "formula": "CaCO3",
         "diffusion": None,
-        "bc": {"top": "20 umol/(cm^2 * yr)", "type": "particulate"},
+        "bc_top": {"Robin": "20 umol/(cm^2 * yr)"},
         "prefill": True,
     },
     "CO3": {

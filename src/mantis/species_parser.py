@@ -152,7 +152,9 @@ def parse_boundary_condition(
     raw_val = bc_dict[bc_type]
 
     # Convert units if string with Pint
-    if isinstance(raw_val, str):
+    if raw_val is None:
+        val = None
+    elif isinstance(raw_val, str):
         if ureg is None:
             ureg = _default_ureg
         try:
@@ -301,6 +303,12 @@ def parse_and_validate_species_dict(
             bc_type, top_val, extras = parse_boundary_condition(
                 meta["bc_top"], sp_name, "bc_top", ureg=ureg
             )
+            if is_transported and top_val is None:
+                print(
+                    f"\n[MANTIS ERROR] Transported species '{sp_name}' must have a numerical boundary value in 'bc_top'. Got: None.\n",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
             bc_entry: Dict[str, Any] = {
                 "type": bc_type,
                 "top": top_val,
@@ -352,6 +360,8 @@ def parse_and_validate_species_dict(
         # Extract delta value from parent bc_top or default 0.0
         delta_val = float(parent_bc.get(std_key, 0.0))
         top_val_bulk = parent_bc.get("top", 0.0)
+        if top_val_bulk is None:
+            top_val_bulk = 0.0
 
         top_val_comp = get_l_mass(top_val_bulk * stoich, delta_val, std_ratio)
 

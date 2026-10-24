@@ -15,6 +15,8 @@ def get_layout(df):
     Returns:
         dict: The plot description dictionary.
     """
+    from pathlib import Path
+    import pandas as pd
     import matplotlib as mpl
     from mantis.diff_lib import solid_conc_to_wt_percent, liquid_conc_to_wt_percent
 
@@ -25,7 +27,7 @@ def get_layout(df):
     O2_attr = {"color": "#AA4499", "lw": lt}
     SO4_attr = {"color": "cornflowerblue", "lw": lt, "fill_only": True, "zorder": -10}
     SO4_attr_nf = {"color": "cornflowerblue", "lw": lt, "fill_only": False}
-    TS2_attr = {"color": "slateblue", "zorder": 10, "lw": lt}
+    HS_attr = {"color": "slateblue", "zorder": 10, "lw": lt}
     POC_slow_attr = {"color": "black", "lw": lt}
     POC_fast_attr = {"color": "yellow", "lw": lt}
     Fe3_attr = {"color": "saddlebrown", "lw": lt}
@@ -34,6 +36,34 @@ def get_layout(df):
     FeS_attr = {"color": "#ee3377", "lw": 4}
     dbio_attr = {"color": "#bbbbbb", "lw": lt, "fill_only": True}
     dirr_attr = {"color": "yellow", "lw": lt, "fill_only": True, "alpha": 0.1}
+
+    # Reference data from Velde et al. (2016)
+    velde_file = Path(__file__).resolve().parent / "veldebt06.csv"
+    if not velde_file.exists():
+        velde_file = Path(__file__).resolve().parent / "velde_bt04_d6.csv"
+
+    velde_series_left = []
+    velde_series_right = []
+    if velde_file.exists():
+        vdf = pd.read_csv(velde_file)
+        # Convert depth from cm to meters to match df.z
+        v_z = vdf["depth_cm"] / 100.0
+        # Porosity for Velde solid conversions (constant phi = 0.8)
+        v_phi = 0.8
+        if "C_HS" in vdf.columns:
+            velde_series_left.append(
+                [v_z, vdf["C_HS"], r"HS$^{-}$ (Velde 2016)", {"color": HS_attr["color"], "lw": lt, "linestyle": "dotted", "zorder": 10}]
+            )
+        if "C_FeS" in vdf.columns:
+            v_FeS_fe = solid_conc_to_wt_percent(vdf["C_FeS"], 56, 2.6, v_phi)
+            velde_series_right.append(
+                [v_z, v_FeS_fe, r"FeS (Velde 2016)", {"color": FeS_attr["color"], "lw": FeS_attr["lw"], "linestyle": "dotted"}]
+            )
+        if "C_FeOOH" in vdf.columns:
+            v_FeOOH_fe = solid_conc_to_wt_percent(vdf["C_FeOOH"], 56, 2.6, v_phi)
+            velde_series_right.append(
+                [v_z, v_FeOOH_fe, r"FeOOH (Velde 2016)", {"color": Fe3_attr["color"], "lw": lt, "linestyle": "dotted"}]
+            )
 
     phi = df.phi
     # relative to sulfur
@@ -65,7 +95,8 @@ def get_layout(df):
             "left": [
                 [df.c_SO4, r"SO$_{4}$", SO4_attr],
                 [df.c_O2, r"O$_{2}$", O2_attr],
-                [df.c_TS2, "TS$^{2-}$", TS2_attr],
+                [df.c_HS, "HS$^{-}$", HS_attr],
+                *velde_series_left,
                 [Fe2_liquid, r"Fe$^{2+}_{liq}$", Fe2_l_attr],
             ],
             "yscale": "log",
@@ -77,6 +108,7 @@ def get_layout(df):
             "right1": [
                 [FeS_fe, r"FeS [wt% Fe]", FeS_attr],
                 [Fe3_fe, r"Fe$^{3+}$ [wt% Fe]", Fe3_attr],
+                *velde_series_right,
                 # [Fe2_fe_sorbed, r"Fe$^{2+}_{sorbed}$ [wt% Fe]", Fe2_s_attr],
                 # [
                 #     total_iron,
@@ -106,7 +138,7 @@ def get_layout(df):
                 # [df.f_O2, "O2", {"color": "C3"}],
                 [df.f_POC_slow + df.f_POC_fast, r"POC", POC_attr],
                 # [df.f_Fe2_p, "f_Fe2+p", {"color": "C9"}],
-                [df.f_TS2, "f_TS2", TS2_attr],
+                [df.f_HS, "f_HS", HS_attr],
             ],
             "left_ylabel": r"reaction rate [mol m$^{-3}s^{-1}$]",
             "xscale": "log",

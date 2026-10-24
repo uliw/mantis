@@ -14,6 +14,9 @@ _version.py
 TAGS
 *.pdf
 *.csv
+!examples/velde_et_al_2016/no_isotopes/run_velde_fast_reference.csv
+!examples/velde_et_al_2016/no_isotopes/velde_bt06.csv
+!examples/velde_et_al_2016/no_isotopes/veldebt06.csv
 *.egg
 *.py[cod]
 *.pyo

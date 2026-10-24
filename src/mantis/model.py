@@ -766,7 +766,7 @@ class DiageneticModel:
             ph_val = float(self.p_dict["pH"])
         elif "Hplus" in species_defs and "bc_top" in species_defs["Hplus"]:
             h_bc = species_defs["Hplus"]["bc_top"]
-            if isinstance(h_bc, dict) and "Dirichlet" in h_bc:
+            if isinstance(h_bc, dict) and "Dirichlet" in h_bc and h_bc["Dirichlet"] is not None:
                 ph_val = float(h_bc["Dirichlet"])
 
         if is_carbonate:
@@ -805,10 +805,12 @@ class DiageneticModel:
                 ca2_top = carb_cfg["Ca2"]
             elif "Ca2" in self.mp.get("bc_overrides", {}):
                 ca2_top = self.mp["bc_overrides"]["Ca2"]
+            elif hasattr(self, "_parsed_bc_map") and "Ca2" in self._parsed_bc_map:
+                ca2_top = self._parsed_bc_map["Ca2"].get("top")
             elif "Ca2" in species_defs:
-                ca2_meta = species_defs["Ca2"].get("bc", {})
+                ca2_meta = species_defs["Ca2"].get("bc_top", species_defs["Ca2"].get("bc", {}))
                 if isinstance(ca2_meta, dict):
-                    ca2_top = ca2_meta.get("top")
+                    ca2_top = ca2_meta.get("Dirichlet", ca2_meta.get("top"))
                 else:
                     ca2_top = ca2_meta
 
