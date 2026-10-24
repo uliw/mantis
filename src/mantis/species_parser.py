@@ -9,6 +9,9 @@ Enforces the modern declarative schema without legacy backwards compatibility:
 
 import sys
 import copy
+import inspect
+import ast
+from pathlib import Path
 from typing import Dict, Any, Tuple, Optional
 import numpy as np
 import pint
@@ -19,11 +22,64 @@ _default_ureg = pint.UnitRegistry()
 CANONICAL_BC_TYPES = {"Dirichlet", "Neumann", "Robin"}
 
 
+def _find_definition_location(var_name: str = "isotope_standards", key: Optional[str] = None) -> Optional[str]:
+    """Finds the source file name and line number where var_name (and optionally key) was defined."""
+    frame = inspect.currentframe()
+    candidate_path: Optional[Path] = None
+    fallback_loc: Optional[str] = None
+
+    while frame:
+        if "self" in frame.f_locals:
+            s = frame.f_locals["self"]
+            sp = getattr(s, "species_file", None) or getattr(s, "species_path", None)
+            if sp:
+                candidate_path = Path(sp)
+                break
+        for mod_name in ("mod_species", "_species_mod", "species_mod"):
+            if mod_name in frame.f_locals:
+                m = frame.f_locals[mod_name]
+                if hasattr(m, "__file__") and m.__file__:
+                    candidate_path = Path(m.__file__)
+                    break
+        if candidate_path:
+            break
+        fn = frame.f_code.co_filename
+        if "species_parser.py" not in fn and fallback_loc is None:
+            fallback_loc = f"{fn}:{frame.f_lineno}"
+        frame = frame.f_back
+
+    if candidate_path and candidate_path.exists():
+        try:
+            tree = ast.parse(candidate_path.read_text(encoding="utf-8", errors="ignore"), filename=str(candidate_path))
+            for node in ast.walk(tree):
+                target_name = None
+                if isinstance(node, ast.Assign):
+                    for t in node.targets:
+                        if isinstance(t, ast.Name):
+                            target_name = t.id
+                elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+                    target_name = node.target.id
+
+                if target_name == var_name and isinstance(node.value, ast.Dict):
+                    if key is not None:
+                        for k in node.value.keys:
+                            if isinstance(k, ast.Constant) and k.value == key:
+                                return f"{candidate_path}:{k.lineno}"
+                    return f"{candidate_path}:{node.lineno}"
+        except Exception:
+            pass
+        return str(candidate_path)
+
+    return fallback_loc
+
+
 def validate_isotope_standards(isotope_standards: Any) -> Dict[str, Dict[str, Any]]:
     """Strictly validates the isotope_standards dictionary."""
     if not isinstance(isotope_standards, dict):
+        loc = _find_definition_location("isotope_standards")
+        loc_str = f" in {loc}" if loc else ""
         print(
-            f"\n[MANTIS ERROR] 'isotope_standards' must be a dictionary. Got: {type(isotope_standards)}.\n",
+            f"\n[MANTIS ERROR]{loc_str} 'isotope_standards' must be a dictionary. Got: {type(isotope_standards)}.\n",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -31,16 +87,20 @@ def validate_isotope_standards(isotope_standards: Any) -> Dict[str, Dict[str, An
     validated = {}
     for std_key, std_meta in isotope_standards.items():
         if not isinstance(std_meta, dict):
+            loc = _find_definition_location("isotope_standards", std_key)
+            loc_str = f" at {loc}" if loc else ""
             print(
-                f"\n[MANTIS ERROR] Isotope standard definition for '{std_key}' must be a dictionary. Got: {type(std_meta)}.\n",
+                f"\n[MANTIS ERROR]{loc_str} Isotope standard definition for '{std_key}' must be a dictionary. Got: {type(std_meta)}.\n",
                 file=sys.stderr,
             )
             sys.exit(1)
 
         # Reject legacy single-element key without element attribute
         if std_key in ("S", "C", "N", "O") and "element" not in std_meta:
+            loc = _find_definition_location("isotope_standards", std_key)
+            loc_str = f" at {loc}" if loc else ""
             print(
-                f"\n[MANTIS ERROR] Legacy isotope standard key '{std_key}' detected in isotope_standards.\n"
+                f"\n[MANTIS ERROR]{loc_str} Legacy isotope standard key '{std_key}' detected in isotope_standards.\n"
                 f"Mantis requires isotope standards to be keyed by delta notation (e.g. 'd34S', 'd18O')\n"
                 f"and include 'standard', 'ratio', 'unit', and 'element'.\n",
                 file=sys.stderr,
@@ -50,8 +110,10 @@ def validate_isotope_standards(isotope_standards: Any) -> Dict[str, Dict[str, An
         required_fields = ["standard", "ratio", "unit", "element"]
         missing = [f for f in required_fields if f not in std_meta]
         if missing:
+            loc = _find_definition_location("isotope_standards", std_key)
+            loc_str = f" at {loc}" if loc else ""
             print(
-                f"\n[MANTIS ERROR] Isotope standard '{std_key}' is missing required fields: {missing}.\n"
+                f"\n[MANTIS ERROR]{loc_str} Isotope standard '{std_key}' is missing required fields: {missing}.\n"
                 f"Expected 'standard', 'ratio', 'unit', and 'element'. Got: {std_meta}\n",
                 file=sys.stderr,
             )
@@ -60,8 +122,10 @@ def validate_isotope_standards(isotope_standards: Any) -> Dict[str, Dict[str, An
         try:
             ratio_val = float(std_meta["ratio"])
         except (ValueError, TypeError):
+            loc = _find_definition_location("isotope_standards", std_key)
+            loc_str = f" at {loc}" if loc else ""
             print(
-                f"\n[MANTIS ERROR] Isotope standard '{std_key}' has invalid 'ratio': {std_meta.get('ratio')}.\n",
+                f"\n[MANTIS ERROR]{loc_str} Isotope standard '{std_key}' has invalid 'ratio': {std_meta.get('ratio')}.\n",
                 file=sys.stderr,
             )
             sys.exit(1)

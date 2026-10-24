@@ -1,4 +1,4 @@
-"""Test regression benchmark for Velde et al. (2016) simulation."""
+"""Test regression benchmark for Velde et al. (2016) simulation (no_isotopes and with_isotopes)."""
 
 from pathlib import Path
 import subprocess
@@ -8,18 +8,19 @@ import pandas as pd
 import pytest
 
 
-def test_velde_et_al_2016_simulation_benchmark():
+def _run_and_verify_simulation_benchmark(scenario_dir_name: str, check_isotopes: bool = False):
     """
     Run Velde et al. (2016) simulation and verify accuracy against reference results.
 
     Requirements:
-    1. Runs examples/velde_et_al_2016/no_isotopes/run_velde_fast.py.
+    1. Runs examples/velde_et_al_2016/{scenario_dir_name}/run_velde_fast.py.
     2. Exits cleanly with returncode == 0 in under 60 seconds.
-    3. Compares simulated concentrations with run_velde_fast_reference.csv.
-    4. Asserts normalized mean error across grid spacing is <= 1% for every active species.
+    3. Compares simulated concentrations (and isotope delta values if check_isotopes=True)
+       with run_velde_fast_reference.csv.
+    4. Asserts normalized mean error across grid spacing is <= 1% for every active species/isotope.
     """
     repo_root = Path(__file__).resolve().parent.parent
-    sim_dir = repo_root / "examples" / "velde_et_al_2016" / "no_isotopes"
+    sim_dir = repo_root / "examples" / "velde_et_al_2016" / scenario_dir_name
     sim_script = sim_dir / "run_velde_fast.py"
     output_csv = sim_dir / "run_velde_fast.csv"
     reference_csv = sim_dir / "run_velde_fast_reference.csv"
@@ -63,24 +64,33 @@ def test_velde_et_al_2016_simulation_benchmark():
     total_length = z[-1] - z[0]
     weights = dz / total_length
 
-    # 4. Compare all concentration columns (c_*)
-    conc_cols = [c for c in ref_df.columns if c.startswith("c_") and c in sim_df.columns]
-    assert len(conc_cols) > 0, "No concentration columns found to compare."
+    # 4. Compare all concentration columns (c_*) and isotope delta columns (d34S_*)
+    cols_to_check = [c for c in ref_df.columns if c.startswith("c_") and c in sim_df.columns]
+    if check_isotopes:
+        cols_to_check += [c for c in ref_df.columns if c.startswith("d34S_") and c in sim_df.columns]
+    assert len(cols_to_check) > 0, "No concentration columns found to compare."
 
     errors = {}
     failing_species = {}
 
-    for col in conc_cols:
+    for col in cols_to_check:
         c_ref = ref_df[col].to_numpy()
         c_sim = sim_df[col].to_numpy()
-        scale = np.max(np.abs(c_ref))
+
+        valid_mask = ~np.isnan(c_ref) & ~np.isnan(c_sim)
+        if not np.any(valid_mask):
+            continue
+
+        scale = np.max(np.abs(c_ref[valid_mask]))
 
         # Skip species that are identically zero (inactive or zero-background)
         if scale < 1e-15:
             continue
 
-        normalized_pointwise_err = np.abs(c_sim - c_ref) / scale
-        mean_err = np.sum(normalized_pointwise_err * weights)
+        normalized_pointwise_err = np.abs(c_sim[valid_mask] - c_ref[valid_mask]) / scale
+        w_sub = weights[valid_mask]
+        w_sub_norm = w_sub / np.sum(w_sub)
+        mean_err = np.sum(normalized_pointwise_err * w_sub_norm)
         errors[col] = mean_err
 
         if mean_err > 0.01:
@@ -91,4 +101,14 @@ def test_velde_et_al_2016_simulation_benchmark():
             f"  {col}: {err * 100:.3f}% error (exceeds 1.000% threshold)"
             for col, err in failing_species.items()
         )
-        pytest.fail(f"Simulation accuracy check failed for species:\n{report}")
+        pytest.fail(f"Simulation accuracy check failed for {scenario_dir_name}:\n{report}")
+
+
+def test_velde_et_al_2016_simulation_benchmark():
+    """Run regression benchmark for no_isotopes scenario."""
+    _run_and_verify_simulation_benchmark("no_isotopes", check_isotopes=False)
+
+
+def test_velde_et_al_2016_with_isotopes_simulation_benchmark():
+    """Run regression benchmark for with_isotopes scenario."""
+    _run_and_verify_simulation_benchmark("with_isotopes", check_isotopes=True)
