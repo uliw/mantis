@@ -50,3 +50,10 @@ isotopes = {
     "species": ["d34S_SO4", "d34S_TS2", "d34S_FeS"],
     "lim": (-45, -37, 20, 30),  # broken y-axis: exclude -37 to 20
 }
+
+
+plot_panels = [
+    [liquid_species, solid_species],
+    [reaction_rates],
+    [isotopes],
+]

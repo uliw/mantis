@@ -56,3 +56,9 @@ reaction_rates = {
         "D_bio",
     ],
 }
+
+plot_panels = [
+    [liquid_species, solid_species],
+    [reaction_rates],
+]
+

@@ -98,6 +98,7 @@ species = {
         "equilibrium_of": "TS2",
         "fraction": "Ka1 / (Hplus + Ka1)",
         "constants": {"pKa1": 7.0},
+        "include_in_TA": 1.0,
     },
     "H2S": {
         "phase": "liquid",
