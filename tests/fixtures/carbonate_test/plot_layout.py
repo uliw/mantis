@@ -44,3 +44,10 @@ isotopes = {
     "species": ["d_SO4", "d_TS2", "d_FeS", "d_FeS2", "d_S0"],
     "lim": (-45, -37, 20, 30),
 }
+
+plot_panels = [
+    [liquid_species, solid_species],
+    [reaction_rates],
+    [isotopes],
+]
+

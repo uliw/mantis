@@ -483,4 +483,110 @@ solid_species = [
         assert first_sp["right3"][0][1] == "phi"
 
 
+def test_custom_plot_panels_arbitrary_ordering_and_assignment(sample_df):
+    with tempfile.TemporaryDirectory() as tmpdir:
+        layout_content = """
+liquid_species_1 = liquid_species({
+    "scale": "log",
+    "species": ["SO4", "HS"],
+    "lim": (1e-4, 30),
+    "units": "mmol/l",
+    "position": "left",
+})
+
+solid_species_1 = solid_species({
+    "scale": "lin",
+    "units": "wt%",
+    "relative_to": "Fe",
+    "species": ["FeS"],
+    "lim": (0, 2),
+    "position": "right",
+})
+
+reaction_rates_1 = reaction_rates({
+    "species": ["SO4", "FeS"],
+    "position": "left",
+})
+
+isotopes_1 = isotopes({
+    "species": ["d34S_SO4", "d34S_FeS"],
+    "lim": (-45, -37, 20, 30),
+    "position": "left",
+})
+
+liquid_species_2 = liquid_species({
+    "scale": "lin",
+    "species": ["O2"],
+    "units": "mmol/l",
+})
+
+# Flexible panel composition:
+# Panel 1: Isotopes on top
+# Panel 2: Liquids (left) + Solids (right)
+# Panel 3: Reaction rates
+# Panel 4: Another liquid panel (e.g. O2)
+plot_panels = [
+    [isotopes_1],
+    [liquid_species_1, solid_species_1],
+    [reaction_rates_1],
+    [liquid_species_2],
+]
+"""
+        layout_path = os.path.join(tmpdir, "plot_layout.py")
+        with open(layout_path, "w") as f:
+            f.write(layout_content)
+
+        plt_desc = load_layout_from_file(sample_df, layout_path)
+
+        assert "first_subplot" in plt_desc
+        assert "second_subplot" in plt_desc
+        assert "third_subplot" in plt_desc
+        assert "fourth_subplot" in plt_desc
+
+        # Panel 1 is isotopes
+        p1 = plt_desc["first_subplot"]
+        assert len(p1["left"]) == 2
+        assert r"\delta^{34}" in p1["left_ylabel"]
+        assert "broken_axis(-45, -37, 20, 30)" in str(p1.get("options-left"))
+
+        # Panel 2 is liquid + solid
+        p2 = plt_desc["second_subplot"]
+        assert len(p2["left"]) == 2
+        assert p2["left_ylabel"] == "Concentration [mmol/l]"
+        assert "right1" in p2
+        assert len(p2["right1"]) == 1
+        assert p2["right1_ylabel"] == "[wt% Fe]"
+
+        # Panel 3 is reaction rates
+        p3 = plt_desc["third_subplot"]
+        assert len(p3["left"]) == 2
+        assert "reaction rate" in p3["left_ylabel"]
+
+        # Panel 4 is liquid_species_2 (O2)
+        p4 = plt_desc["fourth_subplot"]
+        assert len(p4["left"]) == 1
+        assert p4["left"][0][1] == r"O$_{2}$"
+        assert p4["yscale"] == "linear"
+
+        # Verify unified entity color sharing across the panels:
+        # SO4 in p1 (isotopes), p2 (liquid), p3 (rates) must share the same color
+        so4_iso_color = p1["left"][0][2]["color"]
+        so4_liq_color = p2["left"][0][2]["color"]
+        so4_rr_color = p3["left"][0][2]["color"]
+        assert so4_iso_color == so4_liq_color == so4_rr_color
+
+        # FeS in p1 (isotopes), p2 (solids), p3 (rates) must share the same color
+        fes_iso_color = p1["left"][1][2]["color"]
+        fes_sol_color = p2["right1"][0][2]["color"]
+        fes_rr_color = p3["left"][1][2]["color"]
+        assert fes_iso_color == fes_sol_color == fes_rr_color
+
+        # Render PDF to confirm end-to-end plotting works without errors
+        pdf_path = os.path.join(tmpdir, "panels_test.pdf")
+        plot(sample_df, display_length=1.0, outfile=pdf_path, show=False, plot_description=plt_desc)
+        assert os.path.exists(pdf_path)
+        assert os.path.getsize(pdf_path) > 0
+
+
+
 

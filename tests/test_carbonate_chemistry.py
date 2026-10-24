@@ -116,3 +116,110 @@ def test_model_carbonate_overrides_species_bc():
     assert model.mp.is_carbonate is True
     assert hasattr(model.mp, "carb_spec_top")
     assert model.mp.carb_spec_top["TA"] == pytest.approx(2.182, rel=1e-2)
+
+
+def test_compute_carbonate_speciation_with_include_in_ta():
+    """Test that declarative include_in_TA properly subtracts non-carbonate alkalinity."""
+    from mantis.diff_lib import compute_carbonate_speciation
+
+    class Container:
+        pass
+
+    class Params:
+        pass
+
+    # 1. Base case: TA = 2.4, DIC = 2.2, no non-carbonate species
+    c1 = Container()
+    c1.TA = np.array([2.4])
+    c1.DIC = np.array([2.2])
+    mp1 = Params()
+    mp1.is_carbonate = True
+    mp1.K1_carb = 10.0 ** (-6.0)
+    mp1.K2_carb = 10.0 ** (-9.0)
+
+    compute_carbonate_speciation(c1, mp1)
+    ph_base = float(c1.pH[0])
+
+    # 2. Case with TS2 and declarative include_in_TA: 1.0 on HS
+    c2 = Container()
+    c2.TA = np.array([2.4])
+    c2.DIC = np.array([2.2])
+    c2.TS2 = np.array([1.0])  # 1.0 mM sulfide
+    mp2 = Params()
+    mp2.is_carbonate = True
+    mp2.K1_carb = 10.0 ** (-6.0)
+    mp2.K2_carb = 10.0 ** (-9.0)
+    mp2.species_defs = {
+        "TS2": {"phase": "liquid", "include": True},
+        "HS": {
+            "phase": "liquid",
+            "include": False,
+            "equilibrium_of": "TS2",
+            "fraction": "Ka1 / (Hplus + Ka1)",
+            "constants": {"pKa1": 7.0},
+            "include_in_TA": 1.0,
+        },
+    }
+
+    compute_carbonate_speciation(c2, mp2)
+    ph_with_hs = float(c2.pH[0])
+    ta_carb = float(c2.ta_carb[0])
+    ta_non_carb = float(c2.ta_non_carb[0])
+
+    # HS- takes up alkalinity, so carbonate alkalinity is reduced: CA < TA
+    assert ta_carb < 2.4
+    assert ta_non_carb > 0.0
+    assert pytest.approx(ta_carb + ta_non_carb, rel=1e-6) == 2.4
+    # With lower CA, pH must be more acidic than without sulfide alkalinity
+    assert ph_with_hs < ph_base
+
+
+def test_compute_carbonate_speciation_negative_factor():
+    """Test that a negative include_in_TA factor (proton donor) increases carbonate alkalinity."""
+    from mantis.diff_lib import compute_carbonate_speciation
+
+    class Container:
+        pass
+
+    class Params:
+        pass
+
+    c = Container()
+    c.TA = np.array([2.4])
+    c.DIC = np.array([2.2])
+    c.Acid = np.array([0.2])
+    mp = Params()
+    mp.is_carbonate = True
+    mp.K1_carb = 10.0 ** (-6.0)
+    mp.K2_carb = 10.0 ** (-9.0)
+    mp.species_defs = {
+        "Acid": {
+            "phase": "liquid",
+            "include": True,
+            "include_in_TA": -1.0,
+        },
+    }
+
+    compute_carbonate_speciation(c, mp)
+    ta_carb = float(c.ta_carb[0])
+    ta_non_carb = float(c.ta_non_carb[0])
+
+    assert pytest.approx(ta_non_carb, rel=1e-6) == -0.2
+    assert pytest.approx(ta_carb, rel=1e-6) == 2.6  # 2.4 - (-0.2) = 2.6
+    assert ta_carb > 2.4
+
+
+def test_species_parser_rejects_non_numeric_include_in_ta():
+    """Test that species parser rejects invalid non-numeric include_in_TA."""
+    from mantis.species_parser import parse_and_validate_species_dict
+
+    species = {
+        "HS": {
+            "phase": "liquid",
+            "include": False,
+            "include_in_TA": "invalid_string",
+        }
+    }
+    with pytest.raises(SystemExit):
+        parse_and_validate_species_dict(species, {})
+
