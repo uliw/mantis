@@ -192,6 +192,97 @@ while maintaining the user's specified overlying water concentration at $z = 0$.
 #### 4. Vectorized Speciation & Dynamic pH Evolution
 During the time-stepping loop, reactions like organic matter degradation, iron reduction, and calcite dissolution/precipitation produce or consume $\text{DIC}$ and $\text{TA}$. At each timestep, MANTIS solves the exact quadratic relationship for carbonate alkalinity in a fully vectorized manner across all grid cells via `compute_carbonate_speciation`, updating porewater $[\text{H}^+]$, dynamic $\text{pH}$, $[\text{CO}_3^{2-}]$, and $[\text{HCO}_3^-]$.
 
+#### 5. Total Alkalinity vs. Carbonate Alkalinity: The `include_in_TA` Keyword
+
+In marine geochemistry, **Total Alkalinity ($\text{TA}$)** is defined relative to reference protonation levels for conservative ions and weak acid-base pairs (**Dickson, 1981**):
+$$\text{TA} = \underbrace{[\text{HCO}_3^-] + 2[\text{CO}_3^{2-}]}_{\text{Carbonate Alkalinity (CA)}} + [\text{B(OH)}_4^-] + [\text{OH}^-] + [\text{HPO}_4^{2-}] + 2[\text{PO}_4^{3-}] + [\text{HS}^-] + [\text{NH}_3] + \dots - [\text{H}^+] - [\text{HSO}_4^-] - [\text{HF}]$$
+
+In MANTIS, **$\text{TA}$ is transported as the conservative master state variable**. However, carbonate mineral saturation ($\Omega_{\text{calcite}}$) and $\text{pH}$ depend specifically on **Carbonate Alkalinity ($\text{CA}$)**:
+$$\text{CA} = \text{TA} - \text{TA}_{\text{non-carb}}$$
+where $\text{TA}_{\text{non-carb}}$ represents the sum of all non-carbonate species that buffer protons:
+$$\text{TA}_{\text{non-carb}} = \sum_i \nu_i [S_i]$$
+
+To tell MANTIS which species contribute to alkalinity during speciation and $\text{pH}$ calculations, specify the **`include_in_TA`** keyword in `species.py`:
+
+- **Positive Proton Acceptors ($\nu_i > 0$)**: Species that carry excess alkalinity relative to their zero-alkalinity reference level. For example, bisulfide ($\text{HS}^-$, $\nu = +1.0$), ammonia ($\text{NH}_3$, $\nu = +1.0$), borate ($\text{B(OH)}_4^-$, $\nu = +1.0$), or monohydrogen phosphate ($\text{HPO}_4^{2-}$, $\nu = +1.0$). When these species accumulate, they consume part of the total alkalinity pool, reducing the available carbonate alkalinity ($\text{CA} = \text{TA} - \sum \nu_i [S_i]$).
+- **Negative Proton Donors ($\nu_i < 0$)**: Species that donate protons below their zero-alkalinity reference level. For example, excess hydronium ion ($[\text{H}^+]$, $\nu = -1.0$) or bisulfate ($\text{HSO}_4^-$, $\nu = -1.0$). Subtracting a negative term adds back to carbonate alkalinity.
+
+##### Declarative Syntax in `species.py`
+
+You can attach `include_in_TA` to fast equilibrium sub-species or directly transported species:
+
+```python
+species = {
+    # 1. Equilibrium sub-species (HS- dynamically partitioned from TS2):
+    "HS": {
+        "phase": "liquid",
+        "include": False,
+        "formula": "HS",
+        "equilibrium_of": "TS2",
+        "fraction": "Ka1 / (Hplus + Ka1)",
+        "constants": {"pKa1": 7.0},
+        "include_in_TA": 1.0,          # Bisulfide contributes +1.0 * [HS-] to TA
+    },
+
+    # 2. Negative proton donor (e.g. bisulfate HSO4- partitioned from sulfate):
+    "HSO4": {
+        "phase": "liquid",
+        "include": False,
+        "formula": "HSO4",
+        "equilibrium_of": "SO4",
+        "fraction": "Hplus / (Hplus + Ka2_SO4)",
+        "constants": {"pKa2_SO4": 1.5},
+        "include_in_TA": -1.0,         # Bisulfate contributes -1.0 * [HSO4-] to TA
+    },
+
+    # 3. Transported weak base (e.g. unprotonated ammonia NH3):
+    "NH3": {
+        "phase": "liquid",
+        "include": True,
+        "formula": "NH3",
+        "include_in_TA": 1.0,          # Contributes +1.0 * [NH3] to TA
+        # ...
+    },
+}
+```
+
+##### Why Carbonate Species ($\text{HCO}_3^-$, $\text{CO}_3^{2-}$) Do NOT Take `include_in_TA`
+
+A common question is: *if bisulfide ($\text{HS}^-$) takes `include_in_TA: 1.0`, why don't we specify `include_in_TA` for bicarbonate ($\text{HCO}_3^-$) or carbonate ($\text{CO}_3^{2-}$)?*
+
+The answer lies in how the speciation engine calculates porewater $\text{pH}$:
+
+1. **Carbonate Species Are Endogenous (The Solution, Not the Input)**:
+   The carbonate alkalinity equation is:
+   $$\text{CA} = [\text{HCO}_3^-] + 2[\text{CO}_3^{2-}]$$
+   Using the thermodynamic equilibrium relations $[\text{HCO}_3^-] = \text{DIC} \frac{K_1^* [\text{H}^+]}{[\text{H}^+]^2 + K_1^* [\text{H}^+] + K_1^* K_2^*}$ and $[\text{CO}_3^{2-}] = \text{DIC} \frac{K_1^* K_2^*}{[\text{H}^+]^2 + K_1^* [\text{H}^+] + K_1^* K_2^*}$, MANTIS sets up the exact quadratic equation:
+   $$\text{CA} [\text{H}^+]^2 + K_1^*(\text{CA} - \text{DIC}) [\text{H}^+] + K_1^* K_2^* (\text{CA} - 2\,\text{DIC}) = 0$$
+   Notice that the $+1$ weighting of $\text{HCO}_3^-$ and the $+2$ weighting of $\text{CO}_3^{2-}$ are **already mathematically embedded in the coefficients of this quadratic equation**. They are the unknowns being solved for.
+
+2. **What `include_in_TA` Actually Does**:
+   The `include_in_TA` keyword exists exclusively for **non-carbonate** species that compete for the transported total alkalinity pool. MANTIS deducts non-carbonate alkalinity before solving the quadratic:
+   $$\text{CA} = \text{TA} - \text{TA}_{\text{non-carb}} = \text{TA} - \sum \nu_i [S_i]$$
+   If you were to attach `"include_in_TA": 1.0` to `HCO3` and `"include_in_TA": 2.0` to `CO3`, MANTIS would subtract carbonate alkalinity from itself:
+   $$\text{CA} = \text{TA} - ([\text{HCO}_3^-] + 2[\text{CO}_3^{2-}]) = \text{TA} - \text{CA} = 0$$
+   This would artificially collapse the carbonate alkalinity to zero and crash the speciation solver!
+
+##### Why $\text{Ca}^{2+}$ and $\text{SO}_4^{2-}$ Do NOT Take `include_in_TA`
+
+A frequent question is whether conservative ions like $\text{Ca}^{2+}$ and $\text{SO}_4^{2-}$ should be given an `include_in_TA` entry. **They should not**:
+
+1. **Reaction Stoichiometry Covers Their Effect Completely**: The production or consumption of alkalinity associated with reactions involving $\text{Ca}^{2+}$ and $\text{SO}_4^{2-}$ is already written directly into the reaction stoichiometry in `reactions.py`:
+   - *Sulfate Reduction*: $2\ \text{POC} + \text{SO}_4^{2-} \to 2\ \text{DIC} + \text{TS2} + 2\ \text{TA}$ (consuming 1 mole $\text{SO}_4^{2-}$ explicitly generates $+2\ \text{TA}$).
+   - *Calcite Precipitation*: $\text{Ca}^{2+} + \text{DIC} + 2\ \text{TA} \to \text{CaCO}_3$ (consuming 1 mole $\text{Ca}^{2+}$ explicitly consumes $-2\ \text{TA}$).
+2. **Conservative Reference Levels at Porewater pH**: In the neutral to mildly acidic pH range of marine porewaters ($\text{pH} \approx 6\text{--}9$), $\text{Ca}^{2+}$ is a conservative divalent cation with no acid-base equilibria, and sulfate is virtually $100\%$ deprotonated as $\text{SO}_4^{2-}$ (its second dissociation constant $pK_a \approx 1.0\text{--}1.5$ is well below ambient pH). Because $\text{SO}_4^{2-}$ is the zero-alkalinity reference species in Dickson's definition, unprotonated $\text{SO}_4^{2-}$ has zero contribution to speciation alkalinity. Adding `include_in_TA` to $\text{Ca}^{2+}$ or $\text{SO}_4^{2-}$ would double-count their effects and corrupt porewater $\text{pH}$ calculations.
+
+##### Summary Rule of Thumb
+
+| Chemical Category | Examples | `include_in_TA` in `species.py` | Mechanism |
+| :--- | :--- | :--- | :--- |
+| **Carbonate System** | $\text{HCO}_3^-$, $\text{CO}_3^{2-}$, $\text{CO}_2$ | **Omit** (Do NOT specify) | Endogenous to the carbonate quadratic engine; algebraic weights ($+1, +2$) are built into the solver. |
+| **Non-Carbonate Weak Bases / Acids** | $\text{HS}^-$, $\text{NH}_3$, $\text{B(OH)}_4^-$, $\text{HPO}_4^{2-}$, $[\text{H}^+]$, $\text{HSO}_4^-$ | **Specify** (`1.0`, `-1.0`, etc.) | Deducted from $\text{TA}$ to yield the true carbonate alkalinity ($\text{CA} = \text{TA} - \sum \nu_i [S_i]$). |
+| **Conservative Ions** | $\text{Ca}^{2+}$, $\text{SO}_4^{2-}$, $\text{Na}^+$, $\text{Cl}^-$ | **Omit** (Do NOT specify) | Zero-alkalinity reference species at porewater $\text{pH}$ (6–9). Their alkalinity effects are handled 100% by reaction stoichiometry in `reactions.py`. |
+
 
 ### Handling Diffusion Coefficients
 
@@ -730,7 +821,7 @@ MANTIS uses a clean, purely declarative layout schema in `plot_layout.py`. You d
 
 ### Declarative Schema Overview
 
-A typical `plot_layout.py` defines the following sections:
+A typical `plot_layout.py` defines specifications for liquid species, solid species, reaction rates, and isotopes, and assigns them flexibly to panels via `plot_panels`:
 
 ```python
 """plot_layout.py - Declarative plot configuration."""
@@ -745,43 +836,53 @@ colormap_override = {
     "D_bio": {"color": "#bbbbbb", "lw": 2, "fill_only": True, "zorder": -10},
 }
 
-# ---- 2. Concentration Data Panel (First Subplot) ----
-# Left axis: Dissolved porewater species
-liquid_species = {
+# ---- 2. Species & Panel Specifications ----
+# Liquid dissolved porewater species
+liquid_species_1 = liquid_species({
     "scale": "log",                              # 'log' or 'lin' / 'linear'
-    "species": ["SO4", "O2", "TS2", "Fe2_liq"],
-    "lim": (1e-6, 50),                           # Axis limits
+    "species": ["SO4", "H2S", "Fe2_dis"],
+    "lim": (1e-4, 30),                           # Axis limits
     "units": "mmol/l",                           # Axis label
-}
+    "position": "left",                          # Default: "left"
+})
 
-# Right axis: Solid minerals and particulates (supports multiple right axes)
-# MANTIS automatically converts volumetric concentration (mmol/L) to wt% dry sediment!
-solid_species = [
-    {
-        "scale": "lin",
-        "units": ["wt"],                         # Automatic wt% conversion
-        "relative_to": "Fe",                     # Molecular weight reference (e.g. Fe, S, C)
-        "species": ["FeS", "Fe3"],
-        "lim": (0, 1),
-    }
-]
+# Solid minerals and particulates (supports automatic wt% dry sediment conversion)
+solid_species_1 = solid_species({
+    "scale": "lin",
+    "units": "wt%",                              # Automatic wt% conversion
+    "relative_to": "Fe",                         # Molecular weight reference (e.g. Fe, S, C; None for no scaling)
+    "species": ["FeS"],
+    "lim": (0, 2),
+    "position": "right",                         # Attach as secondary right axis
+})
 
-# ---- 3. Reaction Rate Panel (Second Subplot) ----
+# Reaction rates panel
 # Defaults to symlog scale to handle both positive (production) and negative (consumption) rates
-reaction_rates = {
+reaction_rates_1 = reaction_rates({
     "scale": "symlog",
-    "species": ["POC", "SO4", "TS2", "Fe3", "FeS", "D_bio"],
-}
+    "species": ["POC", "SO4", "H2S", "FeS", "D_bio"],
+    "position": "left",
+})
 
-# ---- 4. Isotope Data Panel (Third Subplot - Optional) ----
+# Isotope data panel (Optional)
 # Multiple isotope systems (e.g. d34S and d18O) automatically create twin Y-axes.
 # 4-element tuples specify broken axes: (min_lower, max_lower, min_upper, max_upper)
-isotopes = {
-    "species": ["d34S_SO4", "d34S_TS2", "d34S_FeS"],
+isotopes_1 = isotopes({
+    "species": ["d34S_SO4", "d34S_FeS"],
     "lim": (-45, -37, 20, 30),                   # Broken y-axis excluding [-37, 20]
-}
+    "position": "left",
+})
 
-# ---- 5. Optional Comparison Against Measured Data ----
+# ---- 3. Flexible Panel Assignment & Ordering ----
+# Each sub-list in plot_panels defines a subplot from top to bottom.
+# Panels can be combined, reordered, or repeated arbitrarily.
+plot_panels = [
+    [liquid_species_1, solid_species_1],  # Panel 1: Liquids (left) + Solids (right)
+    [reaction_rates_1],                   # Panel 2: Reaction rates
+    [isotopes_1],                         # Panel 3: Isotopes
+]
+
+# ---- 4. Optional Comparison Against Measured Data ----
 # comparison_data = "measured_core_data.csv"
 # species_mapping = {
 #     "z": ["depth_cm", 1 / 100],                # Map depth column with unit conversion
@@ -793,19 +894,24 @@ isotopes = {
 
 ### Key Features of the Declarative Layout
 
-1. **Unified Color Palette Across Panels**:
-   Plot elements that relate to the same chemical entity share the exact same color throughout the entire figure. For example, `SO4` in porewater, `SO4` in reaction rates, and `d34S_SO4` in isotopes all automatically share the same color.
+1. **Flexible Panel Assignment (`plot_panels`)**:
+   Panels can be arranged in any order and composed of any combination of specs. For instance, you can place isotopes on top, create multiple dedicated liquid panels, or place solids on their own separate subplot. The `"position": "left" | "right"` setting directs curves to primary left or secondary twin right axes.
 
-2. **Automatic Solid Weight Percent ($\text{wt}\%$) Conversion**:
+2. **Unified Color Palette Across Panels**:
+   Plot elements that relate to the same chemical entity share the exact same color throughout the entire figure. For example, `SO4` in porewater, `SO4` in reaction rates, and `d34S_SO4` in isotopes all automatically share the same color. Colors are assigned generically by cycling through `tab10` (or your chosen `colormap`).
+
+3. **Automatic Solid Weight Percent ($\text{wt}\%$) Conversion**:
    When `"units": ["wt"]` (or `"wt%"`) and `"relative_to": "Fe"` are defined, MANTIS uses sediment porosity ($\phi$) and dry grain density ($\rho_s = 2.6\text{ g/cm}^3$) to convert volumetric concentrations ($\text{mmol/L}$) to dry weight percent:
    $$\text{wt}\% = \frac{C_{\text{solid}} \cdot M_{\text{rel}} \cdot (1 - \phi)}{\rho_s \cdot 10^4}$$
+   When `relative_to` is omitted or set to `None`, units like `"pH"` or `"dimensionless"` are formatted as-is without appending any relative element.
 
-3. **Multi-Axis and Broken Axis Support**:
-   - Secondary solid mineral groups (e.g. iron minerals vs. sulfur minerals) or secondary isotope systems (e.g. $\delta^{34}\text{S}$ on left and $\delta^{18}\text{O}$ on right) automatically create twin axes.
+4. **Multi-Axis and Broken Axis Support**:
+   - Secondary solid mineral groups or secondary isotope systems (e.g. $\delta^{34}\text{S}$ on left and $\delta^{18}\text{O}$ on right) automatically create twin axes.
    - Broken axes can be declared cleanly via a 4-tuple `lim=(min1, max1, min2, max2)` to zoom into separate upper and lower isotope ranges.
 
-4. **Background Fills (`fill_only`)**:
+5. **Background Fills (`fill_only`)**:
    Physical parameters like bioturbation mixing ($D_{\text{bio}}$) or porosity can be plotted as shaded background areas behind lines by setting `"fill_only": True` (or `"fillonly": True`) and a negative `"zorder"`.
+
 
 
 ## Step 6: Running the Model & Producing Time-Lapse Videos

@@ -298,6 +298,15 @@ def parse_and_validate_species_dict(
             )
             sys.exit(1)
 
+        inc_ta = meta.get("include_in_TA", meta.get("include_in_ta"))
+        if inc_ta is not None and not isinstance(inc_ta, (int, float, np.number)):
+            print(
+                f"\n[MANTIS ERROR] Species '{sp_name}' has invalid 'include_in_TA': {inc_ta}.\n"
+                f"Expected a numerical factor (e.g., 1.0, 2.0, -1.0).\n",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
     # 2. Build full species dictionary with synthesized companions
     species_defs = copy.deepcopy(raw_species)
     synthesized_companions: Dict[str, Dict[str, Any]] = {}

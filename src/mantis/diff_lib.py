@@ -2471,21 +2471,93 @@ def compute_carbonate_speciation(c: Any, mp: Any) -> None:
     h_plus = (-b + np.sqrt(disc)) / (2.0 * a)
     h_plus = np.maximum(h_plus, 1e-14)
 
-    # Account for sulfide alkalinity if TS2 is present
-    Ka1_H2S = 10.0 ** (-float(getattr(mp, "pKa1_H2S", 7.0)))
-    ts2_raw = getattr(c, "TS2", None)
-    if ts2_raw is not None:
-        ts2_val = np.asarray(ts2_raw.value if hasattr(ts2_raw, "value") else ts2_raw, dtype=np.float64)
-        if np.any(ts2_val > 1e-12):
-            for _ in range(3):
-                hs_alk = ts2_val * (Ka1_H2S / (h_plus + Ka1_H2S))
-                ta_carb = np.maximum(ta_val - hs_alk, 1e-12)
-                a = ta_carb
-                b = K1 * (ta_carb - dic_val)
-                c_term = K1 * K2 * (ta_carb - 2.0 * dic_val)
-                disc = np.maximum(b**2 - 4.0 * a * c_term, 0.0)
-                h_plus = (-b + np.sqrt(disc)) / (2.0 * a)
-                h_plus = np.maximum(h_plus, 1e-14)
+    def _get_val_arr(obj: Any) -> np.ndarray:
+        if hasattr(obj, "value"):
+            return np.asarray(obj.value, dtype=np.float64)
+        return np.asarray(obj, dtype=np.float64)
+
+    # Check for declarative non-carbonate alkalinity contributors (include_in_TA)
+    species_defs = getattr(mp, "species_defs", None) or {}
+    non_carb_species = []
+    for sp_name, meta in species_defs.items():
+        if not isinstance(meta, dict):
+            continue
+        if "isotope_of" in meta:
+            continue
+        inc_val = meta.get("include_in_TA", meta.get("include_in_ta"))
+        if inc_val is not None:
+            try:
+                factor = float(inc_val)
+            except (ValueError, TypeError):
+                continue
+            if factor != 0.0:
+                non_carb_species.append((sp_name, meta, factor))
+
+    ta_carb = ta_val
+    ta_non_carb = np.zeros_like(ta_val, dtype=np.float64)
+
+    if non_carb_species:
+        for _ in range(4):
+            ta_non_carb = np.zeros_like(ta_val, dtype=np.float64)
+            ph_arr = -np.log10(np.maximum(h_plus, 1e-14))
+            eval_ctx_base = {
+                "np": np,
+                "Hplus": h_plus,
+                "pH": ph_arr,
+                "mp": mp,
+            }
+            for sp_name, meta, factor in non_carb_species:
+                conc = None
+                parent_raw = meta.get("equilibrium_of") or meta.get("alias_of")
+                if parent_raw:
+                    parent_name = str(parent_raw).split(".", 1)[0]
+                    if hasattr(c, parent_name):
+                        parent_val = _get_val_arr(getattr(c, parent_name))
+                        if "fraction" in meta:
+                            frac_ctx = dict(eval_ctx_base)
+                            if "constants" in meta and isinstance(meta["constants"], dict):
+                                for c_name, c_val in meta["constants"].items():
+                                    frac_ctx[c_name] = float(c_val)
+                                    if c_name.startswith("pK"):
+                                        frac_ctx[c_name[1:]] = 10.0 ** (-float(c_val))
+                            frac_expr = meta["fraction"]
+                            try:
+                                frac_val = eval(frac_expr, frac_ctx)
+                                conc = parent_val * frac_val
+                            except Exception:
+                                conc = None
+                        else:
+                            conc = parent_val
+                elif hasattr(c, sp_name):
+                    conc = _get_val_arr(getattr(c, sp_name))
+
+                if conc is not None:
+                    ta_non_carb = ta_non_carb + factor * conc
+
+            ta_carb = np.maximum(ta_val - ta_non_carb, 1e-12)
+            a = ta_carb
+            b = K1 * (ta_carb - dic_val)
+            c_term = K1 * K2 * (ta_carb - 2.0 * dic_val)
+            disc = np.maximum(b**2 - 4.0 * a * c_term, 0.0)
+            h_plus = (-b + np.sqrt(disc)) / (2.0 * a)
+            h_plus = np.maximum(h_plus, 1e-14)
+    else:
+        # Fallback for models without explicit include_in_TA if TS2 is present
+        Ka1_H2S = 10.0 ** (-float(getattr(mp, "pKa1_H2S", 7.0)))
+        ts2_raw = getattr(c, "TS2", None)
+        if ts2_raw is not None:
+            ts2_val = _get_val_arr(ts2_raw)
+            if np.any(ts2_val > 1e-12):
+                for _ in range(3):
+                    hs_alk = ts2_val * (Ka1_H2S / (h_plus + Ka1_H2S))
+                    ta_carb = np.maximum(ta_val - hs_alk, 1e-12)
+                    ta_non_carb = hs_alk
+                    a = ta_carb
+                    b = K1 * (ta_carb - dic_val)
+                    c_term = K1 * K2 * (ta_carb - 2.0 * dic_val)
+                    disc = np.maximum(b**2 - 4.0 * a * c_term, 0.0)
+                    h_plus = (-b + np.sqrt(disc)) / (2.0 * a)
+                    h_plus = np.maximum(h_plus, 1e-14)
 
     denom = h_plus**2 + K1 * h_plus + K1 * K2
     co3 = dic_val * (K1 * K2) / denom
@@ -2505,7 +2577,12 @@ def compute_carbonate_speciation(c: Any, mp: Any) -> None:
     _set_c_field("CO3", co3)
     _set_c_field("HCO3", hco3)
     _set_c_field("CO2", co2)
+    _set_c_field("ta_carb", ta_carb)
+    _set_c_field("ta_non_carb", ta_non_carb)
 
+    Ka1_H2S = 10.0 ** (-float(getattr(mp, "pKa1_H2S", 7.0)))
+    if "HS" in species_defs and "constants" in species_defs["HS"] and "pKa1" in species_defs["HS"]["constants"]:
+        Ka1_H2S = 10.0 ** (-float(species_defs["HS"]["constants"]["pKa1"]))
     c.hs_frac = Ka1_H2S / (h_plus + Ka1_H2S)
     c.h2s_frac = h_plus / (h_plus + Ka1_H2S)
     mp.hs_frac = c.hs_frac
