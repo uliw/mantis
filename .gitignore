@@ -28,8 +28,8 @@ CLAUDE.md
 .unison*
 
 # Exceptions
-!./examples/velde_et_al_2016/no_isotopes/run_velde_fast_reference.csv
-!./examples/velde_et_al_2016/with_isotopes/run_velde_fast_reference.csv
+!examples/velde_et_al_2016/no_isotopes/run_velde_fast_reference.csv
+!examples/velde_et_al_2016/with_isotopes/run_velde_fast_reference.csv
 
 # Virtual environments
 .venv
