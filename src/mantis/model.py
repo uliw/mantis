@@ -35,6 +35,7 @@ from mantis.diff_lib import (
     diff_coeff,
     get_l_mass,
     get_total_delta,
+    make_grid_from_sections,
     make_grid2,
     read_state,
     save_data,
@@ -126,7 +127,8 @@ class DiageneticModelResult:
             pdf_out = outfile or str(Path(caller_dir) / f"{self.mp.plot_name}.pdf")
             try:
                 plt_desc = pdn.load_layout_from_file(self.df, str(p_layout))
-                pdn.plot(self.df, self.mp.max_depth, outfile=pdf_out, show=False, plot_description=plt_desc)
+                display_len = getattr(self.mp, "display_length", None) or getattr(self.mp, "max_depth", 1.0)
+                pdn.plot(self.df, display_len, outfile=pdf_out, show=False, plot_description=plt_desc)
                 return pdf_out
             except Exception as e:
                 print(f"[DiageneticModel] Plot rendering skipped or failed: {e}")
@@ -412,6 +414,7 @@ class DiageneticModel:
             else:
                 self.p_dict[key] = self._convert_value(val)
 
+        self.mp.update(self.p_dict)
         return self
 
     def parse_cli_args(self, args: Optional[List[str]] = None) -> None:
@@ -795,18 +798,10 @@ class DiageneticModel:
         self.mp._caller_dir = str(self.base_dir)
 
         # Fallback defaults for geometry if not specified by user configuration
-        if not hasattr(self.mp, "max_depth"):
-            self.mp.max_depth = 2.0
-        if not hasattr(self.mp, "display_length"):
-            self.mp.display_length = self.mp.max_depth
-        if not hasattr(self.mp, "initial_spacing"):
-            self.mp.initial_spacing = 0.0001
-        if not hasattr(self.mp, "reaction_zone_spacing"):
-            self.mp.reaction_zone_spacing = 0.0001
-        if not hasattr(self.mp, "max_spacing"):
-            self.mp.max_spacing = 0.1
-        if not hasattr(self.mp, "reaction_zone"):
-            self.mp.reaction_zone = (0.0, 0.1)
+        if not hasattr(self.mp, "grid_setup") or self.mp.grid_setup is None:
+            self.mp.grid_setup = [
+                [0.0, 0.5, 0.0001, 0.01],
+            ]
 
         # Fallback defaults for environmental and transport parameters
         if not hasattr(self.mp, "temp"):
@@ -1083,16 +1078,13 @@ class DiageneticModel:
                 self.mp.use_numerical_jacobian = False
 
         # 6. Grid generation
-        mesh, z = make_grid2(
-            self.mp.max_depth,
-            self.mp.initial_spacing,
-            self.mp.reaction_zone_spacing,
-            self.mp.max_spacing,
-            self.mp.reaction_zone,
-        )
+        mesh, z = make_grid_from_sections(self.mp.grid_setup)
         self.mp.mesh = mesh
         self.mp.z = z
         self.mp.grid_points = len(z)
+        self.mp.max_depth = float(mesh.faceCoordinates[-1])
+        if not hasattr(self.mp, "display_length") or self.mp.display_length is None:
+            self.mp.display_length = self.mp.max_depth
         if isinstance(self.mp.phi, dict):
             from mantis.diff_lib import compute_porosity_profile
             phi_top = float(self.mp.phi.get("top", 0.9))

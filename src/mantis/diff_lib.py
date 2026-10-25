@@ -1569,8 +1569,8 @@ def check_reactant_coexistence(
                 f"  Peak cell flux fraction: {peak_cell_flux_frac * 100:.1f}%\n"
                 f"  Local spatial Damköhler (Da_II): {da_ii_str}\n"
                 f"  Reasons: {'; '.join(reasons)}\n"
-                f"  --> Action recommended: In make_grid2(), refine the mesh around z = [{z_front_min * 100:.2f}, {z_front_max * 100:.2f}] cm "
-                f"to reaction_zone_spacing <= {target_dz * 1e3:.2f} mm."
+                f"  --> Action recommended: In grid_setup, refine the mesh around z = [{z_front_min * 100:.4f}, {z_front_max * 100:.4f}] cm "
+                f"to spacing <= {target_dz * 1e3:.4f} mm."
             )
             warnings_found.append(msg)
             if verbose:
@@ -1685,6 +1685,254 @@ def get_time_units(t):
         t = Q_(f"{t} seconds").to("kyear")
 
     return t
+
+
+def _to_meters(val: Any) -> float:
+    if isinstance(val, (int, float)):
+        return float(val)
+    if isinstance(val, str):
+        try:
+            return float(val)
+        except ValueError:
+            import pint
+
+            ureg = pint.UnitRegistry()
+            q = ureg(val)
+            return float(q.to("meter").magnitude)
+    if hasattr(val, "to"):
+        return float(val.to("meter").magnitude)
+    return float(val)
+
+
+def _geometric_progression_section(z0: float, z1: float, dz0: float, dz1: float) -> np.ndarray:
+    L = z1 - z0
+    if np.isclose(dz0, dz1, rtol=1e-5):
+        n = max(1, int(np.round(L / dz0)))
+        return np.full(n, L / n, dtype=np.float64)
+
+    from scipy.optimize import root_scalar
+
+    def f(n):
+        if n <= 1:
+            return -L
+        r = (dz1 / dz0) ** (1.0 / (n - 1))
+        if np.isclose(r, 1.0):
+            return dz0 * n - L
+        return dz0 * (r**n - 1.0) / (r - 1.0) - L
+
+    n_min = 2
+    n_max = max(10, int(np.ceil(L / min(dz0, dz1) * 2)))
+    val_min = f(n_min)
+    val_max = f(n_max)
+
+    if val_min * val_max > 0:
+        n = max(2, int(np.round(2 * L / (dz0 + dz1))))
+    else:
+        sol = root_scalar(f, bracket=[n_min, n_max], method="brentq")
+        n = max(2, int(np.round(sol.root)))
+
+    def f_r(r):
+        if np.isclose(r, 1.0):
+            return dz0 * n - L
+        return dz0 * (r**n - 1.0) / (r - 1.0) - L
+
+    try:
+        bracket_r = [1.0000001, 10.0] if dz1 > dz0 else [0.01, 0.9999999]
+        r_sol = root_scalar(f_r, bracket=bracket_r, method="brentq").root
+        dx = dz0 * (r_sol ** np.arange(n))
+        dx = dx * (L / np.sum(dx))
+    except Exception:
+        dx = np.geomspace(dz0, dz1, n)
+        dx = dx * (L / np.sum(dx))
+    return np.asarray(dx, dtype=np.float64)
+
+
+def make_grid_from_sections(
+    sections: Union[List, Tuple, np.ndarray],
+    smoothing: str = "geometric",
+    smooth_discontinuities: bool = True,
+    verbose: bool = True,
+) -> Tuple[Mesh1D, np.ndarray]:
+    """Construct a 1D non-uniform mesh from one or more contiguous sections.
+
+    Each section is defined as:
+        [start, stop, initial_dz, final_dz]
+
+    Args:
+        sections: List of sections, where each section is [start, stop, initial_dz, final_dz].
+            Values can be numbers (meters) or strings with physical units (e.g. '0 cm', '1 mm', '50 um').
+        smoothing: 'geometric' (default) for exact geometric progression per section,
+            or 'spline' for monotonic PCHIP spline interpolation across knots.
+        smooth_discontinuities: If True (default), automatically blends across any boundary
+            where final_dz of section k != initial_dz of section k+1.
+        verbose: If True, prints grid summary.
+
+    Returns:
+        tuple (mesh, z_centers):
+            mesh: A Mesh1D object with cell faces, volumes, and coordinates.
+            z_centers: A 1D numpy array of cell center coordinates.
+    """
+    if not isinstance(sections, (list, tuple, np.ndarray)) or len(sections) == 0:
+        raise ValueError(
+            "sections must be a non-empty list, tuple, or array of [start, stop, initial_dz, final_dz]."
+        )
+
+    cleaned = []
+    for i, sec in enumerate(sections):
+        if not isinstance(sec, (list, tuple, np.ndarray)) or len(sec) != 4:
+            raise ValueError(
+                f"Section {i} must have exactly 4 elements: [start, stop, initial_dz, final_dz], got {sec}."
+            )
+        z0 = _to_meters(sec[0])
+        z1 = _to_meters(sec[1])
+        dz0 = _to_meters(sec[2])
+        dz1 = _to_meters(sec[3])
+        if z1 <= z0:
+            raise ValueError(
+                f"Section {i}: stop ({z1} m) must be strictly greater than start ({z0} m)."
+            )
+        if dz0 <= 0 or dz1 <= 0:
+            raise ValueError(
+                f"Section {i}: cell spacings must be positive (initial_dz={dz0}, final_dz={dz1})."
+            )
+        if i > 0:
+            prev_z1 = cleaned[-1][1]
+            if not np.isclose(z0, prev_z1, atol=1e-12, rtol=1e-8):
+                raise ValueError(
+                    f"Section {i} start ({z0} m) does not match previous section stop ({prev_z1} m). "
+                    "Sections must be contiguous."
+                )
+            z0 = prev_z1
+        cleaned.append([z0, z1, dz0, dz1])
+
+    if len(cleaned) == 1 and np.isclose(cleaned[0][2], cleaned[0][3], rtol=1e-5):
+        L = cleaned[0][1] - cleaned[0][0]
+        dz = cleaned[0][2]
+        n = max(1, int(np.round(L / dz)))
+        actual_dz = L / n
+        dx = np.full(n, actual_dz, dtype=np.float64)
+        if verbose:
+            print(f"Grid generated with {n} points.")
+        mesh = Mesh1D(dx=dx)
+        return mesh, mesh.cellCenters[0]
+
+    if smoothing == "spline":
+        from scipy.interpolate import PchipInterpolator
+        from scipy.integrate import cumulative_trapezoid
+
+        knots_z = []
+        knots_log_dz = []
+        for i, (z0, z1, dz0, dz1) in enumerate(cleaned):
+            if i == 0:
+                knots_z.append(z0)
+                knots_log_dz.append(np.log(dz0))
+            else:
+                prev_dz1 = cleaned[i - 1][3]
+                if not np.isclose(prev_dz1, dz0, rtol=1e-3) and smooth_discontinuities:
+                    delta = min(
+                        (cleaned[i - 1][1] - cleaned[i - 1][0]) * 0.25,
+                        (z1 - z0) * 0.25,
+                        max(prev_dz1, dz0) * 4.0,
+                    )
+                    if delta > 1e-7:
+                        z_left = z0 - delta
+                        z_right = z0 + delta
+                        if len(knots_z) > 0 and z_left > knots_z[-1] + 1e-7:
+                            knots_z.append(z_left)
+                            knots_log_dz.append(np.log(prev_dz1))
+                        knots_z.append(z0)
+                        knots_log_dz.append(0.5 * (np.log(prev_dz1) + np.log(dz0)))
+                        knots_z.append(z_right)
+                        knots_log_dz.append(np.log(dz0))
+                    else:
+                        knots_z.append(z0)
+                        knots_log_dz.append(0.5 * (np.log(prev_dz1) + np.log(dz0)))
+                else:
+                    knots_z.append(z0)
+                    knots_log_dz.append(np.log(dz0))
+            if i == len(cleaned) - 1:
+                knots_z.append(z1)
+                knots_log_dz.append(np.log(dz1))
+            elif not np.isclose(dz0, dz1, rtol=1e-4):
+                knots_z.append(z1)
+                knots_log_dz.append(np.log(dz1))
+
+        knots_z = np.array(knots_z, dtype=np.float64)
+        knots_log_dz = np.array(knots_log_dz, dtype=np.float64)
+        uidx = np.concatenate(([True], np.diff(knots_z) > 1e-10))
+        knots_z = knots_z[uidx]
+        knots_log_dz = knots_log_dz[uidx]
+
+        if len(knots_z) == 1:
+            log_interp = lambda z: np.full_like(z, knots_log_dz[0])
+        elif len(knots_z) == 2:
+            log_interp = lambda z: knots_log_dz[0] + (z - knots_z[0]) / (
+                knots_z[1] - knots_z[0]
+            ) * (knots_log_dz[1] - knots_log_dz[0])
+        else:
+            pchip = PchipInterpolator(knots_z, knots_log_dz)
+            log_interp = lambda z: pchip(z)
+
+        all_faces = [cleaned[0][0]]
+        for z0, z1, dz0, dz1 in cleaned:
+            L_sec = z1 - z0
+            min_dz = min(dz0, dz1)
+            n_samples = max(200, min(20000, int(np.ceil(L_sec / min_dz * 2))))
+            z_eval = np.linspace(z0, z1, n_samples)
+            dz_eval = np.exp(log_interp(z_eval))
+            rho = 1.0 / dz_eval
+            xi = np.concatenate(([0.0], cumulative_trapezoid(rho, z_eval)))
+            n_cells = max(1, int(np.round(xi[-1])))
+            if n_cells == 1:
+                all_faces.append(z1)
+            else:
+                xi_norm = xi / xi[-1] * n_cells
+                sec_faces = np.interp(np.arange(1, n_cells + 1), xi_norm, z_eval)
+                sec_faces[-1] = z1
+                all_faces.extend(sec_faces.tolist())
+        faces = np.array(all_faces, dtype=np.float64)
+        dx = np.diff(faces)
+    else:
+        # Exact geometric progression per section with boundary smoothing
+        secs_to_generate = []
+        for i, (z0, z1, dz0, dz1) in enumerate(cleaned):
+            if i > 0 and smooth_discontinuities:
+                prev_z0, prev_z1, prev_dz0, prev_dz1 = secs_to_generate[-1]
+                if not np.isclose(prev_dz1, dz0, rtol=1e-3):
+                    delta = min(
+                        (prev_z1 - prev_z0) * 0.25,
+                        (z1 - z0) * 0.25,
+                        max(prev_dz1, dz0) * 4.0,
+                    )
+                    if delta > 1e-7:
+                        secs_to_generate[-1][1] = z0 - delta
+                        secs_to_generate.append([z0 - delta, z0 + delta, prev_dz1, dz0])
+                        z0 = z0 + delta
+            secs_to_generate.append([z0, z1, dz0, dz1])
+
+        all_dx = []
+        for sec in secs_to_generate:
+            dx_sec = _geometric_progression_section(*sec)
+            all_dx.extend(dx_sec.tolist())
+        dx = np.asarray(all_dx, dtype=np.float64)
+
+    N = len(dx)
+    if verbose:
+        print(f"Grid generated with {N} points.")
+
+    mesh = Mesh1D(dx=dx)
+    z_centers = mesh.cellCenters[0]
+    return mesh, z_centers
+
+    faces = np.array(all_faces, dtype=np.float64)
+    dx = np.diff(faces)
+    N = len(dx)
+    if verbose:
+        print(f"Grid generated with {N} points.")
+
+    mesh = Mesh1D(dx=dx)
+    z_centers = mesh.cellCenters[0]
+    return mesh, z_centers
 
 
 def make_grid2(

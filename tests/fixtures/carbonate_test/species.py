@@ -185,7 +185,7 @@ species = {
 # =============================================================================
 # Unified Speciation & Phase Partitioning
 # =============================================================================
-speciation: Dict[str, Dict[str, Any]] = {
+speciation = {
     "carbonate_system": {
         "type": "carbonate_system",
         "primary": {"dic": "DIC", "ta": "TA"},

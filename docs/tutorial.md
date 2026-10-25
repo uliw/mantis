@@ -741,11 +741,12 @@ if __name__ == "__main__":
             "depth": "0 cm",
         },
 
-        # Spatial grid & reaction zone refinement (optional, defaults provided)
-        initial_spacing="0.1 mm",      # Spacing at sediment-water interface (z=0)
-        reaction_zone=("0.1 cm", "1.0 cm"), # Critical depth window of sharp redox fronts
-        reaction_zone_spacing="0.05 mm",    # Dense, uniform spacing in the reaction zone
-        max_spacing="1.0 cm",          # Coarser spacing in deep sediment
+        # Spatial grid setup (multi-section mesh defined as [start, stop, initial_dz, final_dz])
+        grid_setup=[
+            ["0 cm", "0.1 cm", "0.1 mm", "0.05 mm"],    # Surface refinement section
+            ["0.1 cm", "1.0 cm", "0.05 mm", "0.05 mm"], # Uniform high-resolution reaction zone
+            ["1.0 cm", "50 cm", "0.05 mm", "1.0 cm"],   # Coarsening into deep sediment
+        ],
     )
 
     # 3. Allow CLI overrides (e.g. running --video from the terminal)
@@ -847,18 +848,48 @@ Alternatively, you can specify DBL parameters for individual species in `species
 ```
 
 
-### Spatial Grid Configuration & Reaction Zone Resolution
+### Spatial Grid Configuration via Multi-Section `grid_setup`
 
-Diagenetic models must resolve spatial scales ranging from sub-millimeter oxygen penetration depths to deep sediment columns spanning decimeters to hundreds of meters. A uniform fine grid across a 50-meter column would require millions of cells and slow down calculations unnecessarily.
+Diagenetic models must resolve spatial scales ranging from sub-millimeter oxygen penetration depths to deep sediment columns spanning decimeters to hundreds of meters. A uniform fine grid across a deep column would require tens of thousands of cells and slow down calculations unnecessarily.
 
-MANTIS solves this using an adaptive geometric-mesh builder (`make_grid2`) that refines where steep gradients occur and expands into the deep sediment.
+MANTIS provides a flexible multi-section grid generator (`make_grid_from_sections`) declared via the `grid_setup` configuration parameter.
 
-### 1. How Grid Generation Works (`make_grid2`)
-The grid structure is divided into four seamless stages from the sediment surface to depth:
-1. **Surface Section**: Starts at `initial_spacing` and geometrically refines cells downward toward `reaction_zone[0]`.
-2. **Reaction Zone Section**: Maintains a constant, ultra-fine cell size (`reaction_zone_spacing`) across the depth interval `reaction_zone = (z_start, z_end)`.
-3. **Coarsening Section**: Below the reaction zone, cell size expands geometrically by factor $r = 1.05$ per cell.
-4. **Deep Uniform Section**: Once cell size reaches `max_spacing`, the remainder of the domain down to `max_depth` uses uniform large cells.
+### 1. How Sectional Grid Setup Works
+A model's spatial domain is composed of one or more contiguous zones, each specified as:
+```python
+[start, stop, initial_dz, final_dz]
+```
+where physical units (e.g., `'cm'`, `'mm'`, `'um'`, `'m'`) are automatically converted into SI meters via Pint.
+
+- **`start` and `stop`**: The spatial interval spanned by the zone. Sections must be contiguous ($start_{k} = stop_{k-1}$).
+- **`initial_dz` and `final_dz`**: Spacing constraints at the zone boundaries. If `initial_dz == final_dz`, the zone uses uniform cell spacing. If they differ, the zone automatically generates a smooth geometric progression.
+- **Cumulative Domain Length (`max_depth`)**: The total column depth is defined by the cumulative length of all sections (the `stop` position of the final section). There is no need to configure a separate `max_depth` parameter.
+- **Display Length**: The `display_length` plotting parameter automatically defaults to the total grid length unless explicitly set to a smaller viewing window.
+
+#### Example: The Velde et al. (2016) 3-Zone Mesh
+```python
+grid_setup = [
+    ["0 cm", "0.1 cm", "0.1 mm", "0.05 mm"],    # Zone 1: Surface refinement towards reaction zone
+    ["0.1 cm", "1.0 cm", "0.05 mm", "0.05 mm"], # Zone 2: Uniform high-resolution reaction zone
+    ["1.0 cm", "50 cm", "0.05 mm", "1.0 cm"],   # Zone 3: Remainder expanding into deep sediment
+]
+```
+
+#### Example: Complex Multi-Section Profiling
+You can specify arbitrary numbers of zones to refine around multiple reaction fronts, sediment-water interfaces, or ash horizons:
+```python
+grid_setup = [
+    ["0 cm", "1 cm", "50 um", "1 mm"],     # Surface zone
+    ["1 cm", "5 cm", "1 mm", "5 mm"],      # Intermediate zone
+    ["5 cm", "50 cm", "5 mm", "1 cm"],     # Deep zone
+    ["50 cm", "52 cm", "1 cm", "0.1 mm"],  # Deep methane-sulfate transition zone
+]
+```
+
+#### Boundary Continuity and Smoothing
+- **Continuous Boundaries**: When $final\_dz_{k-1} = initial\_dz_k$, cell sizes transition continuously without step jumps.
+- **Step Discontinuities**: If a user defines mismatched boundary values (e.g. $1\text{ mm}$ on the left and $5\text{ mm}$ on the right), MANTIS automatically blends the transition across a narrow boundary window to avoid numerical truncation artifacts.
+- **Exact Section Faces**: All section boundary coordinates ($0\text{ cm}$, $1\text{ cm}$, $5\text{ cm}$, etc.) land exactly on cell face boundaries in the resulting mesh.
 
 #### 2. The Geochemical Importance of Reaction Zone Resolution
 Why does grid spacing in the reaction zone matter so much?
@@ -881,14 +912,17 @@ MANTIS automatically runs a post-simulation front diagnostic (`check_reactant_co
   Estimated physical front width: 0.01 mm
   Front cell span (N_cells): 6 cell(s)
   Reasons: Local grid cell dz (0.10 mm) > 2x physical front width (0.01 mm)
-  --> Action recommended: In make_grid2(), refine the mesh around z = [0.19, 0.23] cm to reaction_zone_spacing <= 0.01 mm.
+  --> Action recommended: In grid_setup, refine the mesh around z = [0.19, 0.23] cm to spacing <= 0.01 mm.
 ```
 
-When you see this warning, simply update your driver script's `model.configure()` with the recommended reaction zone window and spacing:
+When you see this warning, simply update your driver script's `grid_setup` in `model.configure()` with a refined section over the indicated depth window:
 ```python
 model.configure(
-    reaction_zone=("0.15 cm", "0.30 cm"),
-    reaction_zone_spacing="0.01 mm",
+    grid_setup=[
+        ["0 cm", "0.15 cm", "0.1 mm", "0.01 mm"],
+        ["0.15 cm", "0.30 cm", "0.01 mm", "0.01 mm"],
+        ["0.30 cm", "50 cm", "0.01 mm", "1.0 cm"],
+    ],
 )
 ```
 

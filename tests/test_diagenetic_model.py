@@ -52,8 +52,7 @@ def test_diagenetic_model_setup(tmp_path):
         experiment="test_setup_exp",
     )
     model.configure(
-        max_depth="0.1 m",
-        display_length="0.1 m",
+        grid_setup=[["0 cm", "10 cm", "1 mm", "5 mm"]],
         t_end="1 day",
         phi=0.8,
         bioirrigation={"BI0": 0.0, "depth": "0 cm"},
@@ -314,8 +313,7 @@ def test_all_species_exported_and_saved(tmp_path):
         experiment="test_export_exp",
     )
     model.configure(
-        max_depth="0.1 m",
-        display_length="0.1 m",
+        grid_setup=[["0 cm", "10 cm", "1 mm", "5 mm"]],
         t_end="1 day",
         phi=0.8,
         bioturbation={"BT0": "10 cm^2/year", "profile": "exponential", "attenuation": "3 cm"},
