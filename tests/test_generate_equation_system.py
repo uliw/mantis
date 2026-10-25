@@ -13,7 +13,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 EXP_DIR = BASE_DIR / "examples" / "velde_et_al_2016" / "with_isotopes"
 SPECIES_FILE = EXP_DIR / "species.py"
 CONSTANTS_FILE = EXP_DIR / "kinetic_constants_fast.py"
-LIMITERS_FILE = EXP_DIR / "fes_reactions.py"
+LIMITERS_FILE = EXP_DIR / "reactions.py"
 
 
 def test_validator_loading():
