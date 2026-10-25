@@ -5,6 +5,53 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-10-25
+
+### Added
+
+- **Declarative Plotting Layout & Shared Palette System (`plot_data_new.py`)**:
+  - Implemented a clean declarative layout schema (`panels` specification) with automated shared color palettes (`_build_layout_palette`), ensuring consistent colors across related species, equilibrium fractions, and isotopic delta profiles.
+  - Added automatic unit conversion of solid-phase concentrations to dry weight percent ($\text{wt}\%$) with custom molecular weight mapping.
+  - Added native multi-axis, top/bottom secondary axes, broken-axis scales with visual zig-zag indicators, and background shading for physical parameters (porosity, temperature, bio-diffusion).
+- **Unified Speciation Framework & Schema Validation (`species_parser.py`)**:
+  - Introduced a unified top-level `speciation` dictionary in `species.py` consolidating marine carbonate chemistry, acid-base equilibria, and phase partitioning into declarative blocks.
+  - Added strict declarative schema parser (`src/mantis/species_parser.py`) validating species definitions, boundary condition formatting, and isotope standards.
+  - Added `include_in_TA` attribute to control which weak-acid species contribute to Total Alkalinity (TA).
+  - Automated companion isotope species synthesis from `isotope_standards` keyed by delta notation (e.g., `d34S`).
+- **Multi-Section Spatial Grid Setup (`grid_setup`)**:
+  - Implemented `make_grid_from_sections` and the `grid_setup` parameter in `DiageneticModel`, allowing users to define arbitrary contiguous sediment layers with individual resolution, boundaries, and expansion ratios.
+- **Sediment Age & Physical Transport Calculations**:
+  - Added steady-state mean sediment age profile computation (`compute_sediment_age()`) using 1D advective-diffusive transport equations.
+  - Added support for exponential biodiffusion profiles (`compute_exponential_db()`) alongside sigmoidal and Gaussian models.
+  - Added support for diffusive boundary layers (DBL) at the sediment-water interface.
+  - Added explicit Free and Total pH scale support and conversions in `seawater_carbonate.py`.
+- **Solver Stability & Convergence**:
+  - Added fractional trust-region step-limiting and non-negativity safeguards during Newton-Raphson iterations.
+  - Added backtracking line search with weighted residual norms (`wrms`) for robust convergence across stiff geochemical fronts.
+  - Improved handling of array-valued kinetic rate constants.
+- **Benchmarks & Modular Examples**:
+  - Reorganized `examples/velde_et_al_2016` into modular `no_isotopes/` and `with_isotopes/` subdirectories with declarative plot layouts.
+  - Added regression test suite and 1,000-year reference datasets (`test_velde_simulation_benchmark.py`).
+
+### Changed
+
+- Replaced legacy single-reaction-zone grid configuration parameters (`initial_spacing`, `reaction_zone_spacing`) with flexible multi-section `grid_setup`.
+- Renamed default reactions configuration file in tests and examples to `reactions.py`.
+- Updated tutorial documentation with declarative layouts, sectional grid generation, and DBL physics.
+
+### Removed
+
+- Removed legacy `docs/carbonate_chemistry.org` and `docs/org-file.org` in favor of updated tutorial and documentation.
+- Removed deprecated legacy speciation syntax and obsolete plot layout scripts.
+
+## [0.3.2] - 2026-10-19
+
+- Fixed carbonate chemistry unit tests to reference tracked fixtures directory without modifying process working directory.
+
+## [0.3.1] - 2026-10-19
+
+- Added `__future__.annotations` and `Sequence` typing imports for Python 3.12 CI compatibility.
+
 ## [0.3.0] - 2026-10-19
 
 ### Added
