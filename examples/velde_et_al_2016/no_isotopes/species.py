@@ -144,7 +144,7 @@ species = {
 # =============================================================================
 # Unified Speciation & Phase Partitioning
 # =============================================================================
-speciation: Dict[str, Dict[str, Any]] = {
+speciation = {
     "sulfide_acid_base": {
         "type": "acid_base",
         "primary": "TS2",

@@ -22,7 +22,8 @@ if __name__ == "__main__":
     # 1. Initialize model (automatically detects species.py, reactions, etc. in same dir,
     # and derives experiment name from the script filename 'run_velde_model')
     model = DiageneticModel(
-        reactions="fes_reactions.py",
+        reactions="reactions.py",
+        equations="equations.py",
         constants="kinetic_constants_fast.py",
         layout="plot_layout.py",
     )
@@ -30,8 +31,11 @@ if __name__ == "__main__":
     # 2. Configure environmental and run parameters
     model.configure(
         # video_dt = "1 year",
-        max_depth="0.5 m",
-        display_length="0.5 m",
+        grid_setup=[
+            ["0 cm", "0.1 cm", "0.1 mm", "0.05 mm"],
+            ["0.1 cm", "4.0 cm", "0.05 mm", "0.05 mm"],
+            ["4.0 cm", "50 cm", "0.05 mm", "1.0 cm"],
+        ],
         t_end="2 kyr",
         dt_max="1 year",
         temp=[10.0, 10.1],
@@ -48,10 +52,6 @@ if __name__ == "__main__":
             "BI0": 0.0,  # explicitly disabled
             "depth": "0 cm",
         },
-        reaction_zone=("0.1 cm", "4.0 cm"), # Critical depth window of sharp redox fronts
-        reaction_zone_spacing="0.05 mm",    # Dense, uniform spacing in the reaction zone
-        initial_spacing="0.1 mm",
-        max_spacing="10 cm",
     )
 
     # Allow CLI argument overrides (e.g. --video, --solver-tol)

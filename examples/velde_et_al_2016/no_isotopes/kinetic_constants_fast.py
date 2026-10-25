@@ -59,7 +59,6 @@ def get_reaction_constants(
         ],  # check with halevy
         "FeS_O2": [1e7, "cm^3/(umol*year)", "m^3/(mol*second)"],
         "Fe2_O2": [1e7, "cm^3/(umol*year)", "m^3/(mol*second)"],
-        # "Fe2p_ox": [1e73, "cm^3/(umol*year)", "m^3/(mol*second)"],
         # Iron sulfide reactions after Velde at eal 2016
         "FeS_isp": [
             1e4,
