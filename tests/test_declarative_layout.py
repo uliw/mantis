@@ -588,5 +588,34 @@ plot_panels = [
         assert os.path.getsize(pdf_path) > 0
 
 
+def test_z_scale_and_z_lim_options(sample_df):
+    with tempfile.TemporaryDirectory() as tmpdir:
+        layout_content = """
+z_scale = "linear"
+z_lim = (0.05, 0.8)
+
+liquid_species = {
+    "species": ["SO4"],
+}
+"""
+        layout_path = os.path.join(tmpdir, "plot_layout.py")
+        with open(layout_path, "w") as f:
+            f.write(layout_content)
+
+        plt_desc = load_layout_from_file(sample_df, layout_path)
+        first_sp = plt_desc["first_subplot"]
+        assert first_sp["xscale"] == "linear"
+        assert first_sp["xlim"] == (0.05, 0.8)
+
+        # Verify plot application sets axes limits
+        fig, axes = plot(sample_df, display_length=1.0, outfile=None, show=False, plot_description=plt_desc)
+        ax = axes[0]
+        assert ax.get_xscale() == "linear"
+        xlim = ax.get_xlim()
+        assert pytest.approx(xlim[0], rel=1e-3) == 0.05
+        assert pytest.approx(xlim[1], rel=1e-3) == 0.8
+
+
+
 
 

@@ -307,14 +307,22 @@ def plot(
         # Apply arbitrary matplotlib options
         _apply_all_options(ax_main, right_axes, subplot_config)
 
-    # Adjust x-axis length for all plots that don't have an explicit xlim
+    # Adjust x-axis length for all plots that don't have an explicit xlim or have None boundary
     for idx, (subplot_key, subplot_config) in enumerate(valid_subplots.items()):
-        if "xlim" not in subplot_config:
-            ax_main = ax_objects[idx]
+        ax_main = ax_objects[idx]
+        cfg_xlim = subplot_config.get("xlim")
+        if cfg_xlim is None:
             if ax_main.get_xscale() == "log":
                 ax_main.set_xlim(1e-4, display_length)
             else:
                 ax_main.set_xlim(0, display_length)
+        elif isinstance(cfg_xlim, (tuple, list)) and len(cfg_xlim) == 2:
+            x_min, x_max = cfg_xlim
+            if x_min is None:
+                x_min = 1e-4 if ax_main.get_xscale() == "log" else 0.0
+            if x_max is None:
+                x_max = display_length
+            ax_main.set_xlim(x_min, x_max)
 
     # Determine if constrained layout is active
     is_constrained = False
@@ -1385,15 +1393,27 @@ def compile_declarative_layout(module, df, layout_path, measured_data_path=None)
     top-level declarations ('liquid_species', 'solid_species', etc.).
     """
     # 1. Global settings
-    depth_scale = getattr(module, "depth_scale", "log")
+    # Support z_scale, depth_scale, or zscale
+    depth_scale = getattr(
+        module,
+        "z_scale",
+        getattr(module, "depth_scale", getattr(module, "zscale", "log")),
+    )
     if str(depth_scale).lower() in ("lin", "linear"):
         depth_scale = "linear"
     else:
         depth_scale = "log"
 
-    depth_lim = getattr(module, "depth_lim", None)
+    # Support z_lim, depth_lim, or zlim
+    depth_lim = getattr(
+        module,
+        "z_lim",
+        getattr(module, "depth_lim", getattr(module, "zlim", None)),
+    )
     if depth_lim is None and depth_scale == "log":
         depth_lim = (1e-4, None)
+    elif depth_lim is not None and isinstance(depth_lim, (list, tuple)) and len(depth_lim) == 2:
+        depth_lim = tuple(depth_lim)
 
     fig_width = getattr(module, "fig_width", 8)
     xaxis = [df.z, "Depth [m]"]
