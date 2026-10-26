@@ -423,6 +423,148 @@ def test_uncoupled_fixed_ph_selects_analytical_jacobian(tmp_path):
     assert model.mp.use_numerical_jacobian is False
 
 
+def test_missing_ph_warning_only_when_reactions_require_ph(tmp_path, capsys):
+    """Verify that models without pH only fail/warn if reactions or species actually depend on pH."""
+    # 1. Model that does NOT use pH (like nbk/start_here)
+    start_here_dir = BASE_DIR / "nbk" / "start_here"
+    if (start_here_dir / "species.py").exists():
+        eq_file = tmp_path / "test_no_ph_eq.py"
+        model_no_ph = DiageneticModel(
+            base_dir=start_here_dir,
+            species="species.py",
+            reactions="reactions.py",
+            constants="kinetic_constants.py",
+            equations=eq_file,
+        )
+        # Should set up cleanly without error even though pH is not defined
+        model_no_ph.setup()
+        assert model_no_ph.mp.pH is None
+
+    # 2. Model that DOES use pH (Velde 2016), but with pH omitted
+    # Create temporary species without Hplus
+    tmp_species = tmp_path / "species.py"
+    tmp_reactions = tmp_path / "reactions.py"
+    tmp_constants = tmp_path / "kinetic_constants.py"
+    
+    # Read Velde species and remove Hplus definition
+    with open(EXP_DIR / "species.py") as f:
+        sp_content = f.read()
+    # Write a species file with acid_base speciation that depends on Hplus/pH
+    with open(tmp_species, "w") as f:
+        f.write(
+            "species = {\n"
+            "    'TS2': {'phase': 'liquid', 'include': True, 'bc_top': {'Dirichlet': 0.0}},\n"
+            "    'HS': {'phase': 'liquid', 'include': False},\n"
+            "}\n"
+            "speciation = {\n"
+            "    'sulfide_acid_base': {\n"
+            "        'type': 'acid_base',\n"
+            "        'primary': 'TS2',\n"
+            "        'species': {\n"
+            "            'HS': {'phase': 'liquid', 'fraction': 'Ka1 / (Hplus + Ka1)'},\n"
+            "        },\n"
+            "    },\n"
+            "}\n"
+        )
+    with open(tmp_reactions, "w") as f:
+        f.write(
+            "reactions = [{'reaction_name': 'r1', 'reaction': '1 HS -> 1 TS2', 'k_value_name': 'k1'}]\n"
+        )
+    with open(tmp_constants, "w") as f:
+        f.write(
+            "def get_reaction_constants(pH, phi, k_values={}):\n"
+            "    return {}, {'k1': 1.0}\n"
+        )
+
+    model_needs_ph = DiageneticModel(
+        base_dir=tmp_path,
+        species=tmp_species,
+        reactions=tmp_reactions,
+        constants=tmp_constants,
+        equations=tmp_path / "eq.py",
+    )
+    with pytest.raises(SystemExit) as exc_info:
+        model_needs_ph.setup()
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert "[MANTIS ERROR] pH is not defined in the model, but is required" in captured.err
+
+
+def test_purely_diffusive_model_reactions_none(tmp_path):
+    """Verify that setting reactions=None runs purely diffusive transport without requiring reactions.py or constants."""
+    sp_file = tmp_path / "species.py"
+    sp_file.write_text(
+        "species = {\n"
+        "    'Tracer': {\n"
+        "        'phase': 'liquid',\n"
+        "        'include': True,\n"
+        "        'formula': 'Tracer',\n"
+        "        'diffusion': {'m0': 5.0, 'm1': 0.2},\n"
+        "        'bc_top': {'Dirichlet': 10.0},\n"
+        "        'bc_bottom': {'Neumann': 0.0},\n"
+        "    }\n"
+        "}\n"
+    )
+    model = DiageneticModel(
+        base_dir=tmp_path,
+        species=sp_file,
+        reactions=None,
+        constants=None,
+    )
+    assert model.is_diffusion_only is True
+    model.configure(
+        grid_setup=[["0 cm", "20 cm", "2 mm", "2 mm"]],
+        t_end="2 days",
+        dt_max="1 day",
+        phi=0.8,
+    )
+    res = model.run()
+    assert res is not None
+    # Verify that tracer has diffused into top cells and concentration decreases with depth
+    tracer_vals = model._c.Tracer.value
+    assert 9.0 < tracer_vals[0] <= 10.0
+    assert tracer_vals[0] > tracer_vals[10] > tracer_vals[-1]
+    assert tracer_vals[-1] == pytest.approx(0.0, abs=1e-3)
+
+
+def test_purely_diffusive_model_empty_reactions_list(tmp_path):
+    """Verify that an empty reactions list (reactions = []) is recognized as diffusion-only."""
+    sp_file = tmp_path / "species.py"
+    sp_file.write_text(
+        "species = {\n"
+        "    'Tracer': {\n"
+        "        'phase': 'liquid',\n"
+        "        'include': True,\n"
+        "        'formula': 'Tracer',\n"
+        "        'diffusion': {'m0': 5.0, 'm1': 0.2},\n"
+        "        'bc_top': {'Dirichlet': 5.0},\n"
+        "        'bc_bottom': {'Neumann': 0.0},\n"
+        "    }\n"
+        "}\n"
+    )
+    rxn_file = tmp_path / "reactions.py"
+    rxn_file.write_text("reactions = []\n")
+
+    model = DiageneticModel(
+        base_dir=tmp_path,
+        species=sp_file,
+        reactions=rxn_file,
+        constants=None,
+    )
+    assert model.is_diffusion_only is True
+    model.configure(
+        grid_setup=[["0 cm", "5 cm", "1 mm", "1 mm"]],
+        t_end="1 day",
+        dt_max="1 day",
+        phi=0.8,
+    )
+    res = model.run()
+    assert res is not None
+    assert 4.5 < model._c.Tracer.value[0] <= 5.0
+
+
+
+
 
 
 

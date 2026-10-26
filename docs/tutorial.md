@@ -946,7 +946,11 @@ A typical `plot_layout.py` defines specifications for liquid species, solid spec
 ```python
 """plot_layout.py - Declarative plot configuration."""
 
-# ---- 1. Color Map and Style Setup ----
+# ---- 1. Color Map, Depth Scale, and Style Setup ----
+# Depth / z-axis scale ('log' or 'linear') and limits (min, max) in meters
+z_scale = "log"                                  # Or "linear" (aliases: depth_scale, zscale)
+z_lim = (1e-4, 0.5)                              # Or e.g. (0.0, 0.4) for linear (aliases: depth_lim, zlim)
+
 # Standard colormap name ('default', 'tab10', 'Set1'), a dict of species colors,
 # or per-species overrides.
 colormap = "default"
