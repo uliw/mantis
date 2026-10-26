@@ -1278,6 +1278,49 @@ class DiageneticModel:
                     # will be updated across grid by update_all_species during setup and solver steps.
                     pass
 
+        # Register equilibrium isotope fractionation factors from speciation definitions
+        if isinstance(speciation_defs, dict):
+            for sys_name, sys_cfg in speciation_defs.items():
+                eq_frac = sys_cfg.get("equilibrium_fractionation", sys_cfg.get("isotope_fractionation"))
+                if eq_frac is not None:
+                    alpha_entry = eq_frac.get("alpha") if isinstance(eq_frac, dict) else eq_frac
+                    sub_sp = sys_cfg.get("species", {})
+                    sp_keys = list(sub_sp.keys()) if isinstance(sub_sp, dict) else []
+
+                    if isinstance(alpha_entry, dict):
+                        for a_name, a_val in alpha_entry.items():
+                            val = float(a_val)
+                            clean_name = str(a_name).strip()
+                            # Check for A_to_B or A/B
+                            tokens = None
+                            if "_to_" in clean_name:
+                                tokens = clean_name.split("_to_")
+                            elif " / " in clean_name:
+                                tokens = clean_name.split(" / ")
+                            elif "/" in clean_name:
+                                tokens = clean_name.split("/")
+
+                            if tokens and len(tokens) == 2:
+                                s1, s2 = tokens[0].strip(), tokens[1].strip()
+                                # Set specific key e.g. h2s_s32_to_hs_s32_alpha
+                                setattr(self.mp, f"{s1.lower()}_to_{s2.lower()}_alpha", val)
+                                setattr(self.mp, f"{s2.lower()}_to_{s1.lower()}_alpha", 1.0 / val)
+                                # Also derive base species names (strip _32 or _S32)
+                                s1_base = species_defs.get(s1, {}).get("isotope_of", s1)
+                                s2_base = species_defs.get(s2, {}).get("isotope_of", s2)
+                                setattr(self.mp, f"{s1_base.lower()}_{s2_base.lower()}_alpha", val)
+                                setattr(self.mp, f"{s2_base.lower()}_{s1_base.lower()}_alpha", 1.0 / val)
+                            else:
+                                if not clean_name.endswith("_alpha"):
+                                    clean_name = f"{clean_name}_alpha"
+                                setattr(self.mp, clean_name.lower(), val)
+                    elif isinstance(alpha_entry, (int, float)):
+                        val = float(alpha_entry)
+                        setattr(self.mp, f"{sys_name.lower()}_alpha", val)
+                        if len(sp_keys) == 2:
+                            setattr(self.mp, f"{sp_keys[1].lower()}_{sp_keys[0].lower()}_alpha", val)
+                            setattr(self.mp, f"{sp_keys[0].lower()}_{sp_keys[1].lower()}_alpha", 1.0 / val)
+
 
         # Initialize CellVariables
         zeros = np.zeros(self.mp.grid_points)

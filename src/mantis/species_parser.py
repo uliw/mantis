@@ -538,6 +538,10 @@ def validate_and_normalize_speciation(
             sub_sp = norm_sys.get("species", {})
             primary_val = norm_sys.get("primary", norm_sys.get("parent"))
             eq_parent = primary_val if isinstance(primary_val, str) else None
+
+            # Support equilibrium_fractionation (preferred) or isotope_fractionation (alias)
+            eq_frac_cfg = norm_sys.get("equilibrium_fractionation", norm_sys.get("isotope_fractionation"))
+
             if isinstance(sub_sp, dict):
                 for sp_name, sp_meta in sub_sp.items():
                     if isinstance(sp_meta, dict):
@@ -567,6 +571,8 @@ def validate_and_normalize_speciation(
                             species_defs[sp_name]["equilibrium_of"] = eq_parent
                         if "constants" in norm_sys and "constants" not in species_defs[sp_name]:
                             species_defs[sp_name]["constants"] = copy.deepcopy(norm_sys["constants"])
+                        if eq_frac_cfg and "equilibrium_fractionation" not in species_defs[sp_name]:
+                            species_defs[sp_name]["equilibrium_fractionation"] = copy.deepcopy(eq_frac_cfg)
                         if "isotopes" in sp_meta and isinstance(sp_meta["isotopes"], dict):
                             species_defs[sp_name]["isotopes"] = copy.deepcopy(sp_meta["isotopes"])
                             for iso_sp_name, iso_ref in sp_meta["isotopes"].items():
@@ -590,6 +596,37 @@ def validate_and_normalize_speciation(
                                     }
                                     if "constants" in norm_sys:
                                         species_defs[iso_sp_name]["constants"] = copy.deepcopy(norm_sys["constants"])
+                                    if eq_frac_cfg:
+                                        species_defs[iso_sp_name]["equilibrium_fractionation"] = copy.deepcopy(eq_frac_cfg)
+
+            # Validate equilibrium_fractionation species keys if specified as a dict
+            if eq_frac_cfg is not None:
+                alpha_val = eq_frac_cfg.get("alpha") if isinstance(eq_frac_cfg, dict) else eq_frac_cfg
+                if isinstance(alpha_val, dict):
+                    for a_key in alpha_val.keys():
+                        clean_k = str(a_key).strip()
+                        # Allow format "A_to_B", "A / B", "A/B"
+                        tokens = None
+                        if "_to_" in clean_k:
+                            tokens = clean_k.split("_to_")
+                        elif " / " in clean_k:
+                            tokens = clean_k.split(" / ")
+                        elif "/" in clean_k:
+                            tokens = clean_k.split("/")
+
+                        if tokens and len(tokens) == 2:
+                            s1, s2 = tokens[0].strip(), tokens[1].strip()
+                            # Check that both s1 and s2 exist in species_defs
+                            for s in (s1, s2):
+                                if s not in species_defs:
+                                    loc_str = f" in speciation system '{sys_name}'"
+                                    print(
+                                        f"\n[MANTIS ERROR]{loc_str} 'equilibrium_fractionation' references unknown species or isotope companion '{s}'.\n"
+                                        f"Key '{clean_k}' must refer to recognized species declared in the model (e.g. 'H2S_S32_to_HS_S32').\n"
+                                        f"Available species: {sorted(list(species_defs.keys()))}.\n",
+                                        file=sys.stderr,
+                                    )
+                                    sys.exit(1)
             elif isinstance(sub_sp, (list, tuple)):
                 for sp_name in sub_sp:
                     if sp_name not in species_defs:

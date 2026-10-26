@@ -54,6 +54,8 @@ generate_equations = "mantis.generate_equation_system:main"
 generate-equation-system = "mantis.generate_equation_system:main"
 generate_equation_system = "mantis.generate_equation_system:main"
 plot_data_new = "mantis.plot_data_new:main"
+mantis_create_examples = "mantis.mantis_create_examples:main"
+mantis-create-examples = "mantis.mantis_create_examples:main"
 
 # Optional extras (e.g. for development, testing, docs)
 [project.optional-dependencies]

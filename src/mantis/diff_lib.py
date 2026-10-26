@@ -3005,6 +3005,132 @@ def update_all_species(c: Any, mp: Any) -> None:
                             elif hasattr(target, "__setitem__"):
                                 target[:] = top_val
 
+    # 3. Update equilibrium isotope speciation companions (e.g. HS_S32, H2S_S32 from TS2_S32)
+    speciation_defs = getattr(mp, "speciation", {})
+    if getattr(mp, "isotopes", False) and isinstance(speciation_defs, dict):
+        for sys_name, sys_cfg in speciation_defs.items():
+            if not isinstance(sys_cfg, dict):
+                continue
+            eq_frac_cfg = sys_cfg.get("equilibrium_fractionation", sys_cfg.get("isotope_fractionation"))
+            if not eq_frac_cfg:
+                continue
+            primary_sp = sys_cfg.get("primary") or sys_cfg.get("parent")
+            if not primary_sp:
+                continue
+
+            primary_meta = species_defs.get(primary_sp, {})
+            primary_iso_dict = primary_meta.get("isotopes", {})
+            if not primary_iso_dict or not isinstance(primary_iso_dict, dict):
+                continue
+
+            sub_sp_map = sys_cfg.get("species", {})
+            if not isinstance(sub_sp_map, dict) or len(sub_sp_map) < 2:
+                continue
+
+            sp_keys = list(sub_sp_map.keys())
+            sp1, sp2 = sp_keys[0], sp_keys[1]
+
+            c_sp1 = getattr(c, sp1, None)
+            c_sp2 = getattr(c, sp2, None)
+            c_primary = getattr(c, primary_sp, None)
+            if c_sp1 is None or c_sp2 is None or c_primary is None:
+                continue
+
+            val_primary = get_v(c_primary)
+            val_sp1 = get_v(c_sp1)
+            val_sp2 = get_v(c_sp2)
+
+            denom_tot = val_sp1 + val_sp2 + 1e-30
+            f1 = val_sp1 / denom_tot
+            f2 = val_sp2 / denom_tot
+
+            alpha_entry = eq_frac_cfg.get("alpha") if isinstance(eq_frac_cfg, dict) else eq_frac_cfg
+
+            for prim_iso, iso_ref in primary_iso_dict.items():
+                if not hasattr(c, prim_iso):
+                    continue
+                prim_iso_val = get_v(getattr(c, prim_iso))
+
+                iso1_name = None
+                iso2_name = None
+                meta1 = sub_sp_map.get(sp1, {})
+                meta2 = sub_sp_map.get(sp2, {})
+                if isinstance(meta1, dict) and "isotopes" in meta1:
+                    for k_i, ref_i in meta1["isotopes"].items():
+                        if ref_i == iso_ref:
+                            iso1_name = k_i
+                            break
+                if isinstance(meta2, dict) and "isotopes" in meta2:
+                    for k_i, ref_i in meta2["isotopes"].items():
+                        if ref_i == iso_ref:
+                            iso2_name = k_i
+                            break
+
+                if not iso1_name:
+                    for s_k, s_m in species_defs.items():
+                        if isinstance(s_m, dict) and s_m.get("isotope_of") == sp1:
+                            iso1_name = s_k
+                            break
+                if not iso2_name:
+                    for s_k, s_m in species_defs.items():
+                        if isinstance(s_m, dict) and s_m.get("isotope_of") == sp2:
+                            iso2_name = s_k
+                            break
+
+                # Resolve alpha for this specific pair
+                alpha_val = None
+                if isinstance(alpha_entry, dict):
+                    # Check direct keys like H2S_S32_to_HS_S32 or HS_S32_to_H2S_S32
+                    for k_a, v_a in alpha_entry.items():
+                        clean_k = str(k_a).strip()
+                        tokens = None
+                        if "_to_" in clean_k:
+                            tokens = clean_k.split("_to_")
+                        elif " / " in clean_k:
+                            tokens = clean_k.split(" / ")
+                        elif "/" in clean_k:
+                            tokens = clean_k.split("/")
+
+                        if tokens and len(tokens) == 2:
+                            t1, t2 = tokens[0].strip(), tokens[1].strip()
+                            # If key specifies iso2_to_iso1 (e.g. H2S_S32_to_HS_S32)
+                            if (t1 == iso2_name or t1 == sp2) and (t2 == iso1_name or t2 == sp1):
+                                alpha_val = float(v_a)
+                                break
+                            elif (t1 == iso1_name or t1 == sp1) and (t2 == iso2_name or t2 == sp2):
+                                alpha_val = 1.0 / float(v_a)
+                                break
+                        else:
+                            # Fallback generic key
+                            alpha_val = float(v_a)
+                            break
+                elif isinstance(alpha_entry, (int, float)):
+                    alpha_val = float(alpha_entry)
+
+                if alpha_val is None:
+                    continue
+
+                iso1_val = partition_equilibrium_isotope(prim_iso_val, f1, f2, alpha_val)
+                iso2_val = np.maximum(prim_iso_val - iso1_val, 0.0)
+
+                if iso1_name:
+                    t1 = getattr(c, iso1_name, None)
+                    if hasattr(t1, "setValue"):
+                        t1.setValue(iso1_val)
+                    elif hasattr(t1, "__setitem__"):
+                        t1[:] = iso1_val
+                    else:
+                        setattr(c, iso1_name, iso1_val)
+
+                if iso2_name:
+                    t2 = getattr(c, iso2_name, None)
+                    if hasattr(t2, "setValue"):
+                        t2.setValue(iso2_val)
+                    elif hasattr(t2, "__setitem__"):
+                        t2[:] = iso2_val
+                    else:
+                        setattr(c, iso2_name, iso2_val)
+
 
 def compute_porosity_profile(
     z: Any,
