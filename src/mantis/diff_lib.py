@@ -2889,7 +2889,8 @@ def update_all_species(c: Any, mp: Any) -> None:
 
     # 2. Setup evaluation context for equilibrium and partition fractions
     phi_val = get_v(mp.phi) if hasattr(mp, "phi") else 0.8
-    ph_arr = get_v(c.pH) if hasattr(c, "pH") else float(getattr(mp, "pH", 7.0))
+    mp_ph = getattr(mp, "pH", 7.0)
+    ph_arr = get_v(c.pH) if hasattr(c, "pH") else (float(mp_ph) if mp_ph is not None else 7.0)
     h_arr = 10.0 ** (-ph_arr)
 
     k = getattr(mp, "k", {})

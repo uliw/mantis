@@ -13,6 +13,7 @@ Provides a clean object-oriented entry point that:
 from __future__ import annotations
 
 import argparse
+import ast
 import copy
 import importlib.util
 import inspect
@@ -142,8 +143,8 @@ class DiageneticModel:
     def __init__(
         self,
         species: Union[str, Path] = "species.py",
-        reactions: Union[str, Path] = "reactions.py",
-        constants: Union[str, Path] = "reaction_constants.py",
+        reactions: Optional[Union[str, Path]] = "reactions.py",
+        constants: Optional[Union[str, Path]] = "reaction_constants.py",
         equations: Optional[Union[str, Path]] = None,
         limiters: Optional[Union[str, Path]] = None,
         layout: Union[str, Path] = "plot_layout.py",
@@ -192,8 +193,8 @@ class DiageneticModel:
         # 3. Resolve filenames relative to cwd or base_dir (wherever the model resides)
         self.species_file = self._resolve(species)
         rxn_fallbacks = [f"{self.experiment}_reactions.py"] if str(reactions) == "reactions.py" else None
-        self.reactions_file = self._resolve(reactions, fallbacks=rxn_fallbacks)
-        self.constants_file = self._resolve(constants)
+        self.reactions_file = self._resolve(reactions, fallbacks=rxn_fallbacks) if reactions else None
+        self.constants_file = self._resolve(constants) if constants else None
         self.equations_file = self._resolve(equations) if equations else None
         self.limiters_file = self._resolve(limiters) if limiters else None
         self.layout_file = self._resolve(layout)
@@ -233,10 +234,11 @@ class DiageneticModel:
         """Validates that all required files describing the simulation exist in cwd or model directory."""
         if not self.species_file.exists():
             self._exit_with_missing_file_error(self._orig_species, "species definitions file")
-        if not self.reactions_file.exists():
+        if self._orig_reactions is not None and self.reactions_file is not None and not self.reactions_file.exists():
             self._exit_with_missing_file_error(self._orig_reactions, "declarative reactions file")
-        if not self.constants_file.exists():
-            self._exit_with_missing_file_error(self._orig_constants, "reaction constants file")
+        if self._orig_constants is not None and self.constants_file is not None and not self.constants_file.exists():
+            if not self.is_diffusion_only:
+                self._exit_with_missing_file_error(self._orig_constants, "reaction constants file")
         if self._orig_limiters is not None and self.limiters_file is not None and not self.limiters_file.exists():
             self._exit_with_missing_file_error(self._orig_limiters, "limiters file")
 
@@ -702,6 +704,98 @@ class DiageneticModel:
         self._species_mod = mod
         return mod.species
 
+    @property
+    def is_diffusion_only(self) -> bool:
+        """Determines if the simulation is purely diffusive without diagenetic reactions."""
+        if self._orig_reactions is None or self.reactions_file is None:
+            return True
+        if hasattr(self, "_raw_reactions") and len(self._raw_reactions) == 0:
+            return True
+        if hasattr(self, "reactions_file") and self.reactions_file and self.reactions_file.exists():
+            try:
+                with open(self.reactions_file, "r") as f:
+                    rxn_tree = ast.parse(f.read())
+                for node in rxn_tree.body:
+                    if isinstance(node, ast.Assign):
+                        for target in node.targets:
+                            if isinstance(target, ast.Name) and target.id == "reactions":
+                                if isinstance(node.value, (ast.List, ast.Tuple)) and len(node.value.elts) == 0:
+                                    return True
+            except Exception:
+                pass
+        return False
+
+    def check_requires_ph(self, species_defs: Dict[str, Any], speciation_defs: Dict[str, Any]) -> Tuple[bool, str]:
+        """Detects whether the chemical model (species, speciation, reactions, or kinetic constants) requires pH."""
+        ph_re = re.compile(r"\b(pH|Hplus|H\+)\b")
+
+        # 1. Species definitions
+        for sp_name, meta in species_defs.items():
+            if sp_name in ("Hplus", "H+", "pH"):
+                return True, f"species '{sp_name}' is defined"
+            if isinstance(meta, dict):
+                formula = meta.get("formula", "")
+                if formula in ("H+", "Hplus"):
+                    return True, f"species '{sp_name}' has formula '{formula}'"
+                for field in ("fraction", "partition"):
+                    val = meta.get(field)
+                    if isinstance(val, str) and ph_re.search(val):
+                        return True, f"species '{sp_name}' {field} expression '{val}'"
+                    elif isinstance(val, dict):
+                        for pk, pv in val.items():
+                            if isinstance(pv, str) and ph_re.search(pv):
+                                return True, f"species '{sp_name}' {field}.{pk} expression '{pv}'"
+
+        # 2. Speciation definitions
+        if isinstance(speciation_defs, dict):
+            for sys_name, sys_cfg in speciation_defs.items():
+                if not isinstance(sys_cfg, dict):
+                    continue
+                for sub_k, sub_v in sys_cfg.get("species", {}).items():
+                    if isinstance(sub_v, dict) and isinstance(sub_v.get("fraction"), str):
+                        if ph_re.search(sub_v["fraction"]):
+                            return True, f"speciation '{sys_name}.{sub_k}' fraction expression"
+                for f_k, f_expr in sys_cfg.get("fractions", {}).items():
+                    if isinstance(f_expr, str) and ph_re.search(f_expr):
+                        return True, f"speciation '{sys_name}' partition fraction '{f_k}'"
+
+        # 3. Kinetic constants file
+        if hasattr(self, "constants_file") and self.constants_file and self.constants_file.exists():
+            try:
+                with open(self.constants_file, "r") as f:
+                    const_tree = ast.parse(f.read())
+                for node in const_tree.body:
+                    if isinstance(node, ast.FunctionDef) and node.name == "get_reaction_constants":
+                        for stmt in node.body:
+                            for sub in ast.walk(stmt):
+                                if isinstance(sub, ast.Name) and isinstance(sub.ctx, ast.Load) and sub.id in ("pH", "Hplus"):
+                                    return True, f"get_reaction_constants uses variable '{sub.id}'"
+                                if isinstance(sub, ast.Constant) and isinstance(sub.value, str):
+                                    if ph_re.search(sub.value):
+                                        return True, f"get_reaction_constants references '{sub.value}'"
+            except Exception:
+                pass
+
+        # 4. Reactions file
+        if hasattr(self, "reactions_file") and self.reactions_file and self.reactions_file.exists():
+            try:
+                with open(self.reactions_file, "r") as f:
+                    rxn_tree = ast.parse(f.read())
+                for node in rxn_tree.body:
+                    if isinstance(node, ast.Assign):
+                        for target in node.targets:
+                            if isinstance(target, ast.Name) and target.id in ("reactions", "limiters"):
+                                for sub in ast.walk(node.value):
+                                    if isinstance(sub, ast.Name) and sub.id in ("pH", "Hplus"):
+                                        return True, f"reactions file references '{sub.id}'"
+                                    if isinstance(sub, ast.Constant) and isinstance(sub.value, str):
+                                        if ph_re.search(sub.value):
+                                            return True, f"reactions file references '{sub.value}'"
+            except Exception:
+                pass
+
+        return False, "no reactions or species depend on pH or Hplus"
+
     def classify_jacobian_strategy(self) -> Tuple[bool, str]:
         """Classifies whether the model requires the vectorized numerical Jacobian
         or can safely and optimally use the analytical SymPy Jacobian.
@@ -1008,74 +1102,87 @@ class DiageneticModel:
             if ph_val is not None:
                 self.mp.pH = ph_val
             else:
-                print(
-                    "\n[MANTIS ERROR] pH is not defined in the model.\n"
-                    "Please specify pH in species.py (e.g. Hplus: {'bc': {'pH': 7.5}}) "
-                    "or pass model.configure(pH=7.5).\n",
-                    file=sys.stderr,
-                )
-                sys.exit(1)
+                needs_ph, reason = self.check_requires_ph(species_defs, speciation_defs)
+                if needs_ph:
+                    print(
+                        f"\n[MANTIS ERROR] pH is not defined in the model, but is required ({reason}).\n"
+                        "Please specify pH in species.py (e.g. Hplus: {'bc': {'pH': 7.5}}) "
+                        "or pass model.configure(pH=7.5).\n",
+                        file=sys.stderr,
+                    )
+                    sys.exit(1)
+                else:
+                    self.mp.pH = None
 
         # 3. Compile or load reaction equations
-        prep_dict = dict(self.mp)
-        prep_dict["reactions"] = str(self.reactions_file)
-        prep_dict["species"] = str(self.species_file)
-        prep_dict["kinetic_constants"] = str(self.constants_file)
-        if self.limiters_file and self.limiters_file.exists():
-            prep_dict["limiters"] = str(self.limiters_file)
-        if self.equations_file:
-            prep_dict["equations"] = str(self.equations_file)
-
-        eq_mod, _rxn_p, _eq_p = resolve_and_prepare_equations(
-            prep_dict, experiment_name=self.experiment, base_dir=self.base_dir
-        )
-        self.mp.reactions_module = eq_mod
-        if hasattr(eq_mod, "get_limiters"):
-            self.mp.get_limiters = eq_mod.get_limiters
-
-        # Extract reaction_parameters, fractionation_factors, and raw reaction definitions
-        rxn_params = getattr(eq_mod, "reaction_parameters", None) or getattr(eq_mod, "fractionation_factors", None)
-        if hasattr(self, "reactions_file") and self.reactions_file.exists():
-            spec_rxn = importlib.util.spec_from_file_location("rxn_param_mod", self.reactions_file)
-            if spec_rxn and spec_rxn.loader:
-                mod_rxn = importlib.util.module_from_spec(spec_rxn)
-                spec_rxn.loader.exec_module(mod_rxn)
-                self._raw_reactions = getattr(mod_rxn, "reactions", [])
-                if rxn_params is None:
-                    rxn_params = getattr(mod_rxn, "reaction_parameters", None) or getattr(mod_rxn, "fractionation_factors", None)
-        else:
+        if self.is_diffusion_only:
+            from mantis.generate_equation_system import make_null_reactions
+            eq_mod = make_null_reactions()
+            self.mp.reactions_module = eq_mod
             self._raw_reactions = []
-
-        if isinstance(rxn_params, dict):
-            for rp_k, rp_v in rxn_params.items():
-                if not hasattr(self.mp, rp_k):
-                    setattr(self.mp, rp_k, rp_v)
-
-        # 4. Load reaction constants
-        spec_rc = importlib.util.spec_from_file_location("rc_mod", self.constants_file)
-        if spec_rc is None or spec_rc.loader is None:
-            raise ImportError(f"Cannot load reaction constants file: {self.constants_file}")
-        mod_rc = importlib.util.module_from_spec(spec_rc)
-        spec_rc.loader.exec_module(mod_rc)
-
-        if hasattr(mod_rc, "get_reaction_constants"):
-            get_rc_fn = mod_rc.get_reaction_constants
+            get_rc_fn = None
+            self.p_dict["use_numerical_jacobian"] = False
+            self.mp.use_numerical_jacobian = False
         else:
-            raise AttributeError(f"{self.constants_file} must define get_reaction_constants(pH, phi, k_values).")
+            prep_dict = dict(self.mp)
+            prep_dict["reactions"] = str(self.reactions_file) if self.reactions_file else None
+            prep_dict["species"] = str(self.species_file)
+            prep_dict["kinetic_constants"] = str(self.constants_file) if self.constants_file else None
+            if self.limiters_file and self.limiters_file.exists():
+                prep_dict["limiters"] = str(self.limiters_file)
+            if self.equations_file:
+                prep_dict["equations"] = str(self.equations_file)
 
-        # 5. Chemical Jacobian strategy selection (heuristic switching between analytical and numerical)
-        if "use_numerical_jacobian" not in getattr(self, "_user_configured_keys", set()):
-            requires_num, reason = self.classify_jacobian_strategy()
-            if requires_num:
-                self.p_dict["use_numerical_jacobian"] = True
-                self.mp.use_numerical_jacobian = True
-                print(
-                    f"\n[MANTIS] Coupled non-linear speciation detected ({reason}).\n"
-                    "         Automatically enabled vectorized finite-difference chemical Jacobian for exact cross-coupling.\n"
-                )
+            eq_mod, _rxn_p, _eq_p = resolve_and_prepare_equations(
+                prep_dict, experiment_name=self.experiment, base_dir=self.base_dir
+            )
+            self.mp.reactions_module = eq_mod
+            if hasattr(eq_mod, "get_limiters"):
+                self.mp.get_limiters = eq_mod.get_limiters
+
+            # Extract reaction_parameters, fractionation_factors, and raw reaction definitions
+            rxn_params = getattr(eq_mod, "reaction_parameters", None) or getattr(eq_mod, "fractionation_factors", None)
+            if hasattr(self, "reactions_file") and self.reactions_file and self.reactions_file.exists():
+                spec_rxn = importlib.util.spec_from_file_location("rxn_param_mod", self.reactions_file)
+                if spec_rxn and spec_rxn.loader:
+                    mod_rxn = importlib.util.module_from_spec(spec_rxn)
+                    spec_rxn.loader.exec_module(mod_rxn)
+                    self._raw_reactions = getattr(mod_rxn, "reactions", [])
+                    if rxn_params is None:
+                        rxn_params = getattr(mod_rxn, "reaction_parameters", None) or getattr(mod_rxn, "fractionation_factors", None)
             else:
-                self.p_dict["use_numerical_jacobian"] = False
-                self.mp.use_numerical_jacobian = False
+                self._raw_reactions = []
+
+            if isinstance(rxn_params, dict):
+                for rp_k, rp_v in rxn_params.items():
+                    if not hasattr(self.mp, rp_k):
+                        setattr(self.mp, rp_k, rp_v)
+
+            # 4. Load reaction constants
+            spec_rc = importlib.util.spec_from_file_location("rc_mod", self.constants_file)
+            if spec_rc is None or spec_rc.loader is None:
+                raise ImportError(f"Cannot load reaction constants file: {self.constants_file}")
+            mod_rc = importlib.util.module_from_spec(spec_rc)
+            spec_rc.loader.exec_module(mod_rc)
+
+            if hasattr(mod_rc, "get_reaction_constants"):
+                get_rc_fn = mod_rc.get_reaction_constants
+            else:
+                raise AttributeError(f"{self.constants_file} must define get_reaction_constants(pH, phi, k_values).")
+
+            # 5. Chemical Jacobian strategy selection (heuristic switching between analytical and numerical)
+            if "use_numerical_jacobian" not in getattr(self, "_user_configured_keys", set()):
+                requires_num, reason = self.classify_jacobian_strategy()
+                if requires_num:
+                    self.p_dict["use_numerical_jacobian"] = True
+                    self.mp.use_numerical_jacobian = True
+                    print(
+                        f"\n[MANTIS] Coupled non-linear speciation detected ({reason}).\n"
+                        "         Automatically enabled vectorized finite-difference chemical Jacobian for exact cross-coupling.\n"
+                    )
+                else:
+                    self.p_dict["use_numerical_jacobian"] = False
+                    self.mp.use_numerical_jacobian = False
 
         # 6. Grid generation
         mesh, z = make_grid_from_sections(self.mp.grid_setup)
@@ -1106,7 +1213,8 @@ class DiageneticModel:
 
         # 6. Evaluate k values
         k = data_container()
-        _k1, k = get_rc_fn(self.mp.pH, self.mp.phi, k_values=k)
+        if get_rc_fn is not None:
+            _k1, k = get_rc_fn(self.mp.pH, self.mp.phi, k_values=k)
         self.mp.k = k
 
         # Propagate reaction and equilibrium constants from k to self.mp if not already configured
@@ -1123,13 +1231,13 @@ class DiageneticModel:
         c = data_container()
 
         # Dynamic speciation & phase partition calculations from species_defs
-        Hplus = 10.0 ** (-float(self.mp.pH))
+        Hplus = 10.0 ** (-float(self.mp.pH)) if self.mp.pH is not None else None
         eval_ctx: Dict[str, Any] = {
             "k": k,
             "mp": self.mp,
             "np": np,
             "Hplus": Hplus,
-            "pH": float(self.mp.pH),
+            "pH": float(self.mp.pH) if self.mp.pH is not None else None,
         }
 
         for sp_name, meta in species_defs.items():
@@ -1158,12 +1266,17 @@ class DiageneticModel:
                             base_c = c_name[1:]
                             frac_ctx[base_c] = 10.0 ** (-float(c_val))
                 frac_raw = meta["fraction"]
-                if isinstance(frac_raw, (int, float)):
-                    f_val = float(frac_raw)
-                else:
-                    f_val = float(eval(str(frac_raw), frac_ctx))
-                setattr(self.mp, f"{sp_name.lower()}_frac", f_val)
-                eval_ctx[f"{sp_name.lower()}_frac"] = f_val
+                try:
+                    if isinstance(frac_raw, (int, float)):
+                        f_val = float(frac_raw)
+                    else:
+                        f_val = float(eval(str(frac_raw), frac_ctx))
+                    setattr(self.mp, f"{sp_name.lower()}_frac", f_val)
+                    eval_ctx[f"{sp_name.lower()}_frac"] = f_val
+                except Exception:
+                    # Dynamic fraction depends on spatially varying species not yet initialized;
+                    # will be updated across grid by update_all_species during setup and solver steps.
+                    pass
 
 
         # Initialize CellVariables

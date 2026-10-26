@@ -30,6 +30,39 @@ class ValidationError(Exception):
     pass
 
 
+def make_null_reactions():
+    """Constructs a null reaction module for purely diffusive / reaction-free models."""
+    import types
+    from .diff_lib import data_container
+
+    null_mod = types.ModuleType("null_reactions")
+
+    def diagenetic_reactions(mp, c, k, f=None, lim=None, dt=None):
+        if f is None:
+            f = data_container()
+        return f, data_container()
+
+    def compute_chemical_jacobian(c, mp, k, species_names):
+        first_sp = species_names[0]
+        c_val = c[first_sp]
+        N = len(c_val.value if hasattr(c_val, "value") else c_val)
+        S = len(species_names)
+        import numpy as np
+        return np.zeros((N, S, S), dtype=np.float64)
+
+    def get_limiters(c, mp):
+        return {}
+
+    diagenetic_reactions.compute_chemical_jacobian = compute_chemical_jacobian
+    null_mod.diagenetic_reactions = diagenetic_reactions
+    null_mod.compute_chemical_jacobian = compute_chemical_jacobian
+    null_mod.get_limiters = get_limiters
+    null_mod.reactions = []
+    null_mod.reaction_parameters = {}
+    null_mod.fractionation_factors = {}
+    return null_mod
+
+
 class ReactionSystemValidator:
     """Validates chemical reaction specifications against model definitions."""
 
@@ -701,6 +734,13 @@ def resolve_and_prepare_equations(
     equations_path = _resolve(eq_val, f"{exp}_equations.py")
     constants_path = _resolve(kc_val, "reaction_constants.py")
     species_path = _resolve(sp_val, "species.py")
+
+    # If reactions is explicitly configured as diffusion-only (__DIFFUSION_ONLY__), return null reaction module
+    if rxn_val == "__DIFFUSION_ONLY__":
+        null_mod = make_null_reactions()
+        p_dict["reactions_module"] = null_mod
+        p_dict["reactions_path"] = None
+        return null_mod, None, None
 
     # If limiters not explicitly specified in p_dict, check if base_dir or cwd has limiters.py
     if lim_val is not None:
