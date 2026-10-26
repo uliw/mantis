@@ -32,7 +32,6 @@ reaction_parameters = {
     "msr_alpha": 1.07,
     "TS2_O2_alpha": 0.995,
     "dispro_hs_alpha": 0.993,
-    "h2s_hs_alpha": 0.99991542,
     # Primary respiration stoichiometry
     "POC_O2_ratio": 1.27,
     # Transition factors for isotope fractionation limiters

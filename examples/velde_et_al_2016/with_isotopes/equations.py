@@ -876,6 +876,6 @@ def compute_chemical_jacobian(c, mp, k, species_names):
 
 diagenetic_reactions.compute_chemical_jacobian = compute_chemical_jacobian
 
-reaction_parameters = {'msr_alpha': 1.07, 'TS2_O2_alpha': 0.995, 'dispro_hs_alpha': 0.993, 'h2s_hs_alpha': 0.99991542, 'POC_O2_ratio': 1.27, 'K_epsilon_msr': 0.2, 'K_epsilon_TS2_O2': 0.01}
+reaction_parameters = {'msr_alpha': 1.07, 'TS2_O2_alpha': 0.995, 'dispro_hs_alpha': 0.993, 'POC_O2_ratio': 1.27, 'K_epsilon_msr': 0.2, 'K_epsilon_TS2_O2': 0.01}
 
 fractionation_factors = reaction_parameters

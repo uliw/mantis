@@ -165,6 +165,10 @@ speciation = {
         "type": "acid_base",
         "primary": "TS2",
         "constants": {"pKa1": 7.0},
+        "equilibrium_fractionation": {
+            "standard": "d34S",
+            "alpha": {"H2S_S32_to_HS_S32": 0.99991542},
+        },
         "species": {
             "HS": {
                 "phase": "liquid",

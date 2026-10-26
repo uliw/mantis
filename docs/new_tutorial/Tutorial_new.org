@@ -1,0 +1,214 @@
+#+TITLE: Mantis quick start Tutorial
+#+AUTHOR:Ulrich G. Wortmann
+#+STARTUP: showall shrink inlineimages
+#+OPTIONS: todo:nil tasks:nil tags:nil
+#+EXCLUDE_TAGS: noexport answer
+#+latex_compiler: lualatex
+#+LATEX_CLASS: koma-article
+#+latex_class_options: [11pt,letter]
+#+latex_header: \newlength\bibitemsep
+#+latex_header: \hypersetup{colorlinks=true,linkcolor=Navy,filecolor=Navy,urlcolor=Navy,citecolor=Navy,anchorcolor=Navy}
+
+
+* Installation 
+- ~pip install mantis-rtm~
+- Optional: In an empty directory run ~mantis_create_examples.py~ 
+
+* Running your first model 
+After creating the example directory, go to ~./examples/start_here/basic_transport_and_reaction~
+** Model structure 
+A typical MANTIS project directory contains five primary configuration
+files, alongside the master run script:
+#+begin_example
+./velde_et_al_2016/
+├── species.py           <- Who lives in the sediment? (chemical species, phases, diffusion, BCs)
+├── reactions.py         <- What reactions happen? (stoichiometry, kinetics, limiters)
+├── kinetic_constants.py <- How fast do reactions happen? (rate constants, half-saturation values)
+├── plot_layout.py       <- How should the profiles look? (panels, colors, geochemist units like wt%)
+└── run_model.py         <- Master driver script (sediment accumulation rate, depth, duration)
+#+end_example
+
+When you execute ~python run_model.py~, MANTIS automatically detects these files, ensures the underlying equation system is up to date, solves the time evolution of the sediment column, and produces your outputs:
+
+- =<model_name>.pdf=: A multi-panel summary plot of porewater and solid-phase profiles.
+- =<model_name>.csv=: A tabular export of concentrations, reaction rates, and isotope ratios across depth.
+- =<model_name>_state.npz=: The complete numerical state of the simulation for restarting or continuing runs.
+- =<model_name>.mp4= (optional): An animated video showing the transient evolution
+
+*** The main model file
+The model definition is straightforward, importing the libraries an wrapping an ~if __name__ == "__main__":~ block, and then define some basic parameters:
+#+BEGIN_SRC jupyter-python
+from mantis import DiageneticModel
+from mantis.diff_lib import get_total_delta
+
+if __name__ == "__main__":
+    model = DiageneticModel(
+        reactions="reactions.py",
+        equations="equations.py",
+        constants="kinetic_constants.py",
+        layout="plot_layout.py",
+    )
+
+    # 2. Configure environmental and run parameters
+    model.configure(
+        grid_setup=[  # start, stop, start_dz, stop_dz
+            ["0 cm", "100 cm", "2 mm", "2 mm"],
+        ],
+        t_end="2 kyr", # max run time 
+        dt_max="1 year", # max dt 
+        temp=[10.0, 10.1], # temperature field 
+        w="0.2 cm/yr", # sedimentation rate 
+        phi=0.8, # porosity 
+    )
+
+    # Allow CLI argument overrides (e.g. --video, --solver-tol)
+    model.parse_cli_args()
+
+    # 3. Run simulation
+    result = model.run()
+
+    # 4. Save results & render summary plot
+    df, fqfn = result.save_csv()
+    # result.save_state() optional 
+
+    result.plot_summary()
+#+END_SRC
+
+*** Defining the species that participate in the model 
+The species file contains all the information we need to know about a species. This includes the type (solid or liquid), diffusion coefficients, boundary conditions, the chemical formula, as well as a field that decides whether a species is part of the transport reactions. Most species are covered by the ~diff_coeff~ function with the ~m0, m1~ parameter listed in Table 4.8 in Boudreau 1996. Note that diffusion coefficients are only needed for species that are part of the reaction-transport matrix (i.e., where include = True). As before, all properties are defined in a dictionary. Unless a lower boundary condition is specified, it defaults to a zero gradient Neumann condition. The ~prefill~ parameter determines of the initial species concentration across the modeling domains is set to the upper boundary condition or to zero. Note that "CO2" and "H2O" need to be present, even so they do not appear in the model directly. 
+
+#+BEGIN_SRC jupyter-python
+
+species = {
+    # Solid species
+    "POC": {
+        "phase": "solid",
+        "include": True,
+        "formula": "CH2O6",
+        "diffusion": None,
+        "bc_top": {"Robin": "3065 umol/(cm^2 * yr)"},
+    },
+    # -------------------------------------------------------------------------
+    # Dissolved Liquid Species
+    # -------------------------------------------------------------------------
+    "SO4": {
+        "phase": "liquid",
+        "include": True,
+        "formula": "SO4",
+        "diff_coeff_function": "diff_coeff",
+        "diffusion": {"m0": 4.88, "m1": 0.232},
+        "bc_top": {"Dirichlet": 28.2},
+        "prefill": True,
+    },
+    "TS2": {
+        "phase": "liquid",
+        "include": True,
+        "formula": "H2S",
+        "diff_coeff_function": "diff_coeff",
+        "diffusion": {"m0": 10.4, "m1": 0.273},
+        "bc_top": {"Dirichlet": 0.0},  #
+    },
+    # External / Reaction Balance Species (Excluded from transport)
+    "CO2": {"phase": "liquid", "include": False, "formula": "CO2"},
+    "H2O": {"phase": "liquid", "include": False, "formula": "H2O"},
+}
+#+END_SRC
+
+
+*** Defining kinetic constants
+Kinetic constants are defined in a dictionary. In the below example, I use the ~pint~ library to map units into the model units, and return both dictionaries.
+#+BEGIN_SRC jupyter-python
+import pint
+
+   ureg = pint.UnitRegistry()
+   Q_ = ureg.Quantity
+
+   constants: dict = {
+       # kinetic constants
+       "POC": [0.001, "1/year", "1/second"],  # key, [value, unit, target unit]
+       
+       # Monod half-saturation for microbial sulfate reduction
+       "K_SO4": [0.9, "umol/cm^3", "mol/m^3"],
+   }
+
+   # convert into model units (meter, mol, seconds)
+   for k, v in constants.items():
+       k_values[k] = Q_(f"{v[0]} {v[1]}").to(f"{v[2]}").magnitude
+
+   return constants, k_values
+#+END_SRC
+
+*** Setting up reactions
+Microbial sulfate reduction rates are sensitive to sulfate concentrations, so in the reactions file, we first define a limiter for ~SO4~. This is followed by a list of dictionaries that define the reactions of the model. The reaction name is arbitrary, but the chemical reaction can only use names that are defined in the species file. An important limitation is that the stoichiometric must be integer numbers. The kinetic constant name must exist in the kinetic constants file, the limiters parameter will only accept values that are defined in the ~limiters~ dictionary. 
+A note on limiters. The canonical form of writing a limiter is 
+\begin{equation}
+\frac{[SO_4]}{[SO_4]+ K}
+\end{equation}
+
+However, mantis exclusively uses implicit limiters:
+\begin{equation}
+\frac{1}{[SO_4]+ K}
+\end{equation}
+
+
+#+BEGIN_SRC jupyter-python
+# Monod type reaction rate limiters 
+limiters = {
+    # Base implicit limiters: L_imp = 1.0 / (C + K)
+    # The parser automatically derives explicit (C * L_imp) and inhibition (K * L_imp = 1 - C * L_imp)
+    "SO4": "1.0 / (c.SO4 + K_SO4)", # where c.SO4 = sulfate concentration 
+}
+
+reactions = [
+    # -------------------------------------------------------------------------
+    # Organic Carbon Primary Respiration
+    # -------------------------------------------------------------------------
+    {
+        "reaction_name": "sulfate_reduction_slow",
+        "reaction": "2 POC + SO4 -> TS2",
+        "k_value_name": "POC",
+        "limiters": ["SO4"],
+    },
+]
+#+END_SRC
+
+*** Defining the plot output
+Mantis provides a default plot output that can be adapted to a variety of layouts. Its basic structure requires that you define the x-axis scale,  as well as one or more panels. For each panel, you can create a one or more ~liquid_species~ objects, none or more  ~solid_species~ objects which allow for the mapping into weight percent, none or more ~reaction_rates~ objects that allow for the continuous display of negative and positive rates on a logarithmic scale, and isotope object, that allows for broken scales. These objects are then grouped into one or more vertical panels.
+#+BEGIN_SRC jupyter-python
+#  ---- z-axis (Depth) Scale and Limits ----
+z_scale = "lin"  # Or "linear" / "lin" (default: "log")
+z_lim = (0, 1)  # (z_min, z_max) in meters (default for log: (1e-4, display_length))
+
+# ----  concentration data panel  --- #
+liquid_species_1 = liquid_species({
+    "scale": "lin",
+    "species": ["SO4", "TS2"],
+    "lim": (0, 30),
+    "units": "mmol/l",
+})
+
+solid_species_1 = solid_species([
+    {
+        "scale": "lin",
+        "units": ["wt"],
+        "relative_to": "C",
+        "species": ["POC"],
+        # "lim": (0, 1),
+    }
+])
+
+# ----  reaction rate data panel  --- #
+reaction_rates_1 = reaction_rates({"species": ["POC"]})
+
+# ---- create final panel arrangement ------ #
+plot_panels = [
+    [liquid_species_1, solid_species_1],
+    [reaction_rates_1],
+]
+#+END_SRC
+
+
+* Advanced usage 
+** Kinetic Isotope Effects 
+** Speciation and Equilibrium Isotope Effects 
+** Carbonate Chemistry 
