@@ -665,5 +665,3 @@ def compute_chemical_jacobian(c, mp, k, species_names):
 diagenetic_reactions.compute_chemical_jacobian = compute_chemical_jacobian
 
 reaction_parameters = {'POC_O2_ratio': 1.27, 'K_epsilon_msr': 0.2}
-
-fractionation_factors = reaction_parameters

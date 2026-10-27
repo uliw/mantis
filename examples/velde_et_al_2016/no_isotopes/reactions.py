@@ -33,7 +33,6 @@ reaction_parameters = {
     # Transition factors for isotope fractionation limiters
     "K_epsilon_msr": 0.2,
 }
-fractionation_factors = reaction_parameters
 
 
 limiters = {

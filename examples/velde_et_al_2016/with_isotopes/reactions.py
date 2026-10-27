@@ -38,7 +38,6 @@ reaction_parameters = {
     "K_epsilon_msr": 0.2,
     "K_epsilon_TS2_O2": 0.01,
 }
-fractionation_factors = reaction_parameters
 
 
 limiters = {
@@ -91,7 +90,6 @@ reactions = [
         "k_value_name": "POC_fast",
         "limiters": ["SO4"],
         "inhibitors": ["O2", "Fe3_diss_red"],
-        "isotope_species": {"SO4": "SO4_S32", "TS2": "TS2_S32"},
         "isotope_fractionation": {
             "SO4_S32 to TS2_S32": ["msr_alpha", "SO4_alpha_explicit"]
         },
@@ -102,7 +100,6 @@ reactions = [
         "k_value_name": "POC_slow",
         "limiters": ["SO4"],
         "inhibitors": ["O2", "Fe3_diss_red"],
-        "isotope_species": {"SO4": "SO4_S32", "TS2": "TS2_S32"},
         "isotope_fractionation": {
             "SO4_S32 to TS2_S32": ["msr_alpha", "SO4_alpha_explicit"]
         },
@@ -116,7 +113,6 @@ reactions = [
         "reaction": "1 HS + 2 O2 -> 1 SO4",
         "k_value_name": "TS2_O2",
         "limiters": ["O2_TS2"],
-        "isotope_species": {"SO4": "SO4_S32", "TS2": "TS2_S32", "HS": "HS_S32"},
     },
     {
         "reaction_name": "sulfide_mediated_iron_reduction_velde",
@@ -124,7 +120,6 @@ reactions = [
         "k_value_name": "Fe3_hs",
         "limiters": ["Fe3"],
         "inhibitors": ["O2"],
-        "isotope_species": {"SO4": "SO4_S32", "TS2": "TS2_S32", "HS": "HS_S32"},
     },
     {
         "reaction_name": "Fe2_oxidation",
@@ -135,7 +130,6 @@ reactions = [
         "reaction_name": "FeS_oxidation",
         "reaction": "4 FeS + 9 O2 -> 4 Fe3 + 4 SO4",
         "k_value_name": "FeS_O2",
-        "isotope_species": {"FeS": "FeS_S32", "SO4": "SO4_S32"},
     },
 
     # -------------------------------------------------------------------------
@@ -149,6 +143,5 @@ reactions = [
             "dissolution": "FeS_isd",
             "equilibrium": "FeS_sp",
         },
-        "isotope_species": {"TS2": "TS2_S32", "FeS": "FeS_S32", "HS": "HS_S32"},
     },
 ]
