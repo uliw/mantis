@@ -3308,3 +3308,113 @@ def compute_sediment_age(
 
     return np.maximum(age, 0.0)
 
+
+def _find_constant_location(
+    key: str, filename: str | Any = None, calling_frame: Any = None
+) -> tuple[str | None, int | None]:
+    """Finds the source file name and line number where constant key was defined."""
+    import ast
+    import inspect
+    from pathlib import Path
+
+    cand_path: Path | None = None
+    frame_lineno: int | None = None
+
+    if filename is not None:
+        p = Path(str(filename))
+        if p.exists():
+            cand_path = p
+
+    if cand_path is None:
+        frame = calling_frame or inspect.currentframe()
+        while frame:
+            fn = frame.f_code.co_filename
+            if fn and not fn.endswith("diff_lib.py") and fn != "<string>":
+                p = Path(fn)
+                if p.exists():
+                    cand_path = p
+                    frame_lineno = frame.f_lineno
+                    break
+            frame = frame.f_back
+
+    if cand_path and cand_path.exists():
+        try:
+            tree = ast.parse(cand_path.read_text(encoding="utf-8", errors="ignore"))
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Dict):
+                    for k in node.keys:
+                        if isinstance(k, ast.Constant) and k.value == key:
+                            return str(cand_path), getattr(k, "lineno", None)
+        except Exception:
+            pass
+        return str(cand_path), frame_lineno
+
+    return None, frame_lineno
+
+
+def convert_reaction_constants(
+    constants: dict,
+    k_values: dict | Any = None,
+    filename: str | Any = None,
+) -> dict:
+    """Converts a dictionary of reaction constants with units into model SI base units.
+
+    Each constant value should be a string parsable by pint (e.g. '10 1/year',
+    '1e-3 dimensionless', '0.9 umol/cm^3') or a numeric value.
+    Converts directly to model units (meter, second, mole).
+
+    Parameters
+    ----------
+    constants : dict
+        Mapping from constant name to unit string or numeric value.
+    k_values : dict, optional
+        Target dictionary or data_container to populate. If None, a new dict is returned.
+    filename : str or Path, optional
+        Source file path for error reporting.
+
+    Returns
+    -------
+    dict
+        The populated k_values dictionary.
+
+    Raises
+    ------
+    ValueError
+        If pint cannot parse or convert a unit string, with the file and line number.
+    """
+    import inspect
+    import pint
+
+    ureg = pint.UnitRegistry()
+    if k_values is None:
+        k_values = {}
+
+    calling_frame = inspect.currentframe()
+    if calling_frame is not None:
+        calling_frame = calling_frame.f_back
+
+    for k, v in constants.items():
+        if isinstance(v, (int, float)):
+            k_values[k] = float(v)
+            continue
+        if not isinstance(v, str):
+            filepath, lineno = _find_constant_location(k, filename, calling_frame)
+            loc = f" at line {lineno}" if lineno else ""
+            file_loc = f" in {filepath}" if filepath else ""
+            raise ValueError(
+                f"Reaction constant '{k}'{loc}{file_loc} must be a string or number, got {type(v).__name__}."
+            )
+        try:
+            q = ureg.Quantity(v)
+            base_q = q.to_base_units()
+            k_values[k] = float(base_q.magnitude)
+        except Exception as exc:
+            filepath, lineno = _find_constant_location(k, filename, calling_frame)
+            loc = f" at line {lineno}" if lineno else ""
+            file_loc = f" in {filepath}" if filepath else ""
+            raise ValueError(
+                f"Cannot parse/convert unit for reaction constant '{k}'{loc}{file_loc} with value '{v}': {exc}"
+            ) from exc
+
+    return k_values
+

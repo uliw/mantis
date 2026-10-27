@@ -10,92 +10,50 @@ from typing import Any
 
 
 def get_reaction_constants(
-    pH: float, phi: float | Any, k_values: dict = {}
+    pH: float, phi: float | Any
 ) -> dict:
-    """Convert reaction_constants into model units.
+    """Return reaction constants with their initial units.
 
-        It is assumed that the reaction constants are in phase specific units.
-        This can be tricky, as Velde et al, state that their k-values are in
-        bulk units, but then they convert it before using (see Table 3). E.g.
-        they write:
-
-       (1−ϕ)⋅kSIR⋅[FeOOH]⋅[HS−]
-    ​
-        which suggests that the (1−ϕ) is used to convert FeOOH from solid
-        phase concentration to bulk concentration. Since this code
-        tracks all concentrations in phase specific units, converting the
-        k-value by deviding by (1−ϕ), would cancel out, and we can use the
-        k-value as published.
+    The model operates in SI units (meter, second, mole), and unit conversion
+    is automatically handled by diff_lib.py.
     """
-    import pint
-
-    ureg = pint.UnitRegistry()
-    Q_ = ureg.Quantity
-
     if hasattr(phi, "value"):
         phi = phi.value
 
     velde: dict = {
-        "POC_fast": [10, "1/year", "1/second"],  # highly reactive OM
-        "POC_slow": [0.1, "1/year", "1/second"],  # reactive OM, Velde et al
-        "Fe2_p_eq": [
-            696,
-            "dimensionless",
-            "dimensionless",
-        ],  # sorbed vs Fe2+ Fe2+ liq.
+        "POC_fast": "10 1/year",  # highly reactive OM
+        "POC_slow": "0.1 1/year",  # reactive OM, Velde et al
+        "Fe2_p_eq": "696 dimensionless",  # sorbed vs Fe2+ Fe2+ liq.
         # FeS + HS -> FeS2
-        "FeS_TS2": [
-            5e-8,
-            "m^3/(mol*second)",
-            "m^3/(mol*second)",
-        ],  # FeS + H2S -> FeS2, at 10C -> notes.org
-        "Hplus": [10 ** (-pH), "mol/l", "mol/m^3"],
+        "FeS_TS2": "5e-8 m^3/(mol*second)",  # FeS + H2S -> FeS2, at 10C -> notes.org
+        "Hplus": f"{10 ** (-pH)} mol/l",
         # Oxidation reactions after Velde at eal 2016
-        "TS2_O2": [1e7, "cm^3/(umol*year)", "m^3/(mol*second)"],
-        "Fe3_hs": [
-            494,
-            "cm^3/(umol*year)",
-            "m^3/(mol*second)",
-        ],  # check with halevy
-        "FeS_O2": [1e7, "cm^3/(umol*year)", "m^3/(mol*second)"],
-        "Fe2_O2": [1e7, "cm^3/(umol*year)", "m^3/(mol*second)"],
+        "TS2_O2": "1e7 cm^3/(umol*year)",
+        "Fe3_hs": "494 cm^3/(umol*year)",  # check with halevy
+        "FeS_O2": "1e7 cm^3/(umol*year)",
+        "Fe2_O2": "1e7 cm^3/(umol*year)",
         # Iron sulfide reactions after Velde at eal 2016
-        "FeS_isp": [
-            1e4,
-            "umol/((cm^3*year))",
-            "mol/(m^3 *second)",
-        ],  # FeS precipitation
-        "FeS_isd": [3, "1/year", "1/second"],  # FeS dissolution
-        "FeS_sp": [  # FeS equilibrium constant
-            10**-3.5,
-            "mol/l",
-            "mol/m^3 ",
-        ],
+        "FeS_isp": "1e4 umol/((cm^3*year))",  # FeS precipitation
+        "FeS_isd": "3 1/year",  # FeS dissolution
+        "FeS_sp": "10**-3.5 mol/l",  # FeS equilibrium constant
         # Monod half-saturation & inhibition thresholds
-        "K_O2": [0.001, "umol/cm^3", "mol/m^3"],
-        "K_O2_TS2": [0.001, "umol/cm^3", "mol/m^3"],
-        "K_SO4": [0.9, "umol/cm^3", "mol/m^3"],
-        "K_Fe3_diss_red": [10.4, "umol/cm^3", "mol/m^3"],
-        "K_Fe3": [1e-3, "dimensionless", "dimensionless"],
+        "K_O2": "0.001 umol/cm^3",
+        "K_O2_TS2": "0.001 umol/cm^3",
+        "K_SO4": "0.9 umol/cm^3",
+        "K_Fe3_diss_red": "10.4 umol/cm^3",
+        "K_Fe3": "1e-3 dimensionless",
     }
 
-    for k, v in velde.items():
-        k_values[k] = Q_(f"{v[0]} {v[1]}").to(f"{v[2]}").magnitude
-
-    return velde, k_values
+    return velde
 
 
 if __name__ == "__main__":
-    import pint
+    from mantis.diff_lib import convert_reaction_constants
 
-    ureg = pint.UnitRegistry()
-    Q_ = ureg.Quantity
-
-    velde, k_values = get_reaction_constants(7.5, 0.8)
-    ureg = pint.UnitRegistry()
-    for k, v in velde.items():
-        n = Q_(f"{v[0]} {v[1]}").to(f"{v[2]}")
-        print(f"{k} = {n.magnitude:.2e} [{n.units:~P}]")
+    velde = get_reaction_constants(7.5, 0.8)
+    k_values = convert_reaction_constants(velde)
+    for k, v in k_values.items():
+        print(f"{k} = {v:.2e}")
 
     print(f"k.FeS_sp * k.Hplus: {k_values['FeS_sp'] * k_values['Hplus']:.2e}")
     print(f"k.Hplus: {k_values['Hplus']:.2e}")

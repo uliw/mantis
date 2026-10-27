@@ -123,11 +123,15 @@ class ReactionSystemValidator:
         self.valid_constants = set()
         if hasattr(mod_constants, "get_reaction_constants"):
             try:
-                _velde, k_vals = mod_constants.get_reaction_constants(7.5, 0.8)
-                if isinstance(k_vals, dict):
-                    self.valid_constants.update(k_vals.keys())
-                if isinstance(_velde, dict):
-                    self.valid_constants.update(_velde.keys())
+                res = mod_constants.get_reaction_constants(7.5, 0.8)
+                if isinstance(res, tuple) and len(res) == 2:
+                    _velde, k_vals = res
+                    if isinstance(k_vals, dict):
+                        self.valid_constants.update(k_vals.keys())
+                    if isinstance(_velde, dict):
+                        self.valid_constants.update(_velde.keys())
+                elif isinstance(res, dict):
+                    self.valid_constants.update(res.keys())
             except Exception:
                 pass
 

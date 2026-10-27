@@ -1168,7 +1168,7 @@ class DiageneticModel:
             if hasattr(mod_rc, "get_reaction_constants"):
                 get_rc_fn = mod_rc.get_reaction_constants
             else:
-                raise AttributeError(f"{self.constants_file} must define get_reaction_constants(pH, phi, k_values).")
+                raise AttributeError(f"{self.constants_file} must define get_reaction_constants(pH, phi).")
 
             # 5. Chemical Jacobian strategy selection (heuristic switching between analytical and numerical)
             if "use_numerical_jacobian" not in getattr(self, "_user_configured_keys", set()):
@@ -1214,7 +1214,22 @@ class DiageneticModel:
         # 6. Evaluate k values
         k = data_container()
         if get_rc_fn is not None:
-            _k1, k = get_rc_fn(self.mp.pH, self.mp.phi, k_values=k)
+            res = get_rc_fn(self.mp.pH, self.mp.phi)
+            if isinstance(res, tuple) and len(res) == 2:
+                # User returned (raw_constants, converted_k)
+                k_raw, k_vals = res
+                if isinstance(k_vals, dict) and k_vals:
+                    k.update(k_vals)
+                elif isinstance(k_raw, dict):
+                    from mantis.diff_lib import convert_reaction_constants
+                    convert_reaction_constants(k_raw, k_values=k, filename=self.constants_file)
+            elif isinstance(res, dict):
+                from mantis.diff_lib import convert_reaction_constants
+                convert_reaction_constants(res, k_values=k, filename=self.constants_file)
+            elif res is not None:
+                raise TypeError(
+                    f"get_reaction_constants in {self.constants_file} must return a dict of reaction constants."
+                )
         self.mp.k = k
 
         # Propagate reaction and equilibrium constants from k to self.mp if not already configured
