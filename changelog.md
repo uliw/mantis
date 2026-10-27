@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-10-27
+
+### Added
+
+- **Automatic Isotope Species Mapping (`derive_isotope_species_map`)**:
+  - Automatically derives reaction isotope species mappings from reaction stoichiometries and species metadata, eliminating the need to manually declare `isotope_species` dictionaries for each reaction in `reactions.py` while preserving backwards compatibility for explicit overrides.
+- **Centralized Reaction Constant Unit Parsing (`convert_reaction_constants`)**:
+  - Centralized rate constant unit conversion in `diff_lib.convert_reaction_constants`, utilizing `pint` to automatically parse string units and convert them to SI base units.
+  - Simplified `kinetic_constants.py` templates by removing redundant manual conversion code, accompanied by clear error reporting with filenames and line numbers.
+- **Diffusion-Only Simulation Support & Context-Aware pH Validation**:
+  - Added support for purely physical transport models without reaction networks (`reactions=None` or empty lists) via `__DIFFUSION_ONLY__` mode, making `reactions` and `constants` arguments optional in `DiageneticModel`.
+  - Context-aware pH verification: models without an explicit pH specification only warn or raise errors if active reactions or speciation actually require pH.
+- **Equilibrium Isotope Fractionation in Speciation**:
+  - Implemented equilibrium isotope fractionation support directly within declarative speciation blocks (`equilibrium_fractionation` / `isotope_fractionation`), dynamically updating companion isotope pools while preserving mass conservation.
+- **CLI Utility `mantis_create_examples`**:
+  - Added a new command-line tool `mantis_create_examples` (registered in `pyproject.toml`) to copy bundled MANTIS example models and templates into user working directories with overwrite protection (`--overwrite`).
+- **Examples & Plotting Enhancements**:
+  - Added a minimal `examples/basic_transport_and_reaction/` starter template illustrating fundamental transport and reaction cascades.
+  - Enhanced `plot_data_new.py` to handle `None` values in `xlim` (substituting defaults for log/linear scales) and added `z_scale` / `z_lim` aliases for depth axis customization.
+  - Rewritten and expanded tutorial documentation in `docs/Tutorial_new.org`.
+
+## [0.4.1] - 2026-10-25
+
+- Documentation and changelog update for the v0.4.0 release.
+
 ## [0.4.0] - 2026-10-25
 
 ### Added
