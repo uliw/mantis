@@ -356,6 +356,54 @@ class ReactionSystemValidator:
 
         raise ValueError(f"[MANTIS ERROR] No isotope standard found for species '{iso_sp}'.")
 
+    def derive_isotope_species_map(self, r: Dict[str, Any]) -> Dict[str, str]:
+        """Derives or retrieves the isotope species mapping for a reaction.
+
+        If 'isotope_species' is explicitly provided in the reaction dictionary, it is used.
+        Otherwise, it is automatically derived from the species involved in the reaction
+        (reactants and products) and their parent species defined with 'isotopes' in species.py.
+        """
+        explicit_map = r.get("isotope_species")
+        if isinstance(explicit_map, dict) and explicit_map:
+            return dict(explicit_map)
+
+        rxn_str = r.get("reaction", "")
+        if not rxn_str or "->" not in rxn_str:
+            return {}
+
+        try:
+            reactants, products = self.parse_reaction_species(rxn_str)
+        except Exception:
+            return {}
+
+        species_defs = getattr(self, "species_defs", {})
+        if not species_defs:
+            return {}
+
+        involved_species: Set[str] = set()
+        for _, sp in reactants + products:
+            involved_species.add(sp)
+            parent = self.get_parent_species(sp)
+            if parent:
+                involved_species.add(parent)
+
+        derived_map: Dict[str, str] = {}
+        for sp in involved_species:
+            meta = species_defs.get(sp, {})
+            isotopes = meta.get("isotopes")
+            if isinstance(isotopes, dict):
+                for iso_sp in isotopes.keys():
+                    derived_map[sp] = iso_sp
+            parent = self.get_parent_species(sp)
+            if parent and parent != sp:
+                p_meta = species_defs.get(parent, {})
+                p_isotopes = p_meta.get("isotopes")
+                if isinstance(p_isotopes, dict):
+                    for iso_sp in p_isotopes.keys():
+                        derived_map[parent] = iso_sp
+
+        return derived_map
+
     def validate_reaction(self, rxn_dict: Dict[str, Any]) -> List[str]:
         """Validates a single reaction dictionary. Returns a list of error messages (empty if valid)."""
         errors = []
@@ -1045,7 +1093,7 @@ class EquationSystemGenerator:
             '    )',
         ])
 
-        iso_sp_map = r.get("isotope_species")
+        iso_sp_map = self.validator.derive_isotope_species_map(r)
         if iso_sp_map:
             # Find the reactant that participates in isotope tracking
             iso_r_candidates = [
@@ -1280,7 +1328,7 @@ class EquationSystemGenerator:
             ])
 
         # Isotope handling for reversible saturation
-        iso_sp_map = r.get("isotope_species", {})
+        iso_sp_map = self.validator.derive_isotope_species_map(r)
         if iso_sp_map:
             # Find reactant that tracks isotopes
             iso_r = [
@@ -1539,7 +1587,7 @@ class EquationSystemGenerator:
                 ])
 
         # Isotope Jacobian entries
-        iso_sp_map = r.get("isotope_species", {})
+        iso_sp_map = self.validator.derive_isotope_species_map(r)
         if iso_sp_map:
             iso_r = [
                 (coeff, sp, p_sp) for coeff, sp, p_sp, _ in reactants_info
@@ -1768,7 +1816,7 @@ class EquationSystemGenerator:
                 lines.append(f'        J[:, idx["{p_tgt}"], idx["{diff_p}"]] += {coeff_p} * {d_var}')
 
             # Companion isotopes (e.g. 32S, 13C, 15N)
-            iso_sp_map = r.get("isotope_species")
+            iso_sp_map = self.validator.derive_isotope_species_map(r)
             if iso_sp_map:
                 iso_r_candidates = [
                     (c, s, self.validator.get_parent_species(s))
