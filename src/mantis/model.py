@@ -1222,10 +1222,10 @@ class DiageneticModel:
                     k.update(k_vals)
                 elif isinstance(k_raw, dict):
                     from mantis.diff_lib import convert_reaction_constants
-                    convert_reaction_constants(k_raw, k_values=k, filename=self.constants_file)
+                    convert_reaction_constants(k_raw, k_values=k, filename=self.constants_file, mp=self.mp)
             elif isinstance(res, dict):
                 from mantis.diff_lib import convert_reaction_constants
-                convert_reaction_constants(res, k_values=k, filename=self.constants_file)
+                convert_reaction_constants(res, k_values=k, filename=self.constants_file, mp=self.mp)
             elif res is not None:
                 raise TypeError(
                     f"get_reaction_constants in {self.constants_file} must return a dict of reaction constants."

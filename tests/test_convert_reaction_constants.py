@@ -81,3 +81,41 @@ def test_convert_reaction_constants_non_string_non_number_error(tmp_path):
     assert "bad_list" in msg
     assert "line 3" in msg
     assert "must be a string or number" in msg
+
+
+def test_convert_reaction_constants_with_sed_age():
+    import numpy as np
+    from mantis.diff_lib import sed_age
+
+    class MockMP:
+        z = np.linspace(0, 0.5, 50)
+        w = 0.1404 / 100.0  # m/yr
+        phi = 0.85
+        Db = None
+
+    mp = MockMP()
+
+    # Relative mode
+    age = sed_age(mode="relative", a0=1.0, a=0.21, b=1.22)
+    constants = {
+        "k_POC": "age * 0.01 1/year",
+        "K_SO4": "0.9 umol/cm^3",
+    }
+    k_vals = convert_reaction_constants(constants, mp=mp)
+    assert isinstance(k_vals["k_POC"], np.ndarray)
+    assert len(k_vals["k_POC"]) == 50
+    # Surface age is 0 -> factor is 1.0 -> 0.01 1/year in SI
+    assert pytest.approx(k_vals["k_POC"][0], rel=1e-5) == 0.01 / (365.25 * 86400)
+    # Decreases with depth
+    assert k_vals["k_POC"][-1] < k_vals["k_POC"][0]
+    assert pytest.approx(k_vals["K_SO4"], rel=1e-6) == 0.9
+
+    # Direct mode
+    age_dir = sed_age(mode="direct", a0=1.0, a=0.21, b=1.22)
+    constants_dir = {
+        "k_POC": "age",
+    }
+    k_vals_dir = convert_reaction_constants(constants_dir, mp=mp)
+    assert isinstance(k_vals_dir["k_POC"], np.ndarray)
+    assert pytest.approx(k_vals_dir["k_POC"][0], rel=1e-5) == 0.21 / (365.25 * 86400)
+

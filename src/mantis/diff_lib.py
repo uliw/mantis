@@ -3309,6 +3309,191 @@ def compute_sediment_age(
     return np.maximum(age, 0.0)
 
 
+def compute_apparent_rate_constant(
+    age: Any,
+    a0: float = 1.0,
+    a: float = 0.21,
+    b: float = 1.22,
+) -> np.ndarray:
+    """Computes Middleburg power-law organic matter degradation rate constant [1/s].
+
+    k_POC(age) = a * (age + a0)**(-b) [yr^-1] converted to SI [s^-1].
+
+    Parameters
+    ----------
+    age : array-like or float
+        Sediment age in [yr].
+    a0 : float, default 1.0
+        Initial sediment age offset [yr] at sediment-water interface.
+    a : float, default 0.21
+        Middelburg scaling parameter [yr^-1].
+    b : float, default 1.22
+        Middelburg decay exponent.
+
+    Returns
+    -------
+    np.ndarray
+        Apparent degradation rate constant profile in SI units [1/s].
+    """
+    age_arr = np.asarray(age.value if hasattr(age, "value") else age, dtype=np.float64)
+    sec_per_yr = 365.25 * 86400.0
+    return (float(a) * (age_arr + float(a0)) ** (-float(b))) / sec_per_yr
+
+
+class AgeProfile:
+    """Represents a sediment-age dependent profile for reaction rate constants."""
+
+    def __init__(
+        self,
+        mode: str = "relative",
+        a0: float = 1.0,
+        a: float = 0.21,
+        b: float = 1.22,
+        z: Any = None,
+        w: Any = None,
+        phi: Any = None,
+        Db: Any = None,
+    ):
+        self.mode = mode.lower()
+        self.a0 = float(a0)
+        self.a = float(a)
+        self.b = float(b)
+        self.z = z
+        self.w = w
+        self.phi = phi
+        self.Db = Db
+        self._cached_profile: np.ndarray | None = None
+
+    def evaluate(
+        self,
+        z: Any = None,
+        w: Any = None,
+        phi: Any = None,
+        Db: Any = None,
+    ) -> np.ndarray:
+        """Evaluates the age profile on the given grid coordinates and transport parameters."""
+        z_use = z if z is not None else self.z
+        w_use = w if w is not None else self.w
+        phi_use = phi if phi is not None else self.phi
+        Db_use = Db if Db is not None else self.Db
+
+        if z_use is None or w_use is None:
+            raise ValueError(
+                "Cannot evaluate AgeProfile without sediment depth coordinates 'z' and burial velocity 'w'."
+            )
+
+        # Convert w to yr^-1 or m/yr if passed in m/s
+        sec_per_yr = 365.25 * 86400.0
+        w_val = w_use.value if hasattr(w_use, "value") else w_use
+        if np.ndim(w_val) == 0 and float(w_val) < 1e-4:
+            w_use = float(w_val) * sec_per_yr
+        elif hasattr(w_val, "__iter__") and np.any(np.asarray(w_val) < 1e-4):
+            w_use = np.asarray(w_val) * sec_per_yr
+
+        if Db_use is not None:
+            Db_val = Db_use.value if hasattr(Db_use, "value") else Db_use
+            if np.ndim(Db_val) == 0 and float(Db_val) < 1e-6:
+                Db_use = float(Db_val) * sec_per_yr
+            elif hasattr(Db_val, "__iter__") and np.any(np.asarray(Db_val) < 1e-6):
+                Db_use = np.asarray(Db_val) * sec_per_yr
+
+        age_yr = compute_sediment_age(z_use, w=w_use, phi=phi_use, Db=Db_use)
+
+        if self.mode == "relative":
+            # Dimensionless scaling factor: ((age + a0) / a0)^(-b). At surface age=0, factor is 1.0.
+            return ((age_yr + self.a0) / self.a0) ** (-self.b)
+        elif self.mode == "direct":
+            # Direct Middelburg apparent rate in SI [1/s]
+            return compute_apparent_rate_constant(age_yr, a0=self.a0, a=self.a, b=self.b)
+        else:
+            raise ValueError(f"Unknown sed_age mode: '{self.mode}'. Must be 'relative' or 'direct'.")
+
+    def __mul__(self, other: Any) -> AgeScaledExpression:
+        return AgeScaledExpression(self, other)
+
+    def __rmul__(self, other: Any) -> AgeScaledExpression:
+        return AgeScaledExpression(self, other)
+
+    def __repr__(self) -> str:
+        return f"sed_age(mode={self.mode!r}, a0={self.a0}, a={self.a}, b={self.b})"
+
+
+class AgeScaledExpression:
+    """Represents an expression combining an AgeProfile with a rate or unit string."""
+
+    def __init__(self, age_profile: AgeProfile, factor: Any):
+        self.age_profile = age_profile
+        self.factor = factor
+
+    def evaluate(self, z: Any = None, w: Any = None, phi: Any = None, Db: Any = None) -> np.ndarray:
+        import pint
+
+        ureg = pint.UnitRegistry()
+        age_arr = self.age_profile.evaluate(z=z, w=w, phi=phi, Db=Db)
+        if isinstance(self.factor, (int, float)):
+            return age_arr * float(self.factor)
+        elif isinstance(self.factor, str):
+            base_mag = ureg.Quantity(self.factor).to_base_units().magnitude
+            return age_arr * float(base_mag)
+        else:
+            raise TypeError(f"Unsupported factor type in AgeScaledExpression: {type(self.factor)}")
+
+    def __repr__(self) -> str:
+        return f"{self.factor} * {self.age_profile!r}"
+
+
+class _ActiveAgeContext:
+    """Thread/module context holding the latest defined sed_age instance."""
+
+    last_profile: AgeProfile | None = None
+
+
+def sed_age(
+    mode: str = "relative",
+    a0: float = 1.0,
+    a: float = 0.21,
+    b: float = 1.22,
+    z: Any = None,
+    w: Any = None,
+    phi: Any = None,
+    Db: Any = None,
+) -> AgeProfile:
+    """Creates a sediment-age dependent profile for organic matter reaction rate constants.
+
+    Supports two operation modes:
+    - mode="relative": Dimensionless attenuation factor ((age + a0) / a0)**(-b) with surface value 1.0.
+      Used e.g. as "age * 0.01 1/year".
+    - mode="direct": Direct Middelburg apparent degradation rate constant [1/s]: a * (age + a0)**(-b).
+
+    Parameters
+    ----------
+    mode : {"relative", "direct"}, default "relative"
+        Scaling mode.
+    a0 : float, default 1.0
+        Initial sediment age offset [yr] at surface.
+    a : float, default 0.21
+        Middelburg scaling parameter [yr^-1].
+    b : float, default 1.22
+        Middelburg decay exponent.
+    z : array-like, optional
+        Sediment depth coordinates.
+    w : float or array-like, optional
+        Sediment burial velocity.
+    phi : float or array-like, optional
+        Porosity profile.
+    Db : float or array-like, optional
+        Bioturbation biodiffusion coefficient.
+
+    Returns
+    -------
+    AgeProfile
+        A profile proxy that scales reaction rate constants with depth/age.
+    """
+    profile = AgeProfile(mode=mode, a0=a0, a=a, b=b, z=z, w=w, phi=phi, Db=Db)
+    _ActiveAgeContext.last_profile = profile
+    return profile
+
+
 def _find_constant_location(
     key: str, filename: str | Any = None, calling_frame: Any = None
 ) -> tuple[str | None, int | None]:
@@ -3356,21 +3541,25 @@ def convert_reaction_constants(
     constants: dict,
     k_values: dict | Any = None,
     filename: str | Any = None,
+    mp: Any = None,
 ) -> dict:
     """Converts a dictionary of reaction constants with units into model SI base units.
 
     Each constant value should be a string parsable by pint (e.g. '10 1/year',
-    '1e-3 dimensionless', '0.9 umol/cm^3') or a numeric value.
-    Converts directly to model units (meter, second, mole).
+    '1e-3 dimensionless', '0.9 umol/cm^3', 'age * 0.01 1/year'), an AgeProfile/AgeScaledExpression,
+    or a numeric value. Converts directly to model units (meter, second, mole).
 
     Parameters
     ----------
     constants : dict
-        Mapping from constant name to unit string or numeric value.
+        Mapping from constant name to unit string, age-scaled expression, or numeric value.
     k_values : dict, optional
         Target dictionary or data_container to populate. If None, a new dict is returned.
     filename : str or Path, optional
         Source file path for error reporting.
+    mp : Any, optional
+        Model parameters container supplying grid coordinates 'z', burial velocity 'w',
+        porosity 'phi', and bioturbation 'Db' when evaluating age profiles.
 
     Returns
     -------
@@ -3383,6 +3572,7 @@ def convert_reaction_constants(
         If pint cannot parse or convert a unit string, with the file and line number.
     """
     import inspect
+    import re
     import pint
 
     ureg = pint.UnitRegistry()
@@ -3393,10 +3583,45 @@ def convert_reaction_constants(
     if calling_frame is not None:
         calling_frame = calling_frame.f_back
 
+    # Helper to resolve mp context for age profiles
+    def _eval_age_profile(ap: AgeProfile, factor_mag: float = 1.0) -> np.ndarray:
+        z = getattr(mp, "z", None) if mp is not None else ap.z
+        w = getattr(mp, "w", None) if mp is not None else ap.w
+        phi = getattr(mp, "phi", None) if mp is not None else ap.phi
+        Db = getattr(mp, "Db", None) if mp is not None else ap.Db
+        if z is None or w is None:
+            # Deferred evaluation placeholder or return AgeScaledExpression
+            return AgeScaledExpression(ap, factor_mag)
+        evaluated = ap.evaluate(z=z, w=w, phi=phi, Db=Db)
+        return evaluated * factor_mag
+
     for k, v in constants.items():
         if isinstance(v, (int, float)):
             k_values[k] = float(v)
             continue
+        elif isinstance(v, np.ndarray):
+            k_values[k] = v
+            continue
+        elif isinstance(v, AgeProfile):
+            k_values[k] = _eval_age_profile(v, factor_mag=1.0)
+            continue
+        elif isinstance(v, AgeScaledExpression):
+            if isinstance(v.factor, str):
+                try:
+                    q = ureg.Quantity(v.factor)
+                    f_mag = float(q.to_base_units().magnitude)
+                except Exception as exc:
+                    filepath, lineno = _find_constant_location(k, filename, calling_frame)
+                    loc = f" at line {lineno}" if lineno else ""
+                    file_loc = f" in {filepath}" if filepath else ""
+                    raise ValueError(
+                        f"Cannot parse/convert unit for reaction constant '{k}'{loc}{file_loc} with factor '{v.factor}': {exc}"
+                    ) from exc
+            else:
+                f_mag = float(v.factor)
+            k_values[k] = _eval_age_profile(v.age_profile, factor_mag=f_mag)
+            continue
+
         if not isinstance(v, str):
             filepath, lineno = _find_constant_location(k, filename, calling_frame)
             loc = f" at line {lineno}" if lineno else ""
@@ -3404,6 +3629,29 @@ def convert_reaction_constants(
             raise ValueError(
                 f"Reaction constant '{k}'{loc}{file_loc} must be a string or number, got {type(v).__name__}."
             )
+
+        # Check for sediment age expression in string e.g. "age * 0.01 1/year" or "0.01 1/year * age"
+        if re.search(r"\bage\b", v):
+            stripped = re.sub(r"\bage\s*\*\s*", "", v)
+            stripped = re.sub(r"\s*\*\s*\bage\b", "", stripped).strip()
+            if stripped == "age" or stripped == "":
+                stripped = "1.0 dimensionless"
+
+            try:
+                q = ureg.Quantity(stripped)
+                base_mag = float(q.to_base_units().magnitude)
+            except Exception as exc:
+                filepath, lineno = _find_constant_location(k, filename, calling_frame)
+                loc = f" at line {lineno}" if lineno else ""
+                file_loc = f" in {filepath}" if filepath else ""
+                raise ValueError(
+                    f"Cannot parse/convert unit for reaction constant '{k}'{loc}{file_loc} with value '{v}': {exc}"
+                ) from exc
+
+            active_ap = _ActiveAgeContext.last_profile or AgeProfile(mode="relative")
+            k_values[k] = _eval_age_profile(active_ap, factor_mag=base_mag)
+            continue
+
         try:
             q = ureg.Quantity(v)
             base_q = q.to_base_units()

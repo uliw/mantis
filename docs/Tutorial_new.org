@@ -1,4 +1,4 @@
-#+TITLE: Mantis quick start Tutorial
+#+TITLE: Mantis Quick Start Tutorial
 #+AUTHOR:Ulrich G. Wortmann
 #+STARTUP: showall shrink inlineimages
 #+OPTIONS: todo:nil tasks:nil tags:nil
@@ -74,6 +74,11 @@ if __name__ == "__main__":
     result.plot_summary()
 #+END_SRC
 
+*** Setting up a grid
+- uniform grid
+- single increasing grid distance
+- defining on more reaction zones
+- a word on grid resolution and its effect on dt and the accuracy of results along steep reaction fronts 
 *** Defining the species that participate in the model 
 The species file contains all the information we need to know about a species. This includes the type (solid or liquid), diffusion coefficients, boundary conditions, the chemical formula, as well as a field that decides whether a species is part of the transport reactions. Most species are covered by the ~diff_coeff~ function with the ~m0, m1~ parameter listed in Table 4.8 in Boudreau 1996. Note that diffusion coefficients are only needed for species that are part of the reaction-transport matrix (i.e., where include = True). As before, all properties are defined in a dictionary. Unless a lower boundary condition is specified, it defaults to a zero gradient Neumann condition. The ~prefill~ parameter determines of the initial species concentration across the modeling domains is set to the upper boundary condition or to zero. Note that "CO2" and "H2O" need to be present, even so they do not appear in the model directly. 
 #+BEGIN_SRC jupyter-python
@@ -142,6 +147,32 @@ import pint
 
    return constants, k_values
 #+END_SRC
+
+**** Age-dependent reaction rates
+Organic matter reactivity decreases with depth as sediment ages and labile compounds are degraded. In MANTIS, age-dependent reaction rate constants can be defined using the built-in ~sed_age~ function from ~mantis.diff_lib~:
+
+#+BEGIN_SRC jupyter-python
+from mantis.diff_lib import sed_age
+
+def get_reaction_constants(pH, phi):
+    # Configure sediment aging profile (Middelburg power law: a0=1.0 yr, a=0.21 yr^-1, b=1.22)
+    age = sed_age(mode="relative", a0=1.0, a=0.21, b=1.22)
+
+    constants = {
+        # 'relative' mode scales the initial rate constant by ((age + a0) / a0)^(-b):
+        "k_POC": "age * 0.01 1/year",
+
+        # Monod half-saturation for microbial sulfate reduction
+        "K_SO4": "0.9 umol/cm^3",
+    }
+    return constants
+#+END_SRC
+
+Two scaling modes are supported:
+- ~mode="relative"~ (default): Evaluates a dimensionless attenuation factor $((A(z) + a_0) / a_0)^{-b}$ with surface value $1.0$. The reaction constant is specified as ~"age * <initial_rate>"~ (e.g. ~"age * 0.01 1/year"~).
+- ~mode="direct"~: Directly computes the Middelburg apparent rate constant $k(z) = a \cdot (A(z) + a_0)^{-b}$ (in $[1/\text{yr}]$ converted to SI $[1/\text{s}]$), specified simply as ~"age"~ or ~"1.0 * age"~.
+
+The sediment age profile $A(z)$ is computed automatically from 1D advective-diffusive transport accounting for burial velocity ($w$), porosity compaction ($\phi$), and bioturbation mixing ($D_b$).
 
 *** Setting up reactions
 Microbial sulfate reduction rates are sensitive to sulfate concentrations, so in the reactions file, we first define a limiter for ~SO4~. This is followed by a list of dictionaries that define the reactions of the model. The reaction name is arbitrary, but the chemical reaction can only use names that are defined in the species file. An important limitation is that the stoichiometric must be integer numbers. The kinetic constant name must exist in the kinetic constants file, the limiters parameter will only accept values that are defined in the ~limiters~ dictionary. 
@@ -222,7 +253,7 @@ Crucially, concentrations are defined *per unit volume of their respective phase
  - *Phase Transfer & Reactions*: Whenever a reaction couples a solid phase and a liquid phase (for example, \(\text{Fe}^{2+} + \text{HS}^- \to \text{FeS}\)), MANTIS scales the source and sink terms with the appropriate phase ratio (\((1-\phi)/\phi\) or \(\phi/(1-\phi)\)) so that mass is strictly conserved. 
  - *Reaction Rates*: Solved internally in \(\text{mol} / (\text{m}^3_{\text{phase}} \cdot \text{s})\).
  - *Depths and Transport*: Depth \(z\) is in meters (\(\text{m}\)), time \(t\) in seconds (\(\text{s}\)), and diffusion coefficients in \(\text{m}^2/\text{s}\).
-
+   
 **** Output Units
 When the simulation completes or exports data (=<model_name>.csv=): 
 - =c_<species>=: Reported directly in *\(\text{mmol/L}\)* (numerically equivalent to \(\text{mol/m}^3\)): 
@@ -233,8 +264,7 @@ When the simulation completes or exports data (=<model_name>.csv=):
 - =z=: Depth below sediment-water interface in *meters* (\(\text{m}\)). 
 - =phi= and =w=: Porosity (fraction, dimensionless) and burial velocity (\(\text{m/s}\)).
 
-
-**** A. Converting to \(\mu\text{mol / g}\) (micromoles per gram of dry sediment)
+ Converting to \(\mu\text{mol / g}\) (micromoles per gram of dry sediment)
 To convert a solid concentration \(C_{\text{solid}}\) (\(\text{mmol/L of solid} = \mu\text{mol/cm}^3_{\text{solid}}\)) to \(\mu\text{mol/g}\) of dry sediment, divide by the mineral grain density \(\rho_{\text{sed}}\) (typically \(2.6\ \text{g/cm}^3\) for siliciclastic sediments): \[C_{\mu\text{mol/g}} = \frac{C_{\text{solid}}}{\rho_{\text{sed}}}\]
 
 #+begin_src python
@@ -243,7 +273,6 @@ from mantis.diff_lib import solid_conc_to_umol_per_g
 # df.c_FeS is in mmol/L of solid; density in g/cm^3
 c_fes_umol_g = solid_conc_to_umol_per_g(df.c_FeS, d=2.6)
 #+end_src
-
 
 **** B. Converting to Dry Weight Percent (\(\text{wt}\%\))
 To convert \(C_{\text{solid}}\) to weight percent of dry sediment matrix given molecular weight \(M_w\) (\(\text{g/mol}\)): \[\text{wt}\% = \frac{C_{\text{solid}} \cdot M_w}{\rho_{\text{sed}} \cdot 10^4}\]
@@ -258,6 +287,7 @@ fes_wt_pct = solid_conc_to_wt_percent(df.c_FeS, mw=87.91, d=2.6, phi=df.phi)
 #+end_src
 
 * Advanced usage 
+
 ** Kinetic Isotope Effects 
 To model isotope effects the main model script must set ~isotopes=True~, the species file must define isotope species, and the reaction file must define isotope effects (you also need to update the plot file). A full example is available in the ~examples/velde_et_al_2016/with_isotopes/~ directory. The below snippets outline the basic steps. 
 
@@ -294,7 +324,6 @@ reaction_parameters = {
         },
     },
 #+END_SRC
-
 
 ** Speciation, pH and Equilibrium Isotope Effects 
 ** Carbonate Chemistry 
