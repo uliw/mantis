@@ -384,9 +384,13 @@ class DiageneticModel:
             elif key == "check_reactant_coexistence":
                 self.p_dict["check_reactant_coexistence"] = bool(val)
             elif key in ("diffusive_boundary_layer", "dbl"):
-                val_m = self._convert_value(val)
-                self.p_dict["diffusive_boundary_layer"] = float(val_m)
-                self.p_dict["dbl"] = float(val_m)
+                if val is None or val == 0.0 or val == 0:
+                    self.p_dict["diffusive_boundary_layer"] = 0.0
+                    self.p_dict["dbl"] = 0.0
+                else:
+                    val_m = self._convert_value(val)
+                    self.p_dict["diffusive_boundary_layer"] = float(val_m)
+                    self.p_dict["dbl"] = float(val_m)
             elif key == "bioturbation" and isinstance(val, dict):
                 c_val = self._convert_value(val)
                 if "BT0" in c_val:

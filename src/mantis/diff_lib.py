@@ -2745,7 +2745,7 @@ def compute_carbonate_speciation(c: Any, mp: Any) -> None:
     ta_non_carb = np.zeros_like(ta_val, dtype=np.float64)
 
     if non_carb_species:
-        for _ in range(4):
+        for _ in range(12):
             ta_non_carb = np.zeros_like(ta_val, dtype=np.float64)
             ph_arr = -np.log10(np.maximum(h_plus, 1e-14))
             eval_ctx_base = {
@@ -2787,8 +2787,10 @@ def compute_carbonate_speciation(c: Any, mp: Any) -> None:
             b = K1 * (ta_carb - dic_val)
             c_term = K1 * K2 * (ta_carb - 2.0 * dic_val)
             disc = np.maximum(b**2 - 4.0 * a * c_term, 0.0)
-            h_plus = (-b + np.sqrt(disc)) / (2.0 * a)
-            h_plus = np.maximum(h_plus, 1e-14)
+            h_new = (-b + np.sqrt(disc)) / (2.0 * a)
+            h_new = np.maximum(h_new, 1e-14)
+            # Under-relaxation to eliminate fixed-point oscillation between acid-base pools
+            h_plus = 0.5 * h_plus + 0.5 * h_new
     else:
         # Fallback for models without explicit include_in_TA if TS2 is present
         Ka1_H2S = 10.0 ** (-float(getattr(mp, "pKa1_H2S", 7.0)))
@@ -2796,7 +2798,7 @@ def compute_carbonate_speciation(c: Any, mp: Any) -> None:
         if ts2_raw is not None:
             ts2_val = _get_val_arr(ts2_raw)
             if np.any(ts2_val > 1e-12):
-                for _ in range(3):
+                for _ in range(12):
                     hs_alk = ts2_val * (Ka1_H2S / (h_plus + Ka1_H2S))
                     ta_carb = np.maximum(ta_val - hs_alk, 1e-12)
                     ta_non_carb = hs_alk
@@ -2804,8 +2806,9 @@ def compute_carbonate_speciation(c: Any, mp: Any) -> None:
                     b = K1 * (ta_carb - dic_val)
                     c_term = K1 * K2 * (ta_carb - 2.0 * dic_val)
                     disc = np.maximum(b**2 - 4.0 * a * c_term, 0.0)
-                    h_plus = (-b + np.sqrt(disc)) / (2.0 * a)
-                    h_plus = np.maximum(h_plus, 1e-14)
+                    h_new = (-b + np.sqrt(disc)) / (2.0 * a)
+                    h_new = np.maximum(h_new, 1e-14)
+                    h_plus = 0.5 * h_plus + 0.5 * h_new
 
     denom = h_plus**2 + K1 * h_plus + K1 * K2
     co3 = dic_val * (K1 * K2) / denom

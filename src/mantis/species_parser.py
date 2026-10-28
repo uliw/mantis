@@ -400,7 +400,13 @@ def parse_and_validate_species_dict(
             # Check for diffusive boundary layer (DBL)
             for k_dbl in ("dbl", "diffusive_boundary_layer", "dbl_thickness"):
                 if k_dbl in extras:
-                    bc_entry["dbl"] = float(extras[k_dbl])
+                    v_dbl = extras[k_dbl]
+                    if isinstance(v_dbl, str):
+                        from pint import UnitRegistry
+                        _u = ureg if ureg is not None else UnitRegistry()
+                        bc_entry["dbl"] = float(_u(v_dbl).to("m").magnitude)
+                    else:
+                        bc_entry["dbl"] = float(v_dbl)
             # Preserve delta values for isotope companions
             for k_extra, v_extra in extras.items():
                 if k_extra in val_stds:
