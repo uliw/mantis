@@ -994,6 +994,54 @@ def _get_species_style(species_name, colormap_spec=None, colormap_override=None,
     return style
 
 
+_ureg = None
+
+
+def _get_ureg():
+    global _ureg
+    if _ureg is None:
+        import pint
+        _ureg = pint.UnitRegistry()
+    return _ureg
+
+
+def _convert_concentration_unit(series, target_units, base_units="mmol/L"):
+    """Convert a concentration series from base_units (default mmol/L) to target_units using pint."""
+    if not target_units:
+        return series
+    t_clean = str(target_units).strip().replace(" ", "")
+    # Normalize common abbreviations
+    if t_clean.lower() in ("mmol/l", "mm", "mmol"):
+        return series
+    try:
+        ureg = _get_ureg()
+        # Handle case where user passes e.g. uM or mM or mol/L
+        q_base = 1.0 * ureg(base_units)
+        target_q = ureg(t_clean)
+        factor = float(q_base.to(target_q).magnitude)
+        return series * factor
+    except Exception:
+        # If conversion is not recognized (e.g. custom or dimensionless string), keep series as-is
+        return series
+
+
+def _convert_rate_unit(series, target_units, base_units="mol/(m^3*s)"):
+    """Convert a reaction rate series from base_units (mol/(m^3*s)) to target_units using pint."""
+    if not target_units:
+        return series
+    t_clean = str(target_units).strip().replace(" ", "")
+    if t_clean in ("mol/(m^3*s)", "mol/m^3/s", "mol*m^-3*s^-1"):
+        return series
+    try:
+        ureg = _get_ureg()
+        q_base = 1.0 * ureg(base_units)
+        target_q = ureg(t_clean)
+        factor = float(q_base.to(target_q).magnitude)
+        return series * factor
+    except Exception:
+        return series
+
+
 def _convert_solid_to_wt(series, relative_to, df):
     """Convert solid concentration (mmol/L_solid) to wt% dry sediment."""
     from mantis.diff_lib import solid_conc_to_wt_percent
@@ -1015,6 +1063,20 @@ def _convert_solid_to_wt(series, relative_to, df):
 
     phi = df["phi"] if "phi" in df.columns else 0.8
     return solid_conc_to_wt_percent(series, mw, rho_solid, phi)
+
+
+def _convert_solid_to_umol_per_g(series, df):
+    """Convert solid concentration (mmol/L_solid) to umol/g dry sediment."""
+    from mantis.diff_lib import solid_conc_to_umol_per_g
+
+    rho_solid = getattr(df, "rho_solid", 2.6)
+    if hasattr(rho_solid, "iloc"):
+        rho_solid = float(rho_solid.iloc[0])
+    elif not isinstance(rho_solid, (int, float)):
+        rho_solid = 2.6
+
+    return solid_conc_to_umol_per_g(series, rho_solid)
+
 
 
 def _pretty_species_label(name, rel_elem=None):
@@ -1137,7 +1199,8 @@ def _compile_single_spec(
     if kind == "reaction_rates":
         for sp_entry in species_list:
             sp, inline_st = _unpack_species_entry(sp_entry)
-            col_data = _resolve_rate_column(df, sp)
+            raw_col = _resolve_rate_column(df, sp)
+            col_data = _convert_rate_unit(raw_col, units) if units else raw_col
             st = _get_species_style(sp, colormap_spec, colormap_override, color_idx_state, palette=palette)
             st.update(inline_st)
             if "fillonly" in st:
@@ -1146,7 +1209,10 @@ def _compile_single_spec(
             series_data.append([col_data, lbl, st])
 
         target_subplot[pos_axis_key] = series_data
-        default_ylabel = spec.get("ylabel", r"reaction rate [mol m$^{-3}s^{-1}$]")
+        default_ylabel = spec.get(
+            "ylabel",
+            f"Reaction rate [{units}]" if units else r"reaction rate [mol m$^{-3}s^{-1}$]"
+        )
         target_subplot[f"{pos_axis_key}_ylabel"] = default_ylabel
         _apply_lim_and_scale(target_subplot, lim, scale or "symlog", pos_axis_key)
         if broken:
@@ -1246,8 +1312,15 @@ def _compile_single_spec(
         for sp_entry in species_list:
             sp, inline_st = _unpack_species_entry(sp_entry)
             raw_col = _resolve_species_column(df, sp)
-            if units and "wt" in str(units).lower():
+            u_str = str(units).lower() if units else ""
+            if units and ("wt" in u_str or "percent" in u_str):
                 converted_col = _convert_solid_to_wt(raw_col, rel_to or "Fe", df)
+            elif units and ("/g" in u_str or "per_g" in u_str):
+                converted_col = _convert_solid_to_umol_per_g(raw_col, df)
+                if u_str not in ("umol/g", "umol/g_dry", "umol_per_g"):
+                    converted_col = _convert_concentration_unit(converted_col, units, base_units="umol/g")
+            elif units:
+                converted_col = _convert_concentration_unit(raw_col, units, base_units="mmol/L")
             else:
                 converted_col = raw_col
             st = _get_species_style(sp, colormap_spec, colormap_override, color_idx_state, palette=palette)
@@ -1281,7 +1354,8 @@ def _compile_single_spec(
         # liquid
         for sp_entry in species_list:
             sp, inline_st = _unpack_species_entry(sp_entry)
-            col_data = _resolve_species_column(df, sp)
+            raw_col = _resolve_species_column(df, sp)
+            col_data = _convert_concentration_unit(raw_col, units, base_units="mmol/L") if units else raw_col
             st = _get_species_style(sp, colormap_spec, colormap_override, color_idx_state, palette=palette)
             st.update(inline_st)
             if "fillonly" in st:
@@ -1300,7 +1374,7 @@ def _compile_single_spec(
         target_subplot[pos_axis_key] = series_data
         units = units or "mmol/l"
         target_subplot[f"{pos_axis_key}_ylabel"] = (
-            f"Concentration [{units}]" if "mmol" in str(units).lower() else f"[{units}]"
+            f"Concentration [{units}]" if ("mmol" in str(units).lower() or "umol" in str(units).lower() or "mol" in str(units).lower() or "m" in str(units).lower()) else f"[{units}]"
         )
         _apply_lim_and_scale(target_subplot, lim, scale or "log", pos_axis_key)
         if broken:

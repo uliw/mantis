@@ -616,6 +616,58 @@ liquid_species = {
         assert pytest.approx(xlim[1], rel=1e-3) == 0.8
 
 
+def test_units_scaling_liquid_solid_and_rates(sample_df):
+    """Test that specifying units actively scales values from model base units."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        layout_content = """
+liquid_species_1 = liquid_species({
+    "species": ["SO4"],
+    "units": "uM",
+})
+
+solid_species_1 = solid_species({
+    "species": ["FeS"],
+    "units": "umol/g",
+})
+
+reaction_rates_1 = reaction_rates({
+    "species": ["SO4"],
+    "units": "nmol/(cm^3*d)",
+})
+
+plot_panels = [
+    [liquid_species_1],
+    [solid_species_1],
+    [reaction_rates_1],
+]
+"""
+        layout_path = os.path.join(tmpdir, "plot_layout.py")
+        with open(layout_path, "w") as f:
+            f.write(layout_content)
+
+        plt_desc = load_layout_from_file(sample_df, layout_path)
+
+        # 1. Liquid species scaled from mmol/L to uM (factor 1000)
+        p1 = plt_desc["first_subplot"]
+        y_scaled_liq = p1["left"][0][0]
+        np.testing.assert_allclose(y_scaled_liq, sample_df["c_SO4"] * 1000.0)
+        assert "[uM]" in p1["left_ylabel"]
+
+        # 2. Solid species scaled to umol/g dry sediment (divided by rho_solid = 2.6)
+        p2 = plt_desc["second_subplot"]
+        y_scaled_solid = p2["right1"][0][0]
+        np.testing.assert_allclose(y_scaled_solid, sample_df["c_FeS"] / 2.6)
+        assert "[umol/g]" in p2["right1_ylabel"]
+
+        # 3. Reaction rate scaled from mol/(m^3*s) to nmol/(cm^3*d)
+        # 1 mol/(m^3*s) = 1e9 nmol / (1e6 cm^3 * (1/86400 d)) = 86400 * 1000 = 8.64e7 nmol/(cm^3*d)
+        p3 = plt_desc["third_subplot"]
+        y_scaled_rate = p3["left"][0][0]
+        np.testing.assert_allclose(y_scaled_rate, sample_df["f_SO4"] * 8.64e7)
+        assert "[nmol/(cm^3*d)]" in p3["left_ylabel"]
+
+
+
 
 
 
