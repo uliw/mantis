@@ -397,6 +397,8 @@ def parse_and_validate_species_dict(
                 "top": top_val,
                 "phase": meta.get("phase", "liquid"),
             }
+            if "basis" in meta:
+                bc_entry["basis"] = meta["basis"]
             # Check for diffusive boundary layer (DBL)
             for k_dbl in ("dbl", "diffusive_boundary_layer", "dbl_thickness"):
                 if k_dbl in extras:

@@ -325,5 +325,108 @@ reaction_parameters = {
     },
 #+END_SRC
 
+** Sorption
+
+Many reactive chemical species in marine sediments undergo rapid, reversible adsorption and desorption onto solid surfaces (such as particulate organic carbon, iron and manganese oxyhydroxides, or clay minerals). Common examples include ferrous iron ($\text{Fe}^{2+}$), manganese ($\text{Mn}^{2+}$), and ammonium ($\text{NH}_4^+$).
+
+Because sorption reactions typically reach local chemical equilibrium on timescales of seconds to minutes—far faster than the transport timescales of burial and diffusion (years to millennia)—tracking dissolved and adsorbed pools as separate, stiff differential equations is both computationally expensive and numerically unstable. Instead, MANTIS allows you to model these pools as a single *lumped species* (also referred to as a *mixed-phase species*).
+
+*** The Three Physical Phases in MANTIS
+
+When declaring a species in =species.py=, the ~phase~ attribute controls its physical compartment:
+
+- ~"phase": "liquid"~: Pure porewater solutes (e.g., $\text{SO}_4^{2-}, \text{O}_2, \text{HS}^-$). The species inventory is scaled by porosity ($\phi$), and transport occurs via molecular diffusion, porewater advection, and bio-irrigation.
+- ~"phase": "solid"~: Pure solid minerals or particulates (e.g., $\text{POC}, \text{FeS}_2, \text{FeOOH}$). The species inventory is scaled by the solid fraction ($1 - \phi$), and transport occurs solely by sediment accumulation (burial) and particle bioturbation.
+- ~"phase": "mixed"~: Lumped pools containing both a dissolved porewater fraction and a surface-adsorbed solid fraction (e.g., $\text{Fe}^{2+}_{\text{total}}$).
+
+*** The =basis= Keyword: Porewater vs. Solid Volume Units
+
+Because a lumped pool resides partially in the pore fluid and partially in the solid sediment, you must specify which physical volume its concentration represents. This is controlled by the ~basis~ keyword in =species.py=:
+
+- ~"basis": "porewater"~ (or ~"liquid"~):
+  The lumped concentration is expressed per unit volume of porewater ($\text{mol} \cdot \text{m}^{-3}_{\text{pw}}$, equivalent to $\text{mmol/L}$ or $\text{mM}$). This is the standard convention when comparing model results directly to porewater geochemical data or benchmarks like Du (2023). MANTIS automatically uses the porewater porosity ($\phi_{\text{eff}} = \phi$) in the time-derivative and transport terms:
+  $$C_{\text{total}} = C_{\text{dis}} + \frac{1 - \phi}{\phi} C_{\text{sorb}}$$
+
+- ~"basis": "solid"~ (default if omitted):
+  The lumped concentration is expressed per unit volume of dry solid sediment ($\text{mol} \cdot \text{m}^{-3}_{\text{solid}}$). This convention is typically used when the species is predominantly solid-bound (e.g., in Velde et al., 2016, where $>99\%$ of ferrous iron is sorbed). MANTIS uses the solid volume fraction ($\phi_{\text{eff}} = 1 - \phi$):
+  $$C_{\text{total, solid}} = C_{\text{sorb}} + \frac{\phi}{1 - \phi} C_{\text{dis}}$$
+
+*** How MANTIS Handles Mixed-Phase Transport and Bioturbation
+
+In a lumped pool, the dissolved fraction and the sorbed fraction experience completely different physical transport processes:
+1. The **dissolved fraction** ($f_{\text{dis}}$) diffuses through pore fluids via molecular diffusion ($D_{\text{mol}}$) and is advected by porewater flow.
+2. The **sorbed fraction** ($1 - f_{\text{dis}}$) is bound to solid particles and is mixed upwards and downwards by macrofaunal bioturbation ($D_{\text{bio}}$) and buried at the sediment accumulation rate ($w_{\text{sed}}$).
+
+MANTIS automatically constructs a unified effective transport stencil that partitions transport according to the instantaneous local dissolved fraction $f_{\text{dis}}(z)$:
+
+$$D_{\text{eff}}(z) = f_{\text{dis}}(z) \cdot D_{\text{mol}}(z) + \left[1.0 - f_{\text{dis}}(z)\right] \cdot D_{\text{bio}}(z)$$
+
+This dynamic partitioning has crucial physical consequences:
+- In the surface bioturbated zone ($D_{\text{bio}} > 0$), solid mixing transports sorbed iron upwards toward the sediment-water interface, where it can desorb and diffuse into the overlying water column.
+- Neglecting bioturbation on the adsorbed fraction would artificially trap sorbed species in the sediment, leading to systematic over-prediction of authigenic mineral precipitation (e.g., $\text{FeS}$ burial).
+- When $f_{\text{dis}} \to 1$ (no sorption), $D_{\text{eff}}$ seamlessly reduces to pure molecular diffusion. When $f_{\text{dis}} \to 0$ (completely sorbed), $D_{\text{eff}}$ reduces to solid particle biodiffusion.
+
+*** Declaring Lumped Species in =species.py=
+
+Here is an example of defining a lumped ferrous iron pool ($\text{Fe}^{2+}_{\text{total}}$) on a porewater basis, along with its diagnostic dissolved and sorbed sub-species:
+
+#+BEGIN_SRC jupyter-python
+species = {
+    # -------------------------------------------------------------------------
+    # 1. Primary Lumped Transport Variable (Porewater Basis)
+    # -------------------------------------------------------------------------
+    "Fe2_total": {
+        "phase": "mixed",
+        "basis": "porewater",                   # Tracked in mol/m^3 porewater (mM)
+        "include": True,                        # Primary PDE state variable
+        "formula": "Fe2",
+        "diff_coeff_function": "diff_coeff",
+        "diffusion": {"m0": 3.31, "m1": 0.150}, # Molecular diffusion of dissolved Fe2+
+        "bc_top": {"Dirichlet": "5.46e-5 mmol/l"},
+        "prefill": True,
+    },
+
+    # -------------------------------------------------------------------------
+    # 2. Diagnostic Equilibrium Sub-Species (Non-Transported)
+    # -------------------------------------------------------------------------
+    # Free dissolved Fe2+ that drives mineral precipitation (e.g., FeS precipitation)
+    "Fe2_liq": {
+        "phase": "liquid",
+        "include": False,                       # Derived algebraically; not a primary PDE
+        "formula": "Fe2",
+        "alias_of": "Fe2_total.dissolved",
+    },
+
+    # Surface-adsorbed iron bound to solid particles
+    "Fe2_ads": {
+        "phase": "solid",
+        "include": False,
+        "formula": "Fe2",
+        "alias_of": "Fe2_total.sorbed",
+    },
+}
+
+# -----------------------------------------------------------------------------
+# Speciation and Phase Partitioning Block
+# -----------------------------------------------------------------------------
+speciation = {
+    "iron_sorption": {
+        "type": "partition",
+        "primary": "Fe2_total",
+        "fractions": {
+            # Fraction dissolved in porewater vs. adsorbed to solid POC:
+            # f_dis = 1 / (1 + K_ads * [POC] * (1 - phi) / phi)
+            "dissolved": "fe2_dis_frac",
+            "sorbed": "1.0 - fe2_dis_frac",
+        },
+        "species": {
+            "Fe2_liq": {"phase": "liquid", "fraction": "fe2_dis_frac"},
+            "Fe2_ads": {"phase": "solid", "fraction": "1.0 - fe2_dis_frac"},
+        },
+    },
+}
+#+END_SRC
+
+In reaction equations (in =reactions.py=), you can use the diagnostic species (e.g., ~Fe2_liq + HS -> FeS~) so that precipitation rates respond specifically to the active free dissolved solute concentration, while MANTIS conserves mass across the total lumped pool.
 ** Speciation, pH and Equilibrium Isotope Effects 
 ** Carbonate Chemistry 

@@ -1021,19 +1021,25 @@ plot_panels = [
 1. **Flexible Panel Assignment (`plot_panels`)**:
    Panels can be arranged in any order and composed of any combination of specs. For instance, you can place isotopes on top, create multiple dedicated liquid panels, or place solids on their own separate subplot. The `"position": "left" | "right"` setting directs curves to primary left or secondary twin right axes.
 
-2. **Unified Color Palette Across Panels**:
+2. **Active Unit Conversion (`units`)**:
+   The `"units"` parameter actively converts and scales data curves from baseline simulation units into the requested display units:
+   - **Dissolved Solutes (`liquid_species`)**: Converted from $\text{mmol/L}$ to any Pint concentration unit (e.g. `"umol/L"`, `"uM"`, `"nM"`, `"M"`, `"mol/m^3"`).
+   - **Solid Minerals (`solid_species`)**: Converted to weight percent via `"units": "wt%"` (with `"relative_to"`), to mass-normalized concentration via `"units": "umol/g"` (divided by dry grain density $\rho_s$), or volumetric units.
+   - **Reaction Rates (`reaction_rates`)**: Converted from baseline $\text{mol}/(\text{m}^3 \cdot \text{s})$ to any target rate unit (e.g. `"nmol/(cm^3*d)"`, `"umol/(cm^3*d)"`, `"mmol/(m^3*yr)"`).
+
+3. **Unified Color Palette Across Panels**:
    Plot elements that relate to the same chemical entity share the exact same color throughout the entire figure. For example, `SO4` in porewater, `SO4` in reaction rates, and `d34S_SO4` in isotopes all automatically share the same color. Colors are assigned generically by cycling through `tab10` (or your chosen `colormap`).
 
-3. **Automatic Solid Weight Percent ($\text{wt}\%$) Conversion**:
+4. **Automatic Solid Weight Percent ($\text{wt}\%$) Conversion**:
    When `"units": ["wt"]` (or `"wt%"`) and `"relative_to": "Fe"` are defined, MANTIS uses sediment porosity ($\phi$) and dry grain density ($\rho_s = 2.6\text{ g/cm}^3$) to convert volumetric concentrations ($\text{mmol/L}$) to dry weight percent:
    $$\text{wt}\% = \frac{C_{\text{solid}} \cdot M_{\text{rel}} \cdot (1 - \phi)}{\rho_s \cdot 10^4}$$
    When `relative_to` is omitted or set to `None`, units like `"pH"` or `"dimensionless"` are formatted as-is without appending any relative element.
 
-4. **Multi-Axis and Broken Axis Support**:
+5. **Multi-Axis and Broken Axis Support**:
    - Secondary solid mineral groups or secondary isotope systems (e.g. $\delta^{34}\text{S}$ on left and $\delta^{18}\text{O}$ on right) automatically create twin axes.
    - Broken axes can be declared cleanly via a 4-tuple `lim=(min1, max1, min2, max2)` to zoom into separate upper and lower isotope ranges.
 
-5. **Background Fills (`fill_only`)**:
+6. **Background Fills (`fill_only`)**:
    Physical parameters like bioturbation mixing ($D_{\text{bio}}$) or porosity can be plotted as shaded background areas behind lines by setting `"fill_only": True` (or `"fillonly": True`) and a negative `"zorder"`.
 
 

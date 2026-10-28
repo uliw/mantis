@@ -1447,10 +1447,11 @@ class DiageneticModel:
                         raw_diss = eval(part["dissolved"], eval_ctx)
                         diss_frac = float(raw_diss) if np.ndim(raw_diss) == 0 else np.asarray(raw_diss, dtype=np.float64)
                     except Exception:
-                        diss_frac = getattr(self.mp, f"{sp_name}_dissolved", getattr(self.mp, "Fe2_diss", 1.0))
+                        diss_frac = getattr(self.mp, f"{sp_name}_dissolved", getattr(self.mp, f"{sp_name}_dis_frac", getattr(self.mp, "Fe2_diss", getattr(self.mp, "fe2_dis_frac", 1.0))))
                 else:
-                    diss_frac = getattr(self.mp, f"{sp_name}_dissolved", getattr(self.mp, "Fe2_diss", 1.0))
+                    diss_frac = getattr(self.mp, f"{sp_name}_dissolved", getattr(self.mp, f"{sp_name}_dis_frac", getattr(self.mp, "Fe2_diss", getattr(self.mp, "fe2_dis_frac", 1.0))))
                 setattr(D_mol, sp_name, getattr(D_mol, sp_name) * diss_frac)
+                setattr(D_mol, f"{sp_name}_diss_frac", diss_frac)
 
         # Bioturbation & Bio-irrigation profiles
         bi_atten = getattr(self.mp, "BI_attenuation", self.mp.BI_depth)

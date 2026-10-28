@@ -2866,6 +2866,8 @@ def compute_carbonate_speciation(c: Any, mp: Any) -> None:
             spec_factor = 1.0 + beta_Cl + beta_SO4 * so4_val + beta_FeHS * hs_pw
             fe_denom = ads_factor * spec_factor
 
+            c.fe2_dis_frac = 1.0 / np.maximum(ads_factor, 1e-12)
+            mp.fe2_dis_frac = c.fe2_dis_frac
             c.fe2_liq_frac = 1.0 / np.maximum(fe_denom, 1e-12)
             mp.fe2_liq_frac = c.fe2_liq_frac
 

@@ -228,7 +228,15 @@ def build_native_1d_transport_stencil(
     """
     N = len(z)
     bc_type = bc_props.get("type", "Dirichlet")
-    is_dissolved = (bc_props.get("phase", "liquid") == "liquid")
+    sp_phase = bc_props.get("phase", "liquid")
+    basis = bc_props.get("basis", None)
+    if basis in ("liquid", "porewater"):
+        is_dissolved = True
+    elif basis == "solid":
+        is_dissolved = False
+    else:
+        is_dissolved = (sp_phase == "liquid")
+
     eff_phi_val = np.asarray(phi.value if hasattr(phi, "value") else phi)
     eff_phi = eff_phi_val if is_dissolved else (1.0 - eff_phi_val)
     if eff_phi.ndim == 0:
@@ -501,7 +509,14 @@ class MonolithicNewtonSystem:
                 if max_c > 1.0:
                     self.atol_vec[s_idx] = max(newton_atol_base, 1e-6 * max_c)
 
-            is_diss = props.get("type", "dissolved") == "dissolved"
+            sp_phase = props.get("phase", "liquid")
+            basis = props.get("basis", None)
+            if basis in ("liquid", "porewater"):
+                is_diss = True
+            elif basis == "solid":
+                is_diss = False
+            else:
+                is_diss = (sp_phase == "liquid")
             eff_phi_val = phi_val if is_diss else (1.0 - phi_val)
             self.eff_phi_vol[:, s_idx] = eff_phi_val * self.vol
 
@@ -510,7 +525,23 @@ class MonolithicNewtonSystem:
             if D_eff is None:
                 D_mol_val = getattr(D_mol, name, 0.0) if D_mol is not None else 0.0
                 D_bio_val = getattr(D_mol, "D_bio", 0.0) if D_mol is not None else 0.0
-                D_eff = np.maximum(D_mol_val + D_bio_val, 1e-20)
+                if sp_phase == "mixed":
+                    # Lumped mixed-phase species (e.g. Fe2_total):
+                    # Look up dynamic or static dissolved fraction
+                    f_dis = getattr(mp, f"{name}_dis_frac", getattr(mp, f"{name.lower()}_dis_frac", None))
+                    if f_dis is None:
+                        f_dis = getattr(mp, "fe2_dis_frac", getattr(mp, f"{name}_dissolved", getattr(mp, "Fe2_diss", 1.0)))
+                    f_dis = np.asarray(f_dis, dtype=np.float64)
+
+                    d_diss_stored = getattr(D_mol, f"{name}_diss_frac", 1.0)
+                    if np.all(d_diss_stored == 1.0) and not np.all(f_dis == 1.0):
+                        # D_mol_val is unscaled molecular diffusion: partition both diffusion and bioturbation
+                        D_eff = np.maximum(f_dis * D_mol_val + (1.0 - f_dis) * D_bio_val, 1e-20)
+                    else:
+                        # D_mol_val was already scaled by diss_frac in model.py
+                        D_eff = np.maximum(D_mol_val + (1.0 - f_dis) * D_bio_val, 1e-20)
+                else:
+                    D_eff = np.maximum(D_mol_val + D_bio_val, 1e-20)
 
             # Advection velocity
             w_val = getattr(mp, "w", 0.0)
