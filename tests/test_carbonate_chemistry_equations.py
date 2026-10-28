@@ -373,7 +373,7 @@ def rxn_FeS_precipitation_dissolution(c, k_val, lim, LHS, RHS, RATES, CROSS, mp)
     CROSS["TS2"].append(("Fe2_total", -prec_coeff_Fe2_total * phi))
     RATES["TS2"] -= prec_rate_Fe2_total * phi
     if "TA" in RATES:
-        RATES["TA"] -= R_prec * phi
+        RATES["TA"] -= 2.0 * R_prec * phi
     k_diss_eff = k_isd * is_diss
     us = np.maximum(1.0 - omega, 0.0)
     u_diss = np.minimum(us / (epsilon + 1e-30), 1.0)
@@ -391,7 +391,7 @@ def rxn_FeS_precipitation_dissolution(c, k_val, lim, LHS, RHS, RATES, CROSS, mp)
         add_lhs_sink=False, stoich_ratio=1.0,
     )
     if "TA" in RATES:
-        RATES["TA"] += diss_rate_FeS * (1.0 - phi)
+        RATES["TA"] += 2.0 * diss_rate_FeS * (1.0 - phi)
     if getattr(mp, "isotopes", False):
         std_ratio = getattr(mp, "VCDT", getattr(mp, "d34S_ratio", 0.044162589))
         f_iso_default = 1.0 / (1.0 + float(std_ratio))
@@ -927,12 +927,12 @@ def compute_chemical_jacobian(c, mp, k, species_names):
             J[:, i_ts2, idx["TA"]] -= _d_net_dTA
             J[:, i_ts2, idx["DIC"]] -= _d_net_dDIC
         if "TA" in idx:
-            J[:, idx["TA"], i_fe2_total] -= d_net_dFe2_total
-            J[:, idx["TA"], i_ts2] -= d_net_dTS2
-            J[:, idx["TA"], i_fes] -= d_net_dFeS
+            J[:, idx["TA"], i_fe2_total] -= 2.0 * d_net_dFe2_total
+            J[:, idx["TA"], i_ts2] -= 2.0 * d_net_dTS2
+            J[:, idx["TA"], i_fes] -= 2.0 * d_net_dFeS
             if has_carb:
-                J[:, idx["TA"], idx["TA"]] -= _d_net_dTA
-                J[:, idx["TA"], idx["DIC"]] -= _d_net_dDIC
+                J[:, idx["TA"], idx["TA"]] -= 2.0 * _d_net_dTA
+                J[:, idx["TA"], idx["DIC"]] -= 2.0 * _d_net_dDIC
         if "FeS_S32" in idx and "TS2_S32" in idx and getattr(mp, "isotopes", False):
             i_fes_s32 = idx["FeS_S32"]
             i_ts2_s32 = idx["TS2_S32"]

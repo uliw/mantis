@@ -1297,10 +1297,19 @@ class EquationSystemGenerator:
                 f'    add_implicit_sink(LHS, RATES, "{p1}", prec_coeff_{p1}, prec_rate_{p1}, mp=mp, has_solid=False)',
             ])
 
-        if has_hplus and "TA" in getattr(self.validator, "species_defs", {}):
+        # Check if reaction consumes species with non-zero alkalinity contribution (include_in_TA)
+        # e.g., HS- contributes 1 eq of TA. Precipitation: Fe2+ + HS- -> FeS + H+
+        # consumes 1 HS- (-1 TA) and produces 1 H+ (-1 TA), net dTA = -(1 + 1) = -2.
+        alk_coeff = 1.0 if has_hplus else 0.0
+        for coeff, sp, p_sp, _ in reactants_info:
+            sp_meta = getattr(self.validator, "species_defs", {}).get(sp, {})
+            inc_ta = float(sp_meta.get("include_in_TA", sp_meta.get("include_in_ta", 0.0)))
+            alk_coeff += coeff * inc_ta
+
+        if alk_coeff > 0 and "TA" in getattr(self.validator, "species_defs", {}):
             lines.extend([
                 '    if "TA" in RATES:',
-                '        RATES["TA"] -= R_prec * phi',
+                f'        RATES["TA"] -= {alk_coeff} * R_prec * phi',
             ])
 
         # Dissolution of solid mineral
@@ -1321,10 +1330,10 @@ class EquationSystemGenerator:
                 '    )',
             ])
 
-        if has_hplus and "TA" in getattr(self.validator, "species_defs", {}):
+        if alk_coeff > 0 and "TA" in getattr(self.validator, "species_defs", {}):
             lines.extend([
                 '    if "TA" in RATES:',
-                f'        RATES["TA"] += diss_rate_{mineral_parent} * (1.0 - phi)',
+                f'        RATES["TA"] += {alk_coeff} * diss_rate_{mineral_parent} * (1.0 - phi)',
             ])
 
         # Isotope handling for reversible saturation
@@ -1486,6 +1495,11 @@ class EquationSystemGenerator:
 
         omega_num = " * ".join([f"{sp}_pw" for _, sp, _, _ in reactants_info])
         has_hplus = any("HS" in sp or "H2S" in sp for _, sp, _, _ in reactants_info)
+        alk_coeff = 1.0 if has_hplus else 0.0
+        for coeff, sp, p_sp, _ in reactants_info:
+            sp_meta = getattr(self.validator, "species_defs", {}).get(sp, {})
+            inc_ta = float(sp_meta.get("include_in_TA", sp_meta.get("include_in_ta", 0.0)))
+            alk_coeff += coeff * inc_ta
         lines.extend([
             f'        k_min_sp = float(getattr(k, "{k_sp_name}", getattr(mp, "{k_sp_name}", 10**-3.5)))',
             f'        k_min_isp = float(getattr(k, "{k_prec_name}", getattr(mp, "{k_prec_name}", 1.0)))',
@@ -1572,18 +1586,18 @@ class EquationSystemGenerator:
                     f'            J[:, {p_tgt_idx}, idx["TA"]] -= _d_net_dTA',
                     f'            J[:, {p_tgt_idx}, idx["DIC"]] -= _d_net_dDIC',
                 ])
-            if "TA" in getattr(self.validator, "species_defs", {}):
+            if alk_coeff > 0 and "TA" in getattr(self.validator, "species_defs", {}):
                 lines.extend([
                     '        if "TA" in idx:',
                 ])
                 for _, _, p_i, _ in reactants_info:
                     p_idx = f"i_{p_i.lower()}"
-                    lines.append(f'            J[:, idx["TA"], {p_idx}] -= d_net_d{p_i}')
-                lines.append(f'            J[:, idx["TA"], {m_idx}] -= d_net_d{mineral_parent}')
+                    lines.append(f'            J[:, idx["TA"], {p_idx}] -= {alk_coeff} * d_net_d{p_i}')
+                lines.append(f'            J[:, idx["TA"], {m_idx}] -= {alk_coeff} * d_net_d{mineral_parent}')
                 lines.extend([
                     '            if has_carb:',
-                    '                J[:, idx["TA"], idx["TA"]] -= _d_net_dTA',
-                    '                J[:, idx["TA"], idx["DIC"]] -= _d_net_dDIC',
+                    f'                J[:, idx["TA"], idx["TA"]] -= {alk_coeff} * _d_net_dTA',
+                    f'                J[:, idx["TA"], idx["DIC"]] -= {alk_coeff} * _d_net_dDIC',
                 ])
 
         # Isotope Jacobian entries
