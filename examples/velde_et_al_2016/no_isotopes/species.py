@@ -69,7 +69,7 @@ species = {
         "formula": "H2S",
         "diff_coeff_function": "diff_coeff",
         "diffusion": {"m0": 10.4, "m1": 0.273},
-        "bc_top": {"Neumann": 0.0},  # If Neumann, 0.0 refers to gradient
+        "bc_top": {"Dirichlet": 0.0},  # If Neumann, 0.0 refers to gradient
     },
     "O2": {
         "phase": "liquid",
@@ -97,6 +97,7 @@ species = {
     # -------------------------------------------------------------------------
     "Fe2_total": {
         "phase": "mixed",
+        # "basis": "porewater",
         "include": True,
         "formula": "Fe2",
         "diff_coeff_function": "diff_coeff",

@@ -40,17 +40,12 @@ if __name__ == "__main__":
         dt_max="1 year",
         temp=[10.0, 10.1],
         w="0.2 cm/yr",
-        advection=0.0,
         phi=0.8,
         isotopes=False,
         bioturbation={
             "BT0": "4 cm^2/year",
-            "depth": "6 cm",
+            "depth": "7.6 cm",
             "attenuation": "2 cm",
-        },
-        bioirrigation={
-            "BI0": 0.0,  # explicitly disabled
-            "depth": "0 cm",
         },
     )
 

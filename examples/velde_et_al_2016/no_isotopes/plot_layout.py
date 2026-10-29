@@ -14,6 +14,8 @@ species_mapping = {
     "HS": ["C_HS", 1.0],
     "FeS": ["C_FeS", "wt"],
     "Fe3": ["C_FeOOH", "wt"],
+    "Fe2_liq": ["C_Fe", 1.0],
+    "O2": ["C_O2", 1.0],
 }
 
 # ----  color map and plot style setup  --- #

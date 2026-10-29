@@ -97,18 +97,23 @@ reactions = [
         "reaction_name": "hs_oxidation",
         "reaction": "1 HS + 2 O2 -> 1 SO4",
         "k_value_name": "TS2_O2",
-        "limiters": ["O2_TS2"],
+        # "limiters": ["O2_TS2"],
     },
     {
         "reaction_name": "sulfide_mediated_iron_reduction_velde",
         "reaction": "HS + 8 Fe3 -> SO4 + 8 Fe2_total",
         "k_value_name": "Fe3_hs",
-        "limiters": ["Fe3"],
+        # "limiters": ["Fe3"],
         "inhibitors": ["O2"],
     },
     {
-        "reaction_name": "Fe2_oxidation",
-        "reaction": "4 Fe2_total + O2 -> 4 Fe3",
+        "reaction_name": "Fe2_liq_oxidation",
+        "reaction": "4 Fe2_liq + O2 -> 4 Fe3",
+        "k_value_name": "Fe2_O2",
+    },
+    {
+        "reaction_name": "Fe2_sorbed_oxidation",
+        "reaction": "4 Fe2_sorbed + O2 -> 4 Fe3",
         "k_value_name": "Fe2_O2",
     },
     {

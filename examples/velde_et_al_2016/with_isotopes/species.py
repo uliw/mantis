@@ -84,7 +84,7 @@ species = {
         "diff_coeff_function": "diff_coeff",
         "diffusion": {"m0": 10.4, "m1": 0.273},
         "isotopes": {"TS2_S32": "S"},
-        "bc_top": {"Neumann": 0.0, "d34S": 0},  # If Neumann, 0.0 refers to gradient
+        "bc_top": {"Neumann": 0.0},
     },
     "O2": {
         "phase": "liquid",
