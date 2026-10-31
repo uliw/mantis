@@ -109,6 +109,11 @@ def test_velde_et_al_2016_simulation_benchmark():
     _run_and_verify_simulation_benchmark("no_isotopes", check_isotopes=False)
 
 
+def test_velde_et_al_2016_no_isotopes_with_irrigation_simulation_benchmark():
+    """Run regression benchmark for no_isotopes_with_irrigation scenario."""
+    _run_and_verify_simulation_benchmark("no_isotopes_with_irrigation", check_isotopes=False)
+
+
 def test_velde_et_al_2016_with_isotopes_simulation_benchmark():
     """Run regression benchmark for with_isotopes scenario."""
     _run_and_verify_simulation_benchmark("with_isotopes", check_isotopes=True)
