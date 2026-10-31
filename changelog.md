@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-10-31
+
+### Added
+
+- **Mixed-Phase Sorption Modeling & Dynamic Partitioning**:
+  - Full support for mixed-phase chemical species across liquid, solid, and sorbed states with dynamic partitioning.
+  - Updated transport stencil assembly in `monolithic_solver.py` and `model.py` to handle mixed-phase transport, dynamic dissolved fractions ($f_{\text{dis}}$), and mixed-phase bio-irrigation.
+  - Added support for the `basis` keyword to specify concentration bases and units.
+- **Sediment Age-Dependent Reaction Rates**:
+  - Implemented functionality to scale reaction rate constants with depth-dependent sediment age profiles.
+  - Added support and tests for age-dependent kinetic constant conversions.
+- **Comprehensive Plot Unit Conversions & External Data Mapping (`plot_data_new.py`)**:
+  - Added Pint-based unit conversions for concentration series, reaction rate series, and solid-phase quantities (converting $\text{mmol}/\text{L}_{\text{solid}}$ to $\text{wt}\%$ and $\mu\text{mol}/\text{g}_{\text{dry}}$).
+  - Enhanced external measured data mapping syntax supporting `[column, from_unit, to_unit]` tuples with automatic unit scaling on secondary and primary axes.
+  - Dynamically updated axis labels to reflect target conversion units.
+- **Speciation & Carbonate System Enhancements**:
+  - Added under-relaxation (factor 0.5) and increased iterations (up to 12) in carbonate speciation and $\text{TS}_2$ partitioning loops for enhanced numerical stability.
+  - Accurate alkalinity coefficient calculation for precipitation/dissolution reactions using `include_in_TA` metadata.
+  - Improved iron speciation detection (`enable_iron_speciation`) and exposed speciation constants to the model parameter namespace.
+  - Added support for string-with-unit parsing for diffusive boundary layer (`diffusive_boundary_layer` / `dbl`) thickness.
+- **Benchmark Models & Examples**:
+  - Added the **SimpleFe** benchmark model (`examples/SimpleFe/`, based on Du et al. 2023) featuring Fe diagenesis, kinetic constants, declarative plot layout, and regression tests (`test_simplefe_simulation_benchmark.py`).
+  - Added an irrigation benchmark variant (`examples/velde_et_al_2016/no_isotopes_with_irrigation/`).
+  - Added `examples/00readme.md` detailing bundled example models and their source literature.
+  - Added new comprehensive tutorial documentation in `docs/Tutorial_new.md` covering sorption, speciation, carbonate equilibrium, and comparison datasets.
+
+## [0.5.1] - 2026-10-27
+
+- Updated changelog and release notes for the v0.5.0 release.
+
 ## [0.5.0] - 2026-10-27
 
 ### Added
