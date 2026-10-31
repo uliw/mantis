@@ -286,6 +286,24 @@ from mantis.diff_lib import solid_conc_to_wt_percent
 fes_wt_pct = solid_conc_to_wt_percent(df.c_FeS, mw=87.91, d=2.6, phi=df.phi)
 #+end_src
 
+*** Adding measured data 
+The plot file can specify a second csv file that contains data to compare against. For this to work you need to add the name of the csv file, as well as a mapping table at the beginning of the ~plot_layout~ file
+#+BEGIN_SRC jupyter-python
+# ----  optional comparison against existing data --- #
+comparison_data = "SimpleFe_Du_2023.csv"
+
+# Mapping uses the following scheme:
+# Mantis Name : [name, units, display units]
+species_mapping = { 
+    "z": ["depth_in_cm", "cm", "m"],
+    "SO4": ["SO4", "mmol/cm^3_pw", "mmol/L"],
+    "Fe2_dis": ["TFe", "mmol/cm^3_pw", "umol/L"],
+    "Fe2_liq": ["Fe_aq", "mmol/cm^3_pw", "nmol/L"],
+    "FeS": ["FeS", "mmol/cm^3_solid", "wt%"],
+    "pH": ["pH", "pH", "pH"],
+}
+#+END_SRC
+
 * Advanced usage 
 
 ** Kinetic Isotope Effects 

@@ -1007,12 +1007,15 @@ plot_panels = [
 ]
 
 # ---- 4. Optional Comparison Against Measured Data ----
-# comparison_data = "measured_core_data.csv"
-# species_mapping = {
-#     "z": ["depth_cm", 1 / 100],                # Map depth column with unit conversion
-#     "SO4": ["C_SO4", 1.0],                     # Map porewater sulfate
-#     "FeS": ["C_FeS", "wt"],                    # Map solid FeS with automatic wt% conversion
-# }
+# Format: "species": [column_in_file, source_unit, target_display_unit]
+# or backwards-compatible: [column_in_file, scaling_factor_or_callable]
+comparison_data = "measured_core_data.csv"
+species_mapping = {
+    "z": ["depth_cm", "cm", "m"],              # Convert depth from cm to meters
+    "SO4": ["so4_pw", "mmol/cm^3_pw", "mmol/L"], # Porewater solute: cm^3 to L
+    "Fe2_liq": ["fe_pw", "mmol/cm^3_pw", "nmol/L"], # Porewater solute scaled to nmol/L
+    "FeS": ["fes_solid", "mmol/cm^3_solid", "wt%"], # Solid converted to wt% Fe
+}
 ```
 
 

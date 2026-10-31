@@ -1,0 +1,559 @@
+- [Installation](#orgff743e4)
+- [Running your first model](#orgd69fd05)
+  - [Model structure](#orgf7accd8)
+    - [The main model file](#org8139db8)
+    - [Setting up a grid](#org4c530f2)
+    - [Defining the species that participate in the model](#orga670bb4)
+    - [Defining kinetic constants](#orgab960af)
+      - [Age-dependent reaction rates](#org05e6369)
+    - [Setting up reactions](#org8fd0c93)
+    - [Defining the plot output](#org62c72a3)
+    - [A note on Units](#org25813f4)
+      - [Output Units](#orge6bb2ed)
+      - [B. Converting to Dry Weight Percent ($\text{wt}\%$)](#org53e9855)
+    - [Adding measured data](#orga5a0a3b)
+- [Advanced usage](#org05afb78)
+  - [Kinetic Isotope Effects](#orgbf84bf6)
+  - [Sorption](#org476bf59)
+    - [The Three Physical Phases in MANTIS](#orgd4f0f59)
+    - [The `basis` Keyword: Porewater vs. Solid Volume Units](#org5858fba)
+    - [How MANTIS Handles Mixed-Phase Transport and Bioturbation](#org744f49c)
+    - [Declaring Lumped Species in `species.py`](#org1597985)
+  - [Speciation, pH and Equilibrium Isotope Effects](#org9f0bfc6)
+  - [Carbonate Chemistry](#org606f867)
+
+
+
+<a id="orgff743e4"></a>
+
+# Installation
+
+-   `pip install mantis-rtm`
+-   Optional: In an empty directory run `mantis_create_examples.py`
+
+
+<a id="orgd69fd05"></a>
+
+# Running your first model
+
+After creating the example directory, go to `./examples/start_here/basic_transport_and_reaction`
+
+
+<a id="orgf7accd8"></a>
+
+## Model structure
+
+A typical MANTIS project directory contains five primary configuration files, alongside the master run script:
+
+```
+./velde_et_al_2016/
+├── species.py           <- Who lives in the sediment? (chemical species, phases, diffusion, BCs)
+├── reactions.py         <- What reactions happen? (stoichiometry, kinetics, limiters)
+├── kinetic_constants.py <- How fast do reactions happen? (rate constants, half-saturation values)
+├── plot_layout.py       <- How should the profiles look? (panels, colors, geochemist units like wt%)
+└── run_model.py         <- Master driver script (sediment accumulation rate, depth, duration)
+```
+
+When you execute `python run_model.py`, MANTIS automatically detects these files, ensures the underlying equation system is up to date, solves the time evolution of the sediment column, and produces your outputs:
+
+-   `<model_name>.pdf`: A multi-panel summary plot of porewater and solid-phase profiles.
+-   `<model_name>.csv`: A tabular export of concentrations, reaction rates, and isotope ratios across depth.
+-   `<model_name>_state.npz`: The complete numerical state of the simulation for restarting or continuing runs.
+-   `<model_name>.mp4` (optional): An animated video showing the transient evolution
+
+
+<a id="org8139db8"></a>
+
+### The main model file
+
+The model definition is straightforward, importing the libraries an wrapping an `if __name__ == "__main__":` block, and then define some basic parameters:
+
+```jupyter-python
+from mantis import DiageneticModel
+from mantis.diff_lib import get_total_delta
+
+if __name__ == "__main__":
+    model = DiageneticModel(
+        reactions="reactions.py",
+        equations="equations.py",
+        constants="kinetic_constants.py",
+        layout="plot_layout.py",
+    )
+
+    # 2. Configure environmental and run parameters
+    model.configure(
+        grid_setup=[  # start, stop, start_dz, stop_dz
+            ["0 cm", "100 cm", "2 mm", "2 mm"],
+        ],
+        t_end="2 kyr", # max run time 
+        dt_max="1 year", # max dt 
+        temp=[10.0, 10.1], # temperature field 
+        w="0.2 cm/yr", # sedimentation rate 
+        phi=0.8, # porosity 
+    )
+
+    # Allow CLI argument overrides (e.g. --video, --solver-tol)
+    model.parse_cli_args()
+
+    # 3. Run simulation
+    result = model.run()
+
+    # 4. Save results & render summary plot
+    df, fqfn = result.save_csv()
+    # result.save_state() optional 
+
+    result.plot_summary()
+```
+
+
+<a id="org4c530f2"></a>
+
+### Setting up a grid
+
+-   uniform grid
+-   single increasing grid distance
+-   defining on more reaction zones
+-   a word on grid resolution and its effect on dt and the accuracy of results along steep reaction fronts
+
+
+<a id="orga670bb4"></a>
+
+### Defining the species that participate in the model
+
+The species file contains all the information we need to know about a species. This includes the type (solid or liquid), diffusion coefficients, boundary conditions, the chemical formula, as well as a field that decides whether a species is part of the transport reactions. Most species are covered by the `diff_coeff` function with the `m0, m1` parameter listed in Table 4.8 in Boudreau 1996. Note that diffusion coefficients are only needed for species that are part of the reaction-transport matrix (i.e., where include = True). As before, all properties are defined in a dictionary. Unless a lower boundary condition is specified, it defaults to a zero gradient Neumann condition. The `prefill` parameter determines of the initial species concentration across the modeling domains is set to the upper boundary condition or to zero. Note that "CO2" and "H2O" need to be present, even so they do not appear in the model directly.
+
+```jupyter-python
+
+species = {
+    # Solid species
+    "POC": {
+        "phase": "solid",
+        "include": True,
+        "formula": "CH2O6",
+        "diffusion": None,
+        "bc_top": {"Robin": "3065 umol/(cm^2 * yr)"},
+    },
+    # -------------------------------------------------------------------------
+    # Dissolved Liquid Species
+    # -------------------------------------------------------------------------
+    "SO4": {
+        "phase": "liquid",
+        "include": True,
+        "formula": "SO4",
+        "diff_coeff_function": "diff_coeff",
+        "diffusion": {"m0": 4.88, "m1": 0.232},
+        "bc_top": {"Dirichlet": 28.2},
+        "prefill": True,
+    },
+    "TS2": {
+        "phase": "liquid",
+        "include": True,
+        "formula": "H2S",
+        "diff_coeff_function": "diff_coeff",
+        "diffusion": {"m0": 10.4, "m1": 0.273},
+        "bc_top": {"Dirichlet": 0.0},  #
+    },
+    # External / Reaction Balance Species (Excluded from transport)
+    "CO2": {"phase": "liquid", "include": False, "formula": "CO2"},
+    "H2O": {"phase": "liquid", "include": False, "formula": "H2O"},
+}
+```
+
+
+<a id="orgab960af"></a>
+
+### Defining kinetic constants
+
+Kinetic constants are defined in a dictionary. In the below example, I use the `pint` library to map units into the model units, and return both dictionaries.
+
+In diagenesis, we typically distinguish:
+
+1.  **Rate Constants ($k$)**: The maximum rate of a reaction under substrate-saturated conditions (e.g., $k_{\text{POC}}$ in $\text{yr}^{-1}$ or $\text{s}^{-1}$, or mineral precipitation rates $k_{\text{prec}}$). While the names are arbitrary they must match the names in the reaction file. It also a good idea that parameters that describe first order values start with the name of the species the rate constant refers too.
+2.  **Half-Saturation Constants ($K_m$)**: The concentration of an electron acceptor at which the microbial degradation rate reaches $50\%$ of its maximum. Lower $K_m$ means the microbe is efficient at scavenging low concentrations, e.g., $\frac{1}{C+K_m}$ (see notes in the reaction section) .
+3.  **Inhibition Constants**: The threshold concentration of a more energetically favorable oxidant that shuts down a less favorable pathway (e.g., $O_2$ inhibiting iron reduction or sulfate reduction), e.g., $1 - \frac{1}{C + K_m}$ (see notes in the reaction section) .
+
+```jupyter-python
+import pint
+
+   ureg = pint.UnitRegistry()
+   Q_ = ureg.Quantity
+
+   constants: dict = {
+       # kinetic constants
+       "POC": [0.001, "1/year", "1/second"],  # key, [value, unit, target unit]
+
+       # Monod half-saturation for microbial sulfate reduction
+       "K_SO4": [0.9, "umol/cm^3", "mol/m^3"],
+   }
+
+   # convert into model units (meter, mol, seconds)
+   for k, v in constants.items():
+       k_values[k] = Q_(f"{v[0]} {v[1]}").to(f"{v[2]}").magnitude
+
+   return constants, k_values
+```
+
+
+<a id="org05e6369"></a>
+
+#### Age-dependent reaction rates
+
+Organic matter reactivity decreases with depth as sediment ages and labile compounds are degraded. In MANTIS, age-dependent reaction rate constants can be defined using the built-in `sed_age` function from `mantis.diff_lib`:
+
+```jupyter-python
+from mantis.diff_lib import sed_age
+
+def get_reaction_constants(pH, phi):
+    # Configure sediment aging profile (Middelburg power law: a0=1.0 yr, a=0.21 yr^-1, b=1.22)
+    age = sed_age(mode="relative", a0=1.0, a=0.21, b=1.22)
+
+    constants = {
+        # 'relative' mode scales the initial rate constant by ((age + a0) / a0)^(-b):
+        "k_POC": "age * 0.01 1/year",
+
+        # Monod half-saturation for microbial sulfate reduction
+        "K_SO4": "0.9 umol/cm^3",
+    }
+    return constants
+```
+
+Two scaling modes are supported:
+
+-   `mode="relative"` (default): Evaluates a dimensionless attenuation factor $((A(z) + a_0) / a_0)^{-b}$ with surface value $1.0$. The reaction constant is specified as `"age * <initial_rate>"` (e.g. `"age * 0.01 1/year"`).
+-   `mode="direct"`: Directly computes the Middelburg apparent rate constant $k(z) = a \cdot (A(z) + a_0)^{-b}$ (in $[1/\text{yr}]$ converted to SI $[1/\text{s}]$), specified simply as `"age"` or `"1.0 * age"`.
+
+The sediment age profile $A(z)$ is computed automatically from 1D advective-diffusive transport accounting for burial velocity ($w$), porosity compaction ($\phi$), and bioturbation mixing ($D_b$).
+
+
+<a id="org8fd0c93"></a>
+
+### Setting up reactions
+
+Microbial sulfate reduction rates are sensitive to sulfate concentrations, so in the reactions file, we first define a limiter for `SO4`. This is followed by a list of dictionaries that define the reactions of the model. The reaction name is arbitrary, but the chemical reaction can only use names that are defined in the species file. An important limitation is that the stoichiometric must be integer numbers. The kinetic constant name must exist in the kinetic constants file, the limiters parameter will only accept values that are defined in the `limiters` dictionary. A note on limiters. The canonical form of writing a limiter is
+
+\begin{equation}
+\frac{[SO_4]}{[SO_4]+ K}
+\end{equation}
+
+However, mantis exclusively uses implicit limiters:
+
+\begin{equation}
+\frac{1}{[SO_4]+ K}
+\end{equation}
+
+```jupyter-python
+# Monod type reaction rate limiters 
+limiters = {
+    # Base implicit limiters: L_imp = 1.0 / (C + K)
+    # The parser automatically derives explicit (C * L_imp) and inhibition (K * L_imp = 1 - C * L_imp)
+    "SO4": "1.0 / (c.SO4 + K_SO4)", # where c.SO4 = sulfate concentration 
+}
+
+reactions = [
+    # -------------------------------------------------------------------------
+    # Organic Carbon Primary Respiration
+    # -------------------------------------------------------------------------
+    {
+        "reaction_name": "sulfate_reduction_slow",
+        "reaction": "2 POC + SO4 -> TS2",
+        "k_value_name": "POC",
+        "limiters": ["SO4"],
+        "inhibitors": None,
+    },
+]
+```
+
+
+<a id="org62c72a3"></a>
+
+### Defining the plot output
+
+Mantis provides a default plot output that can be adapted to a variety of layouts. Its basic structure requires that you define the x-axis scale, as well as one or more panels. For each panel, you can create a one or more `liquid_species` objects, none or more `solid_species` objects which allow for the mapping into weight percent, none or more `reaction_rates` objects that allow for the continuous display of negative and positive rates on a logarithmic scale, and isotope object, that allows for broken scales. These objects are then grouped into one or more vertical panels.
+
+```jupyter-python
+#  ---- z-axis (Depth) Scale and Limits ----
+z_scale = "lin"  # Or "linear" / "lin" (default: "log")
+z_lim = (0, 1)  # (z_min, z_max) in meters (default for log: (1e-4, display_length))
+
+# ----  concentration data panel  --- #
+liquid_species_1 = liquid_species({
+    "scale": "lin",
+    "species": ["SO4", "TS2"],
+    "lim": (0, 30),
+    "units": "mmol/l",
+})
+
+solid_species_1 = solid_species([
+    {
+        "scale": "lin",
+        "units": ["wt"],
+        "relative_to": "C",
+        "species": ["POC"],
+        # "lim": (0, 1),
+    }
+])
+
+# ----  reaction rate data panel  --- #
+reaction_rates_1 = reaction_rates({"species": ["POC"]})
+
+# ---- create final panel arrangement ------ #
+plot_panels = [
+    [liquid_species_1, solid_species_1],
+    [reaction_rates_1],
+]
+```
+
+
+<a id="org25813f4"></a>
+
+### A note on Units
+
+Under the hood, MANTIS standardizes all transport and reaction PDEs into SI-derived volumetric units: $$\text{Internal Concentration Unit} = \mathbf{mol/m^3} \quad (\equiv 1\ \text{mmol/L} \equiv 1\ \text{mM} \equiv 1000\ \mu\text{mol/L} \equiv 1\ \mu\text{mol/cm}^3)$$
+
+Crucially, concentrations are defined **per unit volume of their respective phase**:
+
+-   **Liquid Solutes**: Expressed per volume of porewater ($\text{mol / m}^3_{\text{liquid}} = \text{mmol / L}_{\text{porewater}}$). The bulk sediment inventory is $\phi \cdot C_{\text{liquid}}$.
+-   **Solid Minerals**: Expressed per volume of pure solid sediment ($\text{mol / m}^3_{\text{solid}} = \text{mmol / L}_{\text{solid}}$). The bulk sediment inventory is $(1 - \phi) \cdot C_{\text{solid}}$.
+-   **Phase Transfer & Reactions**: Whenever a reaction couples a solid phase and a liquid phase (for example, $\text{Fe}^{2+} + \text{HS}^- \to \text{FeS}$), MANTIS scales the source and sink terms with the appropriate phase ratio ($(1-\phi)/\phi$ or $\phi/(1-\phi)$) so that mass is strictly conserved.
+-   **Reaction Rates**: Solved internally in $\text{mol} / (\text{m}^3_{\text{phase}} \cdot \text{s})$.
+-   **Depths and Transport**: Depth $z$ is in meters ($\text{m}$), time $t$ in seconds ($\text{s}$), and diffusion coefficients in $\text{m}^2/\text{s}$.
+
+
+<a id="orge6bb2ed"></a>
+
+#### Output Units
+
+When the simulation completes or exports data (`<model_name>.csv`):
+
+-   `c_<species>`: Reported directly in **$\text{mmol/L}$** (numerically equivalent to $\text{mol/m}^3$):
+-   Solutes (e.g., `c_SO4`, `c_O2`, `c_TS2`) are in **$\text{mmol / L of porewater}$**.
+-   Solids (e.g., `c_FeS`, `c_Fe3`, `c_POC_slow`) are in **$\text{mmol / L of pure solid}$**.
+-   `f_<species>`: Net production/consumption reaction rates in **$\text{mol} / (\text{m}^3 \cdot \text{s})$**.
+-   `d_<species>` and `d34S_<species>`: Isotope delta values (e.g., `d_SO4`, `d34S_SO4`, `d34S_FeS2`) in **$\text{milli Urey}$** ($\text{mUr}$, relative to reference standards such as VCDT or VPDB). Note 1 mUr = 1&permil;
+-   `z`: Depth below sediment-water interface in **meters** ($\text{m}$).
+-   `phi` and `w`: Porosity (fraction, dimensionless) and burial velocity ($\text{m/s}$).
+    
+    Converting to $\mu\text{mol / g}$ (micromoles per gram of dry sediment)
+
+To convert a solid concentration $C_{\text{solid}}$ ($\text{mmol/L of solid} = \mu\text{mol/cm}^3_{\text{solid}}$) to $\mu\text{mol/g}$ of dry sediment, divide by the mineral grain density $\rho_{\text{sed}}$ (typically $2.6\ \text{g/cm}^3$ for siliciclastic sediments): $$C_{\mu\text{mol/g}} = \frac{C_{\text{solid}}}{\rho_{\text{sed}}}$$
+
+```python
+from mantis.diff_lib import solid_conc_to_umol_per_g
+
+# df.c_FeS is in mmol/L of solid; density in g/cm^3
+c_fes_umol_g = solid_conc_to_umol_per_g(df.c_FeS, d=2.6)
+```
+
+
+<a id="org53e9855"></a>
+
+#### B. Converting to Dry Weight Percent ($\text{wt}\%$)
+
+To convert $C_{\text{solid}}$ to weight percent of dry sediment matrix given molecular weight $M_w$ ($\text{g/mol}$): $$\text{wt}\% = \frac{C_{\text{solid}} \cdot M_w}{\rho_{\text{sed}} \cdot 10^4}$$
+
+In Python:
+
+```python
+from mantis.diff_lib import solid_conc_to_wt_percent
+
+# Example: FeS (Mw = 87.91 g/mol, density = 2.6 g/cm^3)
+fes_wt_pct = solid_conc_to_wt_percent(df.c_FeS, mw=87.91, d=2.6, phi=df.phi)
+```
+
+
+<a id="orga5a0a3b"></a>
+
+### Adding measured data
+
+The plot file can specify a second csv file that contains data to compare against. For this to work you need to add the name of the csv file, as well as a mapping table at the beginning of the `plot_layout` file
+
+```jupyter-python
+# ----  optional comparison against existing data --- #
+comparison_data = "SimpleFe_Du_2023.csv"
+
+# Mapping uses the following scheme:
+# Mantis Name : [name, units, display units]
+species_mapping = { 
+    "z": ["depth_in_cm", "cm", "m"],
+    "SO4": ["SO4", "mmol/cm^3_pw", "mmol/L"],
+    "Fe2_dis": ["TFe", "mmol/cm^3_pw", "umol/L"],
+    "Fe2_liq": ["Fe_aq", "mmol/cm^3_pw", "nmol/L"],
+    "FeS": ["FeS", "mmol/cm^3_solid", "wt%"],
+    "pH": ["pH", "pH", "pH"],
+}
+```
+
+
+<a id="org05afb78"></a>
+
+# Advanced usage
+
+
+<a id="orgbf84bf6"></a>
+
+## Kinetic Isotope Effects
+
+To model isotope effects the main model script must set `isotopes=True`, the species file must define isotope species, and the reaction file must define isotope effects (you also need to update the plot file). A full example is available in the `examples/velde_et_al_2016/with_isotopes/` directory. The below snippets outline the basic steps.
+
+In the species file we need to add basic information about the isotope system we are using, a boundary condition for the isotope ratio, and we need to define that sulfate will have $\ce{^{32}S}$ as isotope of the element S
+
+```jupyter-python
+isotope_standards: dict = {
+    "d34S": {
+        "element": "S",
+        "standard": "VCDT",
+        "ratio": 0.044162589,  # 34S / 32S
+        "unit": "mUr",
+    },
+}
+"SO4": {
+      # in addition to the previous entries above 
+      "isotopes": {"SO4_S32": "S"},
+      "bc_top": {"Dirichlet": 28.2, "d34S": 21},
+  },
+```
+
+Reactions without kinetic isotope effects do not need to be modified. If a reaction involves a kinetic isotope effect we need to add the fractionation factor to the `reaction_parameters` dictionary, and then add a line that specifies which isotope, and which species are involved. Since the isotope effect of microbially mediated sulfate reduction is concentration dependent, the below code additionally specifies a Monod-type limiter for the fractionation factor. Please note the dictionary key must follow the `species_isotope to species_isotope` pattern. Otherwise the parser will fail.
+
+```jupyter-python
+reaction_parameters = {
+    "msr_alpha": 1.07,
+}
+{
+        "reaction_name": "sulfate_reduction",
+        "reaction": "2 POC_fast + SO4 -> TS2",
+        "k_value_name": "POC_fast",
+        "limiters": ["SO4"],
+        "inhibitors": ["O2", "Fe3_diss_red"],
+        "isotope_fractionation": {
+            "SO4_S32 to TS2_S32": ["msr_alpha", "SO4_alpha_explicit"]
+        },
+    },
+```
+
+
+<a id="org476bf59"></a>
+
+## Sorption
+
+Many reactive chemical species in marine sediments undergo rapid, reversible adsorption and desorption onto solid surfaces (such as particulate organic carbon, iron and manganese oxyhydroxides, or clay minerals). Common examples include ferrous iron ($\text{Fe}^{2+}$), manganese ($\text{Mn}^{2+}$), and ammonium ($\text{NH}_4^+$).
+
+Because sorption reactions typically reach local chemical equilibrium on timescales of seconds to minutes—far faster than the transport timescales of burial and diffusion (years to millennia)—tracking dissolved and adsorbed pools as separate, stiff differential equations is both computationally expensive and numerically unstable. Instead, MANTIS allows you to model these pools as a single **lumped species** (also referred to as a **mixed-phase species**).
+
+
+<a id="orgd4f0f59"></a>
+
+### The Three Physical Phases in MANTIS
+
+When declaring a species in `species.py`, the `phase` attribute controls its physical compartment:
+
+-   `"phase": "liquid"`: Pure porewater solutes (e.g., $\text{SO}_4^{2-}, \text{O}_2, \text{HS}^-$). The species inventory is scaled by porosity ($\phi$), and transport occurs via molecular diffusion, porewater advection, and bio-irrigation.
+-   `"phase": "solid"`: Pure solid minerals or particulates (e.g., $\text{POC}, \text{FeS}_2, \text{FeOOH}$). The species inventory is scaled by the solid fraction ($1 - \phi$), and transport occurs solely by sediment accumulation (burial) and particle bioturbation.
+-   `"phase": "mixed"`: Lumped pools containing both a dissolved porewater fraction and a surface-adsorbed solid fraction (e.g., $\text{Fe}^{2+}_{\text{total}}$).
+
+
+<a id="org5858fba"></a>
+
+### The `basis` Keyword: Porewater vs. Solid Volume Units
+
+Because a lumped pool resides partially in the pore fluid and partially in the solid sediment, you must specify which physical volume its concentration represents. This is controlled by the `basis` keyword in `species.py`:
+
+-   `"basis": "porewater"` (or `"liquid"`): The lumped concentration is expressed per unit volume of porewater ($\text{mol} \cdot \text{m}^{-3}_{\text{pw}}$, equivalent to $\text{mmol/L}$ or $\text{mM}$). This is the standard convention when comparing model results directly to porewater geochemical data or benchmarks like Du (2023). MANTIS automatically uses the porewater porosity ($\phi_{\text{eff}} = \phi$) in the time-derivative and transport terms: $$C_{\text{total}} = C_{\text{dis}} + \frac{1 - \phi}{\phi} C_{\text{sorb}}$$
+
+-   `"basis": "solid"` (default if omitted): The lumped concentration is expressed per unit volume of dry solid sediment ($\text{mol} \cdot \text{m}^{-3}_{\text{solid}}$). This convention is typically used when the species is predominantly solid-bound (e.g., in Velde et al., 2016, where $>99\%$ of ferrous iron is sorbed). MANTIS uses the solid volume fraction ($\phi_{\text{eff}} = 1 - \phi$): $$C_{\text{total, solid}} = C_{\text{sorb}} + \frac{\phi}{1 - \phi} C_{\text{dis}}$$
+
+
+<a id="org744f49c"></a>
+
+### How MANTIS Handles Mixed-Phase Transport and Bioturbation
+
+In a lumped pool, the dissolved fraction and the sorbed fraction experience completely different physical transport processes:
+
+1.  The ****dissolved fraction**** ($f_{\text{dis}}$) diffuses through pore fluids via molecular diffusion ($D_{\text{mol}}$) and is advected by porewater flow.
+2.  The ****sorbed fraction**** ($1 - f_{\text{dis}}$) is bound to solid particles and is mixed upwards and downwards by macrofaunal bioturbation ($D_{\text{bio}}$) and buried at the sediment accumulation rate ($w_{\text{sed}}$).
+
+MANTIS automatically constructs a unified effective transport stencil that partitions transport according to the instantaneous local dissolved fraction $f_{\text{dis}}(z)$:
+
+$$D_{\text{eff}}(z) = f_{\text{dis}}(z) \cdot D_{\text{mol}}(z) + \left[1.0 - f_{\text{dis}}(z)\right] \cdot D_{\text{bio}}(z)$$
+
+This dynamic partitioning has crucial physical consequences:
+
+-   In the surface bioturbated zone ($D_{\text{bio}} > 0$), solid mixing transports sorbed iron upwards toward the sediment-water interface, where it can desorb and diffuse into the overlying water column.
+-   Neglecting bioturbation on the adsorbed fraction would artificially trap sorbed species in the sediment, leading to systematic over-prediction of authigenic mineral precipitation (e.g., $\text{FeS}$ burial).
+-   When $f_{\text{dis}} \to 1$ (no sorption), $D_{\text{eff}}$ seamlessly reduces to pure molecular diffusion. When $f_{\text{dis}} \to 0$ (completely sorbed), $D_{\text{eff}}$ reduces to solid particle biodiffusion.
+
+
+<a id="org1597985"></a>
+
+### Declaring Lumped Species in `species.py`
+
+Here is an example of defining a lumped ferrous iron pool ($\text{Fe}^{2+}_{\text{total}}$) on a porewater basis, along with its diagnostic dissolved and sorbed sub-species:
+
+```jupyter-python
+species = {
+    # -------------------------------------------------------------------------
+    # 1. Primary Lumped Transport Variable (Porewater Basis)
+    # -------------------------------------------------------------------------
+    "Fe2_total": {
+        "phase": "mixed",
+        "basis": "porewater",                   # Tracked in mol/m^3 porewater (mM)
+        "include": True,                        # Primary PDE state variable
+        "formula": "Fe2",
+        "diff_coeff_function": "diff_coeff",
+        "diffusion": {"m0": 3.31, "m1": 0.150}, # Molecular diffusion of dissolved Fe2+
+        "bc_top": {"Dirichlet": "5.46e-5 mmol/l"},
+        "prefill": True,
+    },
+
+    # -------------------------------------------------------------------------
+    # 2. Diagnostic Equilibrium Sub-Species (Non-Transported)
+    # -------------------------------------------------------------------------
+    # Free dissolved Fe2+ that drives mineral precipitation (e.g., FeS precipitation)
+    "Fe2_liq": {
+        "phase": "liquid",
+        "include": False,                       # Derived algebraically; not a primary PDE
+        "formula": "Fe2",
+        "alias_of": "Fe2_total.dissolved",
+    },
+
+    # Surface-adsorbed iron bound to solid particles
+    "Fe2_ads": {
+        "phase": "solid",
+        "include": False,
+        "formula": "Fe2",
+        "alias_of": "Fe2_total.sorbed",
+    },
+}
+
+# -----------------------------------------------------------------------------
+# Speciation and Phase Partitioning Block
+# -----------------------------------------------------------------------------
+speciation = {
+    "iron_sorption": {
+        "type": "partition",
+        "primary": "Fe2_total",
+        "fractions": {
+            # Fraction dissolved in porewater vs. adsorbed to solid POC:
+            # f_dis = 1 / (1 + K_ads * [POC] * (1 - phi) / phi)
+            "dissolved": "fe2_dis_frac",
+            "sorbed": "1.0 - fe2_dis_frac",
+        },
+        "species": {
+            "Fe2_liq": {"phase": "liquid", "fraction": "fe2_dis_frac"},
+            "Fe2_ads": {"phase": "solid", "fraction": "1.0 - fe2_dis_frac"},
+        },
+    },
+}
+```
+
+In reaction equations (in `reactions.py`), you can use the diagnostic species (e.g., `Fe2_liq + HS -> FeS`) so that precipitation rates respond specifically to the active free dissolved solute concentration, while MANTIS conserves mass across the total lumped pool.
+
+
+<a id="org9f0bfc6"></a>
+
+## Speciation, pH and Equilibrium Isotope Effects
+
+
+<a id="org606f867"></a>
+
+## Carbonate Chemistry
