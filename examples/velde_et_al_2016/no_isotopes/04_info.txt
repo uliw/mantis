@@ -1,0 +1,138 @@
+
+======================================================================
+                OBJECTS ENCODED IN RDATA ARCHIVE
+======================================================================
+[1] "csv_path"        "plot.info"       "rdata_path"      "sim.info"       
+[5] "simulation.list"
+
+[SUCCESS] Concentration data exported to: 04 CSFe Steady Db~xL=6 KFIS=696 2.csv
+          Exported 200 depth intervals and 14 chemical species:
+          Species: OC.f, OC.s, FeOOH, FeS, X.Fe, O2, SO4, HCO3, H2O, H, HS, Fe, OC, Omega.FeS
+
+======================================================================
+                       SIMULATION INFO (sim.info)
+======================================================================
+  tc              : 11269.6421674479
+  fc              : 9934
+  index           : 2
+  code            : 04 CSFe Steady Db~xL=6 KFIS=696
+  name            : 04 CSFe Steady Db~xL=6 KFIS=696 2
+  SV.init         : Matrix/DF with dimensions [200 x 11] (Colnames: OC.f, OC.s, FeOOH, FeS, O2, Fe, SO4, HCO3)
+  time.seq        : 0, 0.000114077116130504, 0.000684462696783025, 0.00136892539356605, 0.0027378507871321, 0.0054757015742642, 0.027378507871321, 10000
+  time.schedule   : 0 hr, 1 hr, 6 hr, 12 hr, 1 d, 2 d, 10 d, 200 yr
+  N.out           : 2
+  progress        : Matrix/DF with dimensions [9934 x 23] (Colnames: Time, ACC OC.f, ACC OC.s, ACC FeOOH, ACC FeS, ACC O2, ACC Fe, ACC SO4)
+  run.time        : 0.479999999999563
+
+======================================================================
+                   MODEL PARAMETERS & UNITS (sim$PL)
+======================================================================
+  Units: Mass = umol, Time = yr, Length = cm
+
+  Key Scalar Parameters:
+    C.lim                = 0.001
+    L                    = 10
+    N                    = 200
+    grid.type            = uniform
+    dx.1                 = 0.005
+    S                    = 35
+    TC                   = 10
+    P                    = 1.013
+    por.0                = 0.8
+    por.inf              = 0.8
+    por.x.att            = 4
+    pH                   = 7.5
+    x.DBL                = 0
+    rho.sed              = 2.6
+    u.0                  = 0.2
+    v.0                  = 0.2
+    SedFlux              = 0.104
+    Db.0                 = 6
+    irr.0                = 0
+    k.f                  = 10
+    k.s                  = 0.1
+    K_O2                 = 0.001
+    K_FeOOH              = 520
+    K_SO4                = 0.9
+    k.CSO                = 1e+07
+    k.CSFO               = 494
+    k.ISO                = 1e+07
+    k.FIO                = 1e+07
+    k.FIS                = 10000
+    K.FIS                = 696.8
+    k.ISP                = 10000
+    k.ISD                = 3
+    n.ISP                = 1
+    n.ISD                = 1
+    K_IS                 = 9.99279740613208e-05
+    F.OC.f               = 365.25
+    F.OC.s               = 182.625
+    F.FeS                = 0
+    F.FeOOH              = 12
+    F.X.Fe               = 0
+    O2.ow                = 0.28
+    HCO3.ow              = 2.2
+    HS.ow                = 0
+    H2O.ow               = 0
+    SO4.ow               = 28.2357280651962
+    Fe.ow                = 0
+    H.ow                 = 0
+    O2.ds                = NA
+    HCO3.ds              = NA
+    HS.ds                = NA
+    H2O.ds               = NA
+    H.ds                 = NA
+    SO4.ds               = NA
+    Fe.ds                = NA
+    simulation.type      = direct.steady.state
+    N.var                = 11
+    N.non.var            = 0
+    x.L                  = 8.78198245087049
+    x.att                = 2
+    y.inf                = 0
+    k.SIO                = 1e+07
+
+======================================================================
+                    REACTION NETWORK (sim$RL)
+======================================================================
+  Reactions modeled:
+  Cmin.f, Cmin.s, AR.f, FR.f, SR.f, AR.s, FR.s, SR.s, ISP, ISD, ISO, CSO, FIO, CSFO, SIO 
+
+======================================================================
+                    ELEMENTAL MASS BALANCE (sim$EL)
+======================================================================
+  Element C    | Up Flux: 25.62      | Down Flux: 25.62      | Imbalance: 2.3788e-14
+  Element O    | Up Flux: 45         | Down Flux: 45         | Imbalance: 3.1210e-13
+  Element H    | Up Flux: 50.41      | Down Flux: 50.41      | Imbalance: 1.1247e-13
+  Element S    | Up Flux: 15.94      | Down Flux: 15.94      | Imbalance: 1.1321e-14
+  Element Fe   | Up Flux: 11.99      | Down Flux: 11.99      | Imbalance: -9.2684e-09
+  Element e    | Up Flux: 9.443      | Down Flux: 9.443      | Imbalance: 1.8537e-08
+
+======================================================================
+              SPECIES BOUNDARY CONDITIONS & FLUXES (sim$SL)
+======================================================================
+  OC.f       (solid ) | C.up: 232.7      | C.down: 0.0007902  | Flux.up: 365.2      | Flux.down: 3.161e-05 
+  OC.s       (solid ) | C.up: 1150       | C.down: 600.8      | Flux.up: 182.6      | Flux.down: 24.03     
+  FeOOH      (solid ) | C.up: 300.8      | C.down: 3.07e-06   | Flux.up: 12         | Flux.down: 1.228e-07 
+  FeS        (solid ) | C.up: 0.0001868  | C.down: 299        | Flux.up: 0          | Flux.down: 11.96     
+  X.Fe       (solid ) | C.up: 0.0002889  | C.down: 0.6793     | Flux.up: 0          | Flux.down: 0.02717   
+  O2         (solute) | C.up: 0.28       | C.down: 1.043e-06  | Flux.up: 496.8      | Flux.down: 1.669e-07 
+  SO4        (solute) | C.up: 28.24      | C.down: 24.75      | Flux.up: 15.98      | Flux.down: 3.96      
+  HCO3       (solute) | C.up: 2.2        | C.down: 9.95       | Flux.up: -522.3     | Flux.down: 1.592     
+  H2O        (solute) | C.up: 0          | C.down: 2.228      | Flux.up: -17.64     | Flux.down: 0.3565    
+  H          (solute) | C.up: 0          | C.down: 0.1934     | Flux.up: -499.8     | Flux.down: 0.03094   
+  HS         (solute) | C.up: 0          | C.down: 0.1025     | Flux.up: -0.0405    | Flux.down: 0.0164    
+  Fe         (solute) | C.up: 0          | C.down: 0.0009749  | Flux.up: -0.01298   | Flux.down: 0.000156  
+  OC         (solid ) | C.up: 1383       | C.down: 600.8      | Flux.up: 547.9      | Flux.down: 24.03     
+  Omega.FeS  (solute) | C.up: 0          | C.down: 1          | Flux.up: 0          | Flux.down: 0         
+
+======================================================================
+                       PLOT SETTINGS (plot.info)
+======================================================================
+  Layout species (mfrow): 4 x 4 
+  Layout reactions (mfrow): 4 x 4 
+
+======================================================================
+Loading Rdata file: 04 CSFe Steady Db~xL=6 KFIS=696 2.Rdata
+Target CSV file:   04 CSFe Steady Db~xL=6 KFIS=696 2.csv
+======================================================================
