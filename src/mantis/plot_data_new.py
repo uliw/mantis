@@ -1005,24 +1005,94 @@ def _get_ureg():
     return _ureg
 
 
+def _clean_unit_str(unit_str):
+    """Clean unit string by removing phase qualifiers (e.g. _pw, _solid, _dry) and spaces."""
+    if not unit_str:
+        return ""
+    s = str(unit_str).strip().replace(" ", "")
+    for suffix in ("_pw", "_solid", "_dry", "_porewater"):
+        s = s.replace(suffix, "")
+    return s
+
+
 def _convert_concentration_unit(series, target_units, base_units="mmol/L"):
-    """Convert a concentration series from base_units (default mmol/L) to target_units using pint."""
+    """Convert concentration series from base_units (mmol/L) to target_units using pint."""
     if not target_units:
         return series
-    t_clean = str(target_units).strip().replace(" ", "")
-    # Normalize common abbreviations
-    if t_clean.lower() in ("mmol/l", "mm", "mmol"):
+    return _convert_generic_unit(series, base_units, target_units)
+
+
+def _convert_generic_unit(series, from_unit, to_unit, df=None, ext_df=None, rel_to="Fe"):
+    """
+    Convert data series from an arbitrary source unit to a target display unit.
+    Supports Pint dimensional analysis as well as geochemical dry weight percent (wt%).
+    """
+    if from_unit is None or to_unit is None:
         return series
+    from_clean = _clean_unit_str(from_unit).lower()
+    to_clean = _clean_unit_str(to_unit).lower()
+
+    if from_clean == to_clean:
+        return series
+
+    # 1. Handling dry weight percent conversions ('wt', 'wt%')
+    if "wt" in to_clean or "%" in to_clean or "percent" in to_clean:
+        from mantis.diff_lib import solid_conc_to_wt_percent
+
+        rel_elem = str(rel_to).strip() if rel_to else "Fe"
+        mw = ATOMIC_WEIGHTS.get(rel_elem, 55.845)
+        if ext_df is not None and "phi" in ext_df.columns:
+            v_phi = ext_df["phi"]
+        elif df is not None and "phi" in df.columns:
+            if hasattr(df["phi"], "__len__") and len(df["phi"]) != len(series):
+                v_phi = float(df["phi"].iloc[0])
+            else:
+                v_phi = df["phi"]
+        else:
+            v_phi = 0.8
+        rho_solid = getattr(df, "rho_solid", 2.6) if df is not None else 2.6
+        if hasattr(rho_solid, "iloc"):
+            rho_solid = float(rho_solid.iloc[0])
+        elif not isinstance(rho_solid, (int, float)):
+            rho_solid = 2.6
+
+        # If input is in mmol/cm^3 or mol/m^3
+        # solid_conc_to_wt_percent expects mmol/L_solid (= mol/m^3_solid).
+        # Note: 1 mmol/cm^3 = 1000 mmol/L.
+        input_series = series
+        if "cm^3" in from_clean or "cm3" in from_clean:
+            input_series = series * 1000.0
+        return solid_conc_to_wt_percent(input_series, mw, rho_solid, v_phi)
+
+    # 2. Handling mass-normalized dry sediment conversions ('umol/g')
+    if "/g" in to_clean or "per_g" in to_clean:
+        from mantis.diff_lib import solid_conc_to_umol_per_g
+
+        rho_solid = getattr(df, "rho_solid", 2.6) if df is not None else 2.6
+        if hasattr(rho_solid, "iloc"):
+            rho_solid = float(rho_solid.iloc[0])
+        elif not isinstance(rho_solid, (int, float)):
+            rho_solid = 2.6
+
+        input_series = series
+        if "cm^3" in from_clean or "cm3" in from_clean:
+            input_series = series * 1000.0
+        umol_g = solid_conc_to_umol_per_g(input_series, rho_solid)
+        if to_clean not in ("umol/g", "umol_per_g"):
+            return _convert_concentration_unit(umol_g, to_unit, base_units="umol/g")
+        return umol_g
+
+    # 3. Standard Pint conversion
     try:
         ureg = _get_ureg()
-        # Handle case where user passes e.g. uM or mM or mol/L
-        q_base = 1.0 * ureg(base_units)
-        target_q = ureg(t_clean)
-        factor = float(q_base.to(target_q).magnitude)
+        f_q = 1.0 * ureg(_clean_unit_str(from_unit))
+        t_q = ureg(_clean_unit_str(to_unit))
+        factor = float(f_q.to(t_q).magnitude)
         return series * factor
     except Exception:
-        # If conversion is not recognized (e.g. custom or dimensionless string), keep series as-is
+        # If conversion fails or dimensions differ, return unchanged
         return series
+
 
 
 def _convert_rate_unit(series, target_units, base_units="mol/(m^3*s)"):
@@ -1330,7 +1400,21 @@ def _compile_single_spec(
             lbl = _pretty_species_label(sp, rel_elem=rel_to if units and "wt" in str(units).lower() else None)
             series_data.append([converted_col, lbl, st])
             if sp in mapped_external_series:
-                ez, ey, elbl = mapped_external_series[sp]
+                ext_info = mapped_external_series[sp]
+                if isinstance(ext_info, dict):
+                    ez = ext_info["z"]
+                    ey = ext_info["data"]
+                    elbl = ext_info["label"]
+                    t_unit = ext_info.get("target_unit")
+                    s_unit = ext_info.get("source_unit")
+                    # If target_unit was not explicitly set in species_mapping,
+                    # convert to the spec's units if applicable
+                    if t_unit is None and s_unit is not None and units:
+                        ey = _convert_generic_unit(
+                            ey, s_unit, units, df=df, ext_df=None, rel_to=rel_to or "Fe"
+                        )
+                else:
+                    ez, ey, elbl = ext_info
                 est = dict(st)
                 est["linestyle"] = ":"
                 est.pop("fill_only", None)
@@ -1363,7 +1447,21 @@ def _compile_single_spec(
             lbl = _pretty_species_label(sp)
             series_data.append([col_data, lbl, st])
             if sp in mapped_external_series:
-                ez, ey, elbl = mapped_external_series[sp]
+                ext_info = mapped_external_series[sp]
+                if isinstance(ext_info, dict):
+                    ez = ext_info["z"]
+                    ey = ext_info["data"]
+                    elbl = ext_info["label"]
+                    t_unit = ext_info.get("target_unit")
+                    s_unit = ext_info.get("source_unit")
+                    # If target_unit was not explicitly set in species_mapping,
+                    # convert to the spec's units if applicable
+                    if t_unit is None and s_unit is not None and units:
+                        ey = _convert_generic_unit(
+                            ey, s_unit, units, df=df, ext_df=None, rel_to=rel_to or "Fe"
+                        )
+                else:
+                    ez, ey, elbl = ext_info
                 est = dict(st)
                 est["linestyle"] = ":"
                 est.pop("fill_only", None)
@@ -1526,20 +1624,29 @@ def compile_declarative_layout(module, df, layout_path, measured_data_path=None)
 
         z_spec = mapping["z"]
         z_col = z_spec[0]
-        z_conv = z_spec[1] if len(z_spec) > 1 else 1.0
         if z_col not in ext_df.columns:
             raise KeyError(f"External depth column '{z_col}' not found in comparison data '{comp_file}'.")
-        if callable(z_conv):
-            ext_z = z_conv(ext_df[z_col])
+
+        if len(z_spec) >= 3 and isinstance(z_spec[1], str) and isinstance(z_spec[2], str):
+            # ["col", "from_unit", "to_unit"]
+            from_u, to_u = z_spec[1], z_spec[2]
+            ext_z = _convert_generic_unit(ext_df[z_col], from_u, to_u, df=df, ext_df=ext_df)
+        elif len(z_spec) > 1:
+            z_conv = z_spec[1]
+            if callable(z_conv):
+                ext_z = z_conv(ext_df[z_col])
+            elif isinstance(z_conv, str):
+                ext_z = _convert_generic_unit(ext_df[z_col], z_conv, "m", df=df, ext_df=ext_df)
+            else:
+                ext_z = ext_df[z_col] * float(z_conv)
         else:
-            ext_z = ext_df[z_col] * float(z_conv)
+            ext_z = ext_df[z_col]
 
         # Process mapped species
         for sp_key, spec_val in mapping.items():
             if sp_key == "z":
                 continue
             ext_col = spec_val[0]
-            conv = spec_val[1] if len(spec_val) > 1 else 1.0
 
             # Validation: key and value must exist in respective dataframes
             if f"c_{sp_key}" not in df.columns and sp_key not in df.columns and f"f_{sp_key}" not in df.columns:
@@ -1551,30 +1658,55 @@ def compile_declarative_layout(module, df, layout_path, measured_data_path=None)
                 )
 
             raw_val = ext_df[ext_col]
-            if callable(conv):
-                try:
-                    converted_val = conv(raw_val, ext_df, df)
-                except TypeError:
-                    try:
-                        converted_val = conv(raw_val, df)
-                    except TypeError:
-                        converted_val = conv(raw_val)
-            elif isinstance(conv, (int, float)):
-                converted_val = raw_val * float(conv)
-            elif isinstance(conv, str) and conv.lower() in ("wt", "wt%"):
-                from mantis.diff_lib import solid_conc_to_wt_percent
+            target_unit = None
+            source_unit = None
 
-                mw = 55.845
-                v_phi = (
-                    ext_df["phi"].values
-                    if "phi" in ext_df.columns
-                    else (df.phi.values[0] if "phi" in df.columns else 0.8)
+            if len(spec_val) >= 3 and isinstance(spec_val[1], str) and isinstance(spec_val[2], str):
+                # 3-element format: [ext_col, source_unit, target_display_unit]
+                source_unit = spec_val[1]
+                target_unit = spec_val[2]
+                converted_val = _convert_generic_unit(
+                    raw_val, source_unit, target_unit, df=df, ext_df=ext_df, rel_to="Fe"
                 )
-                converted_val = solid_conc_to_wt_percent(raw_val, mw, 2.6, v_phi)
+            elif len(spec_val) > 1:
+                conv = spec_val[1]
+                if callable(conv):
+                    try:
+                        converted_val = conv(raw_val, ext_df, df)
+                    except TypeError:
+                        try:
+                            converted_val = conv(raw_val, df)
+                        except TypeError:
+                            converted_val = conv(raw_val)
+                elif isinstance(conv, (int, float)):
+                    converted_val = raw_val * float(conv)
+                elif isinstance(conv, str) and conv.lower() in ("wt", "wt%"):
+                    from mantis.diff_lib import solid_conc_to_wt_percent
+
+                    mw = 55.845
+                    v_phi = (
+                        ext_df["phi"].values
+                        if "phi" in ext_df.columns
+                        else (df.phi.values[0] if "phi" in df.columns else 0.8)
+                    )
+                    converted_val = solid_conc_to_wt_percent(raw_val, mw, 2.6, v_phi)
+                elif isinstance(conv, str):
+                    # Could be source unit with default target unit
+                    source_unit = conv
+                    target_unit = None
+                    converted_val = raw_val
+                else:
+                    converted_val = raw_val
             else:
                 converted_val = raw_val
 
-            mapped_external_series[sp_key] = (ext_z, converted_val, f"{_pretty_species_label(sp_key)} (data)")
+            mapped_external_series[sp_key] = {
+                "z": ext_z,
+                "data": converted_val,
+                "label": f"{_pretty_species_label(sp_key)} (data)",
+                "source_unit": source_unit,
+                "target_unit": target_unit,
+            }
 
     # 3. Build subplots
     plt_desc = {}
