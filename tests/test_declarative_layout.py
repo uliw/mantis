@@ -667,6 +667,83 @@ plot_panels = [
         assert "[nmol/(cm^3*d)]" in p3["left_ylabel"]
 
 
+def test_species_mapping_unit_conversion(sample_df):
+    """Test species_mapping syntax with [col, from_unit, to_unit]."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Create external comparison CSV
+        ext_csv = os.path.join(tmpdir, "comp_data.csv")
+        ext_df = pd.DataFrame({
+            "depth_cm": [0.0, 10.0, 50.0],
+            "so4_pw": [0.028, 0.020, 0.005],  # mmol/cm^3_pw
+            "fe_pw": [1.5e-7, 2.5e-7, 1.0e-7], # mmol/cm^3_pw
+            "fes_solid": [0.03, 0.04, 0.05],   # mmol/cm^3_solid
+        })
+        ext_df.to_csv(ext_csv, index=False)
+
+        layout_content = f"""
+comparison_data = "{os.path.basename(ext_csv)}"
+
+species_mapping = {{
+    "z": ["depth_cm", "cm", "m"],
+    "SO4": ["so4_pw", "mmol/cm^3_pw", "mmol/L"],
+    "Fe2_liq": ["fe_pw", "mmol/cm^3_pw", "nmol/L"],
+    "FeS": ["fes_solid", "mmol/cm^3_solid", "wt%"],
+}}
+
+liquid_species_1 = liquid_species({{
+    "species": ["SO4"],
+    "units": "mmol/L",
+}})
+
+liquid_species_2 = liquid_species({{
+    "species": ["Fe2_liq"],
+    "units": "nmol/L",
+    "position": "right",
+}})
+
+solid_species_1 = solid_species({{
+    "species": ["FeS"],
+    "units": "wt%",
+    "relative_to": "Fe",
+}})
+
+plot_panels = [
+    [liquid_species_1, liquid_species_2],
+    [solid_species_1],
+]
+"""
+        layout_path = os.path.join(tmpdir, "plot_layout.py")
+        with open(layout_path, "w") as f:
+            f.write(layout_content)
+
+        # Make sure sample_df has Fe2_liq
+        df_sim = sample_df.copy()
+        df_sim["c_Fe2_liq"] = 1e-4
+
+        plt_desc = load_layout_from_file(df_sim, layout_path)
+        p1 = plt_desc["first_subplot"]
+
+        # SO4: external series is at index 1 of left [ez, ey, label, kwargs]
+        # raw so4_pw is 0.028 mmol/cm^3 = 28.0 mmol/L
+        ext_so4 = p1["left"][1]
+        assert ext_so4[3]["linestyle"] == ":"
+        np.testing.assert_allclose(ext_so4[1], [28.0, 20.0, 5.0])
+        np.testing.assert_allclose(ext_so4[0], [0.0, 0.1, 0.5])  # z in meters
+
+        # Fe2_liq: external series is at index 1 of right1
+        # raw fe_pw is 1.5e-7 mmol/cm^3 = 1.5e-7 * 1e9 = 150 nmol/L
+        ext_fe = p1["right1"][1]
+        assert ext_fe[3]["linestyle"] == ":"
+        np.testing.assert_allclose(ext_fe[1], [150.0, 250.0, 100.0])
+
+        # FeS: external series in second_subplot right1
+        # wt% Fe = 0.03 * 55.845 / 26.0 ≈ 0.064436
+        p2 = plt_desc["second_subplot"]
+        ext_fes = p2["right1"][1]
+        expected_wt = ext_df["fes_solid"] * 1000.0 * 55.845 / (10000.0 * 2.6)
+        np.testing.assert_allclose(ext_fes[1], expected_wt)
+
+
 
 
 

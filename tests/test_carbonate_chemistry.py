@@ -223,3 +223,38 @@ def test_species_parser_rejects_non_numeric_include_in_ta():
     with pytest.raises(SystemExit):
         parse_and_validate_species_dict(species, {})
 
+
+def test_carbonate_configured_via_speciation_block():
+    """Test that defining carbonate system under speciation in species.py automatically configures carbonate chemistry."""
+    from mantis import DiageneticModel
+    from pathlib import Path
+
+    simplefe_dir = Path(__file__).resolve().parent.parent / "nbk" / "SimpleFe"
+    if not (simplefe_dir / "species.py").exists():
+        pytest.skip("SimpleFe directory not present.")
+
+    model = DiageneticModel(
+        base_dir=simplefe_dir,
+        species="species.py",
+        reactions="reactions.py",
+        constants="kinetic_constants.py",
+        equations="equations.py",
+    )
+    # Configure without passing carbonate_equilibrium_chemistry or iron speciation
+    model.configure(
+        w="0.14 cm/yr",
+        phi=0.8,
+    )
+    model.setup()
+
+    assert model.mp.is_carbonate is True
+    assert model.mp.enable_iron_speciation is True
+    assert hasattr(model.mp, "carb_spec_top")
+    assert model.mp.carb_constants.pressure_bar == 50.0
+    assert model.mp.carb_constants.salinity == 35.0
+    assert model.mp.carb_spec_top["DIC"] == pytest.approx(2.345, rel=1e-3)
+    assert model.mp.carb_spec_top["pH"] == pytest.approx(7.59, rel=1e-3)
+    assert hasattr(model.mp, "beta_FeHS")
+    assert model.mp.beta_FeHS == pytest.approx(251.1886, rel=1e-3)
+
+
