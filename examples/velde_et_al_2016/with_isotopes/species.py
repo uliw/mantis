@@ -115,7 +115,7 @@ species = {
         "include": True,
         "formula": "Fe2",
         "diff_coeff_function": "diff_coeff",
-        "diffusion": {"m0": 27.7, "m1": 1.0},
+        "diffusion": {"m0": 3.31, "m1": 0.15},
         "bc_top": {"Dirichlet": 0.0},
     },
 

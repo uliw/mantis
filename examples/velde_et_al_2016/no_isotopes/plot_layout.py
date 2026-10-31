@@ -8,14 +8,14 @@ Declarative layout configuration for diagenetic modeling results (Velde et al. 2
 comparison_data = "velde_bt04_d6.csv"
 
 # Species mapping between mantis and external data.
-# The second list element is a conversion factor or function.
+# Format: "mantis_species": [external_column_name, source_unit, target_display_unit]
 species_mapping = {
-    "z": ["depth_cm", 1 / 100],
-    "HS": ["C_HS", 1.0],
-    "FeS": ["C_FeS", "wt"],
-    "Fe3": ["C_FeOOH", "wt"],
-    "Fe2_liq": ["C_Fe", 1.0],
-    "O2": ["C_O2", 1.0],
+    "z": ["depth_cm", "cm", "m"],
+    "HS": ["C_HS", "mmol/L_pw", "mmol/L"],
+    "FeS": ["C_FeS", "mmol/L_solid", "wt%"],
+    "Fe3": ["C_FeOOH", "mmol/L_solid", "wt%"],
+    "Fe2_liq": ["C_Fe", "mmol/L_pw", "mmol/L"],
+    "O2": ["C_O2", "mmol/L_pw", "mmol/L"],
 }
 
 # ----  color map and plot style setup  --- #
