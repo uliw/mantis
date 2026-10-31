@@ -825,7 +825,12 @@ class DiageneticModel:
         }
 
         # 1. Procedural speciation hooks (e.g. Du 2023 iron speciation)
-        if self.p_dict.get("enable_iron_speciation", False) or "beta_FeHS" in self.p_dict or hasattr(self.mp, "beta_FeHS"):
+        if (
+            self.p_dict.get("enable_iron_speciation", False)
+            or "beta_FeHS" in self.p_dict
+            or hasattr(self.mp, "beta_FeHS")
+            or getattr(self.mp, "enable_iron_speciation", False)
+        ):
             return True, "coupled non-linear iron speciation (enable_iron_speciation/beta_FeHS)"
 
         # 2. Check speciation systems for cross-species dependencies
@@ -945,8 +950,24 @@ class DiageneticModel:
             elif std_m.get("element") == "O":
                 self.mp.VSMOW = float(std_m["ratio"])
 
+        # Expose constants declared in speciation systems (e.g. fe2_speciation) on self.mp
+        if isinstance(speciation_defs, dict):
+            for sys_name, sys_cfg in speciation_defs.items():
+                if "constants" in sys_cfg and isinstance(sys_cfg["constants"], dict):
+                    for c_name, c_val in sys_cfg["constants"].items():
+                        if not hasattr(self.mp, c_name):
+                            setattr(self.mp, c_name, c_val)
+                if sys_name == "fe2_speciation" or "beta_FeHS" in sys_cfg.get("constants", {}):
+                    self.mp.enable_iron_speciation = True
+
         # 2. Extract pH and check carbonate system boundary consistency
         carb_cfg = self.p_dict.get("carbonate_equilibrium_chemistry")
+        if carb_cfg is None and isinstance(speciation_defs, dict):
+            for sys_name, sys_cfg in speciation_defs.items():
+                if sys_cfg.get("type") in ("carbonate_system", "carbonate"):
+                    carb_cfg = dict(sys_cfg)
+                    break
+
         is_carbonate = carb_cfg is not None
         self.mp.is_carbonate = is_carbonate
 
@@ -968,10 +989,10 @@ class DiageneticModel:
             )
 
             # 1. Environmental parameters (P, S, T)
-            pressure_bar = float(carb_cfg.get("pressure", 1.0))
-            salinity = float(carb_cfg.get("salinity", 34.0))
-            adjust_omega = bool(carb_cfg.get("adjust_omega", True))
-            ph_scale = str(carb_cfg.get("ph_scale", carb_cfg.get("pH_scale", "free"))).lower().strip()
+            pressure_bar = float(carb_cfg.get("pressure", self.p_dict.get("pressure", 1.0)))
+            salinity = float(carb_cfg.get("salinity", self.p_dict.get("salinity", 34.0)))
+            adjust_omega = bool(carb_cfg.get("adjust_omega", self.p_dict.get("adjust_omega", True)))
+            ph_scale = str(carb_cfg.get("ph_scale", carb_cfg.get("pH_scale", self.p_dict.get("ph_scale", "free")))).lower().strip()
 
             temp_val = self.mp.temp
             temp_c = float(temp_val[0] if isinstance(temp_val, (list, tuple, np.ndarray)) else temp_val)
@@ -1018,28 +1039,62 @@ class DiageneticModel:
                 sys.exit(1)
             ca2_top = float(ca2_top)
 
-            # 3. Extract TA, DIC, pH solely from carbonate_equilibrium_chemistry
-            # When carbonate_equilibrium_chemistry is provided, species.py boundary values
-            # for carbonate species are disregarded and decisions are based solely on carb_cfg.
+            # 3. Extract TA, DIC, pH
+            def _extract_bc_val(sp_name):
+                if hasattr(self, "_parsed_bc_map") and sp_name in self._parsed_bc_map:
+                    v = self._parsed_bc_map[sp_name].get("top")
+                    if v is not None:
+                        return v
+                if sp_name in species_defs:
+                    meta = species_defs[sp_name].get("bc_top", species_defs[sp_name].get("bc", {}))
+                    if isinstance(meta, dict):
+                        v = meta.get("Dirichlet", meta.get("top"))
+                        if v is not None:
+                            return v
+                    elif meta is not None:
+                        return meta
+                return None
+
             ta_top = carb_cfg.get("TA")
+            if ta_top is None:
+                ta_top = _extract_bc_val("TA")
             if isinstance(ta_top, dict):
                 ta_top = ta_top.get("top")
             if isinstance(ta_top, str):
                 ta_top = self.Q_(ta_top).to("mol/m^3").magnitude
 
             dic_top = carb_cfg.get("DIC")
+            if dic_top is None:
+                dic_top = _extract_bc_val("DIC")
             if isinstance(dic_top, dict):
                 dic_top = dic_top.get("top")
             if isinstance(dic_top, str):
                 dic_top = self.Q_(dic_top).to("mol/m^3").magnitude
 
             ph_top = carb_cfg.get("pH")
-            if ph_top is not None:
+            if ph_top is None:
+                h_bc = _extract_bc_val("Hplus")
+                if h_bc is not None:
+                    ph_top = float(h_bc)
+                elif "pH" in self.p_dict and self.p_dict["pH"] is not None:
+                    ph_top = float(self.p_dict["pH"])
+            elif ph_top is not None:
                 ph_top = float(ph_top)
 
-            has_ph = ph_top is not None
-            has_ta = ta_top is not None
-            has_dic = dic_top is not None
+            controls = carb_cfg.get("controls")
+            if isinstance(controls, (list, tuple)):
+                controls_upper = [str(c).upper() for c in controls]
+                has_ph = ("PH" in controls_upper or "HPLUS" in controls_upper) and ph_top is not None
+                has_dic = "DIC" in controls_upper and dic_top is not None
+                has_ta = "TA" in controls_upper and ta_top is not None
+            else:
+                has_ph = ph_top is not None
+                has_ta = ta_top is not None
+                has_dic = dic_top is not None
+                # If all three are defined from species.py and not all three were explicitly passed in carb_cfg,
+                # default to DIC and pH as master controls since TA is the dependent variable
+                if has_ph and has_ta and has_dic and not ("TA" in carb_cfg and "DIC" in carb_cfg and "pH" in carb_cfg):
+                    has_ta = False
 
             if has_ph and has_ta and has_dic:
                 print(

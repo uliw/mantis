@@ -219,6 +219,7 @@ def build_native_1d_transport_stencil(
     D_irr: Optional[np.ndarray] = None,
     solid_scheme: str = "powerlaw",
     mp: Optional[Any] = None,
+    f_dis: Optional[Any] = None,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Constructs the exact 1D tridiagonal finite-volume transport stencil in pure NumPy.
 
@@ -350,13 +351,15 @@ def build_native_1d_transport_stencil(
         ab[1, -1] += a_out_diag
         b_transport[-1] += a_out_rhs * bot_val
 
-    # Bio-irrigation (non-local exchange for dissolved species)
-    if is_dissolved and D_irr is not None:
+    # Bio-irrigation (non-local exchange for dissolved and mixed species)
+    if (is_dissolved or sp_phase == "mixed") and D_irr is not None:
         irr_arr = np.asarray(D_irr)
         if np.any(irr_arr > 0):
-            irr_coeff = eff_phi_arr * irr_arr * dx
+            phi_pw = np.asarray(phi.value if hasattr(phi, "value") else phi, dtype=np.float64)
+            f_dis_arr = np.asarray(f_dis, dtype=np.float64) if (sp_phase == "mixed" and f_dis is not None) else 1.0
+            irr_coeff = phi_pw * irr_arr * f_dis_arr * dx
             ab[1, :] += irr_coeff
-            b_transport += irr_coeff * top_val
+            b_transport += phi_pw * irr_arr * dx * top_val
 
     return ab, b_transport
 
@@ -541,7 +544,10 @@ class MonolithicNewtonSystem:
                         # D_mol_val was already scaled by diss_frac in model.py
                         D_eff = np.maximum(D_mol_val + (1.0 - f_dis) * D_bio_val, 1e-20)
                 else:
+                    f_dis = None
                     D_eff = np.maximum(D_mol_val + D_bio_val, 1e-20)
+            else:
+                f_dis = None
 
             # Advection velocity
             w_val = getattr(mp, "w", 0.0)
@@ -552,10 +558,10 @@ class MonolithicNewtonSystem:
                     phi_inf = float(phi_val[-1])
                     w_val = float(w_val) * (1.0 - phi_inf) / np.maximum(1.0 - np.asarray(phi_val, dtype=np.float64), 1e-6)
 
-            # Bio-irrigation (dissolved only)
+            # Bio-irrigation (dissolved and mixed species)
             D_irr_val = (
                 getattr(D_mol, "D_irr", None)
-                if (is_diss and D_mol is not None)
+                if ((is_diss or sp_phase == "mixed") and D_mol is not None)
                 else None
             )
 
@@ -569,6 +575,7 @@ class MonolithicNewtonSystem:
                 D_irr=D_irr_val,
                 solid_scheme=solid_scheme,
                 mp=mp,
+                f_dis=f_dis if sp_phase == "mixed" else None,
             )
 
             # ab has shape (3, N):
