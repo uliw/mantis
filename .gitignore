@@ -6,6 +6,7 @@ ltximg/
 notes/
 dist/
 nbk/
+_minted
 wheels/
 *.egg-info
 src/*.egg-info
@@ -13,6 +14,7 @@ src/**/_version.py
 _version.py
 TAGS
 *.pdf
+*.tex
 *.csv
 *.egg
 *.py[cod]
