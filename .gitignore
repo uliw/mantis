@@ -6,6 +6,7 @@ ltximg/
 notes/
 dist/
 nbk/
+old_tutorial
 _minted
 wheels/
 *.egg-info
@@ -27,12 +28,17 @@ TAGS
 CLAUDE.md
 *.log
 *.gz
+*.xlsx
 .unison*
 
 # Exceptions
 !examples/velde_et_al_2016/no_isotopes/run_velde_fast_reference.csv
-!examples/velde_et_al_2016/with_isotopes/run_velde_fast_reference.csv
 !examples/velde_et_al_2016/no_isotopes/velde_bt04_d6.csv
+!examples/velde_et_al_2016/no_isotopes_with_irrigation/run_velde_fast_reference.csv
+!examples/velde_et_al_2016/no_isotopes_with_irrigation/14_with_irr.csv
+!examples/velde_et_al_2016/with_isotopes/run_velde_fast_reference.csv
+!examples/SimpleFe/run_simplefe_reference.csv
+!examples/SimpleFe/SimpleFe_Du_2023.csv
 
 # Virtual environments
 .venv
