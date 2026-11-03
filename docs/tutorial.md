@@ -648,6 +648,30 @@ reactions = [
     },
 ]
 
+### Controlling Reaction Orders: `reaction_order` (`0`, `1`, `2`)
+
+By default in MANTIS, single-reactant reactions are first-order ($R = k \cdot [A]$), while multiple-reactant reactions follow second-order bimolecular mass-action kinetics ($R = k \cdot [A] \cdot [B] \cdot \prod \text{limiters}$).
+
+To explicitly specify the kinetic reaction order independently of stoichiometric reactants:
+- **`reaction_order: 0`**: Zero-order in reactants ($R = k \cdot \prod \text{limiters}$). Used for surface-controlled mineral precipitation or dissolution governed purely by saturation state ($\Omega - 1$):
+  $$R_{\text{PPT}} = k_{\text{PPT}} \cdot (\Omega - 1)$$
+- **`reaction_order: 1`**: First-order in the primary/master reactant only ($R = k \cdot [A] \cdot \prod \text{limiters}$), without multiplying by secondary reactants.
+- **`reaction_order: 2`**: Second-order mass-action ($R = k \cdot [A] \cdot [B] \cdot \prod \text{limiters}$).
+
+Example for saturation-governed calcite precipitation:
+```python
+    {
+        "reaction_name": "calcite_precipitation",
+        "reaction": "Ca2 + DIC + 2 TA -> CaCO3",
+        "k_value_name": "k_calcite_precip",
+        "limiters": ["calcite_precip_limiter"],
+        "reaction_order": 0,   # Purely governed by k * limiter (saturation state)
+    }
+```
+When `reaction_order: 0`:
+- The reaction stoichiometry (`Ca2 + DIC + 2 TA -> CaCO3`) determines all phase and mass-balance coupling for the transport PDEs.
+- The kinetic rate evaluation omits multiplying by reactant concentrations ($[\text{Ca}^{2+}][\text{DIC}][\text{TA}]^2$), evaluating purely as $R = k \cdot \prod \text{limiters}$.
+
 # -------------------------------------------------------------------------
 # Reaction Parameters & Isotope Fractionation Factors
 # -------------------------------------------------------------------------
