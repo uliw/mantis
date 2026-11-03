@@ -41,6 +41,7 @@ dependencies = [
     "numba",
     "pint",
     "watchdog",
+    "scipy>=1.18.1",
 ]
 
 [project.urls]
