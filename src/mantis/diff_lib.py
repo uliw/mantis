@@ -2782,15 +2782,35 @@ def compute_carbonate_speciation(c: Any, mp: Any) -> None:
                 if conc is not None:
                     ta_non_carb = ta_non_carb + factor * conc
 
+            # Exact vectorized Newton-Raphson step in ln(h) across all cells
+            H_cur = np.clip(h_plus, 1e-13, 1e-3)
+            denom_c = H_cur**2 + K1 * H_cur + K1 * K2
+            num_c = dic_val * (K1 * H_cur + 2.0 * K1 * K2)
+            ta_c = num_c / denom_c
+            dnum_c = dic_val * K1 * H_cur
+            ddenom_c = (2.0 * H_cur + K1) * H_cur
+            dta_c = (dnum_c * denom_c - num_c * ddenom_c) / (denom_c**2)
+            
+            # Approximate d(ta_non_carb)/d(ln_h) for standard acid-base fractions Ka / (H + Ka)
+            d_non_carb = np.zeros_like(ta_val, dtype=np.float64)
+            for sp_name, meta, factor in non_carb_species:
+                parent_raw = meta.get("equilibrium_of") or meta.get("alias_of")
+                if parent_raw:
+                    parent_name = str(parent_raw).split(".", 1)[0]
+                    if hasattr(c, parent_name):
+                        parent_val = _get_val_arr(getattr(c, parent_name))
+                        pKa = 7.0
+                        if "constants" in meta and isinstance(meta["constants"], dict):
+                            pKa = float(meta["constants"].get("pKa1", meta["constants"].get("pKa", 7.0)))
+                        Ka = 10.0 ** (-pKa)
+                        d_non_carb -= factor * parent_val * (Ka * H_cur) / ((H_cur + Ka)**2)
+
+            f_val = ta_c + ta_non_carb - ta_val
+            df_val = dta_c + d_non_carb
+            delta_ln = - f_val / np.minimum(df_val, -1e-15)
+            delta_ln = np.clip(delta_ln, -1.0, 1.0)
+            h_plus = np.clip(H_cur * np.exp(delta_ln), 1e-13, 1e-3)
             ta_carb = np.maximum(ta_val - ta_non_carb, 1e-12)
-            a = ta_carb
-            b = K1 * (ta_carb - dic_val)
-            c_term = K1 * K2 * (ta_carb - 2.0 * dic_val)
-            disc = np.maximum(b**2 - 4.0 * a * c_term, 0.0)
-            h_new = (-b + np.sqrt(disc)) / (2.0 * a)
-            h_new = np.maximum(h_new, 1e-14)
-            # Under-relaxation to eliminate fixed-point oscillation between acid-base pools
-            h_plus = 0.5 * h_plus + 0.5 * h_new
     else:
         # Fallback for models without explicit include_in_TA if TS2 is present
         Ka1_H2S = 10.0 ** (-float(getattr(mp, "pKa1_H2S", 7.0)))
@@ -2798,17 +2818,27 @@ def compute_carbonate_speciation(c: Any, mp: Any) -> None:
         if ts2_raw is not None:
             ts2_val = _get_val_arr(ts2_raw)
             if np.any(ts2_val > 1e-12):
-                for _ in range(12):
-                    hs_alk = ts2_val * (Ka1_H2S / (h_plus + Ka1_H2S))
-                    ta_carb = np.maximum(ta_val - hs_alk, 1e-12)
-                    ta_non_carb = hs_alk
-                    a = ta_carb
-                    b = K1 * (ta_carb - dic_val)
-                    c_term = K1 * K2 * (ta_carb - 2.0 * dic_val)
-                    disc = np.maximum(b**2 - 4.0 * a * c_term, 0.0)
-                    h_new = (-b + np.sqrt(disc)) / (2.0 * a)
-                    h_new = np.maximum(h_new, 1e-14)
-                    h_plus = 0.5 * h_plus + 0.5 * h_new
+                ln_h = np.log(np.clip(h_plus, 1e-13, 1e-3))
+                for _ in range(10):
+                    H_cur = np.exp(ln_h)
+                    denom_c = H_cur**2 + K1 * H_cur + K1 * K2
+                    num_c = dic_val * (K1 * H_cur + 2.0 * K1 * K2)
+                    ta_c = num_c / denom_c
+                    dnum_c = dic_val * K1 * H_cur
+                    ddenom_c = (2.0 * H_cur + K1) * H_cur
+                    dta_c = (dnum_c * denom_c - num_c * ddenom_c) / (denom_c**2)
+                    hs_denom = H_cur + Ka1_H2S
+                    hs_val = ts2_val * Ka1_H2S / hs_denom
+                    dhs = - (ts2_val * Ka1_H2S * H_cur) / (hs_denom**2)
+                    f_val = ta_c + hs_val - ta_val
+                    df_val = dta_c + dhs
+                    delta_ln = - f_val / np.minimum(df_val, -1e-15)
+                    delta_ln = np.clip(delta_ln, -2.0, 2.0)
+                    ln_h = ln_h + delta_ln
+                h_plus = np.exp(ln_h)
+                hs_alk = ts2_val * (Ka1_H2S / (h_plus + Ka1_H2S))
+                ta_carb = np.maximum(ta_val - hs_alk, 1e-12)
+                ta_non_carb = hs_alk
 
     denom = h_plus**2 + K1 * h_plus + K1 * K2
     co3 = dic_val * (K1 * K2) / denom

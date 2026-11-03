@@ -1063,14 +1063,34 @@ class EquationSystemGenerator:
         if master_spec:
             coeff_expr += f' * {master_spec}'
 
-        for coeff, sp in reactants:
-            p_sp = self.validator.get_parent_species(sp)
-            if p_sp != master_parent:
-                if p_sp == "TA" and not ("calcite" in r_name.lower() or "caco3" in r_name.lower()):
-                    continue
-                spec = self.validator.get_speciation_factor_expr(sp)
-                term = f'getattr(c, "{p_sp}")' if not spec else f'(getattr(c, "{p_sp}") * {spec})'
-                coeff_expr += f' * {term}'
+        # Determine reaction order:
+        # 1. Explicit reaction_order or order: 0, 1, 2
+        #    - 0: rate = k * limiters (zero-order in reactants, e.g. surface precipitation Omega - 1)
+        #    - 1: rate = k * [master] * limiters (first-order in master reactant only, e.g. k_POC * [POC])
+        #    - 2: rate = k * [master] * [other_reactants] * limiters (second-order / bimolecular mass-action)
+        # 2. Legacy reactants_in_rate / order_from_reactants: bool
+        # 3. Default:
+        #    - 1 if single reactant
+        #    - 2 if multiple reactants (preserves legacy mass-action behavior across all existing benchmark models)
+        rxn_order = r.get("reaction_order", r.get("order", None))
+        if rxn_order is not None:
+            rxn_order = int(rxn_order)
+        elif "reactants_in_rate" in r:
+            rxn_order = 2 if r["reactants_in_rate"] else 0
+        elif "order_from_reactants" in r:
+            rxn_order = 2 if r["order_from_reactants"] else 0
+        else:
+            rxn_order = 1 if len(reactants) == 1 else 2
+
+        if rxn_order == 2:
+            for coeff, sp in reactants:
+                p_sp = self.validator.get_parent_species(sp)
+                if p_sp != master_parent:
+                    if p_sp == "TA" and not ("calcite" in r_name.lower() or "caco3" in r_name.lower()):
+                        continue
+                    spec = self.validator.get_speciation_factor_expr(sp)
+                    term = f'getattr(c, "{p_sp}")' if not spec else f'(getattr(c, "{p_sp}") * {spec})'
+                    coeff_expr += f' * {term}'
 
         for l_name in (r.get("limiters") or []):
             lines.append(f'    _lim_{l_name} = lim.get("{l_name}_implicit", lim.get("{l_name}", 1.0))')
@@ -1111,14 +1131,15 @@ class EquationSystemGenerator:
                 iso_spec = self.validator.get_speciation_factor_expr(iso_orig_sp)
                 if iso_spec:
                     iso_coeff_expr += f' * {iso_spec}'
-                for coeff, sp in reactants:
-                    p_sp = self.validator.get_parent_species(sp)
-                    if p_sp != iso_master_parent:
-                        if p_sp == "TA" and not ("calcite" in r_name.lower() or "caco3" in r_name.lower()):
-                            continue
-                        spec = self.validator.get_speciation_factor_expr(sp)
-                        term = f'getattr(c, "{p_sp}")' if not spec else f'(getattr(c, "{p_sp}") * {spec})'
-                        iso_coeff_expr += f' * {term}'
+                if rxn_order == 2:
+                    for coeff, sp in reactants:
+                        p_sp = self.validator.get_parent_species(sp)
+                        if p_sp != iso_master_parent:
+                            if p_sp == "TA" and not ("calcite" in r_name.lower() or "caco3" in r_name.lower()):
+                                continue
+                            spec = self.validator.get_speciation_factor_expr(sp)
+                            term = f'getattr(c, "{p_sp}")' if not spec else f'(getattr(c, "{p_sp}") * {spec})'
+                            iso_coeff_expr += f' * {term}'
                 for l_name in (r.get("limiters") or []):
                     iso_coeff_expr += f' * _lim_{l_name}'
                 for i_name in (r.get("inhibitors") or []):
@@ -1801,7 +1822,24 @@ class EquationSystemGenerator:
             lines.append('')
             return lines
 
+        rxn_order = r.get("reaction_order", r.get("order", None))
+        if rxn_order is not None:
+            rxn_order = int(rxn_order)
+        elif "reactants_in_rate" in r:
+            rxn_order = 2 if r["reactants_in_rate"] else 0
+        elif "order_from_reactants" in r:
+            rxn_order = 2 if r["order_from_reactants"] else 0
+        else:
+            rxn_order = 1 if len(r_parents) == 1 else 2
+
+        if rxn_order == 0:
+            # Zero-order in reactants: rate does not depend linearly on reactant concentrations
+            return lines
+
         for coeff_diff, orig_sp_diff, diff_p in r_parents:
+            if rxn_order == 1 and diff_p != ref_sp:
+                # First-order reaction depends only on master/reference reactant
+                continue
             if diff_p == "TA" and not ("calcite" in r_name.lower() or "caco3" in r_name.lower()):
                 continue
             other_r = [

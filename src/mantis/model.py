@@ -1530,6 +1530,16 @@ class DiageneticModel:
         w_top = self.mp.w
         if hasattr(phi_val, "__getitem__") and len(phi_val) > 1 and np.ndim(self.mp.w) == 0:
             w_top = float(self.mp.w) * (1.0 - phi_bottom) / np.maximum(1.0 - phi_top, 1e-6)
+        def _eval_init(init_raw: Any) -> Any:
+            """Evaluates initial condition specifications (scalars, units, callables, or spatial expressions)."""
+            if callable(init_raw):
+                return np.asarray(init_raw(z), dtype=np.float64)
+            if isinstance(init_raw, str):
+                if "z" in init_raw or "np." in init_raw:
+                    return np.asarray(eval(init_raw, {"z": z, "np": np}), dtype=np.float64)
+                return self.Q_(init_raw).to("mol/m^3").magnitude
+            return init_raw
+
         for sp_name in species_transport:
             var = getattr(c, sp_name)
             props = bc_map.get(sp_name, {"top": 0.0, "type": "Dirichlet", "phase": "liquid"})
@@ -1552,10 +1562,7 @@ class DiageneticModel:
                 val = J_flux / w_top if w_top > 0 else 0.0
 
                 if "init" in meta and meta["init"] is not None:
-                    init_val = meta["init"]
-                    if isinstance(init_val, str):
-                        init_val = self.Q_(init_val).to("mol/m^3").magnitude
-                    var.setValue(init_val)
+                    var.setValue(_eval_init(meta["init"]))
                 elif prefill:
                     var.setValue(val)
                 else:
@@ -1576,10 +1583,7 @@ class DiageneticModel:
             elif bc_type == "Dirichlet":
                 val = props["top"]
                 if "init" in meta and meta["init"] is not None:
-                    init_val = meta["init"]
-                    if isinstance(init_val, str):
-                        init_val = self.Q_(init_val).to("mol/m^3").magnitude
-                    var.setValue(init_val)
+                    var.setValue(_eval_init(meta["init"]))
                 elif prefill:
                     var.setValue(val)
                 else:
@@ -1588,10 +1592,7 @@ class DiageneticModel:
             elif bc_type == "Neumann":
                 grad = props["top"]
                 if "init" in meta and meta["init"] is not None:
-                    init_val = meta["init"]
-                    if isinstance(init_val, str):
-                        init_val = self.Q_(init_val).to("mol/m^3").magnitude
-                    var.setValue(init_val)
+                    var.setValue(_eval_init(meta["init"]))
                 elif prefill:
                     var.setValue(0.0)
                 else:
