@@ -52,6 +52,21 @@ import matplotlib.transforms as mtransforms
 import numpy as np
 import pandas as pd
 
+__all__ = [
+    "liquid_species",
+    "solid_species",
+    "reaction_rates",
+    "isotopes",
+    "SpecConfig",
+    "plot",
+    "load_layout_from_file",
+    "compile_declarative_layout",
+    "exclude_y",
+    "broken_y",
+    "broken_axis",
+    "show_grid",
+]
+
 # import matplotlib
 # matplotlib.use("TkAgg")
 
