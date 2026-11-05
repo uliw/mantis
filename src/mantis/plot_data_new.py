@@ -654,6 +654,7 @@ ATOMIC_WEIGHTS = {
     "Cu": 63.546,
     "Zn": 65.38,
     "Ba": 137.327,
+    "CaCO3": 100.086,
 }
 
 DEFAULT_GEOCHEM_COLORS = {
@@ -685,7 +686,17 @@ DEFAULT_GEOCHEM_COLORS = {
 
 
 def _resolve_species_column(df, name):
-    """Find the concentration column in df corresponding to species name (e.g. c_SO4 or SO4)."""
+    """Find the concentration column in df corresponding to species name (e.g. c_SO4, composite CaCO3/POC, etc.)."""
+    if name == "CaCO3" and f"c_{name}" not in df.columns and name not in df.columns:
+        if "c_Calcite" in df.columns and "c_Aragonite" in df.columns:
+            return df["c_Calcite"] + df["c_Aragonite"]
+        if "Calcite" in df.columns and "Aragonite" in df.columns:
+            return df["Calcite"] + df["Aragonite"]
+    if name == "POC" and f"c_{name}" not in df.columns and name not in df.columns:
+        if "c_POC_fast" in df.columns and "c_POC_slow" in df.columns:
+            return df["c_POC_fast"] + df["c_POC_slow"]
+        if "POC_fast" in df.columns and "POC_slow" in df.columns:
+            return df["POC_fast"] + df["POC_slow"]
     if f"c_{name}" in df.columns:
         return df[f"c_{name}"]
     if name in df.columns:
@@ -700,6 +711,11 @@ def _resolve_species_column(df, name):
 
 def _resolve_rate_column(df, name):
     """Find reaction rate column in df (e.g. f_SO4, or f_POC_slow + f_POC_fast)."""
+    if name == "CaCO3":
+        if "f_Calcite" in df.columns and "f_Aragonite" in df.columns:
+            return df["f_Calcite"] + df["f_Aragonite"]
+        if "f_CaCO3" in df.columns:
+            return df["f_CaCO3"]
     if name == "POC":
         if "f_POC_slow" in df.columns and "f_POC_fast" in df.columns:
             return df["f_POC_slow"] + df["f_POC_fast"]
@@ -994,6 +1010,83 @@ def _get_species_style(species_name, colormap_spec=None, colormap_override=None,
     return style
 
 
+def _resolve_measured_data_style(base_style, measured_data_as=None):
+    """
+    Format style dict for measured / external comparison data overlay.
+
+    Parameters
+    ----------
+    base_style : dict
+        Base style of the species (color, lw, etc.).
+    measured_data_as : str or dict, optional
+        Style specification, e.g.:
+        - 'lines' / 'solid': solid line
+        - 'dotted_lines' / 'dotted': dotted line (default)
+        - 'dashed_lines' / 'dashed': dashed line
+        - 'dashdot_lines' / 'dashdot': dash-dotted line
+        - 'stars' / '*': star markers only
+        - 'points' / 'dots' / '.': point markers only
+        - 'circles' / 'o': circle markers only
+        - 'diamonds' / 'd' / 'D': diamond markers only
+        - 'squares' / 's': square markers only
+        - 'triangles' / '^': triangle markers only
+        - dict: custom kwargs (e.g. {'marker': '*', 'linestyle': 'None', 'markersize': 8})
+    """
+    est = dict(base_style)
+    est.pop("fill_only", None)
+    est.pop("fill", None)
+    est.pop("fillonly", None)
+
+    if isinstance(measured_data_as, dict):
+        est.update(measured_data_as)
+        return est
+
+    opt = str(measured_data_as or "dotted_lines").strip().lower()
+
+    if opt in ("stars", "*"):
+        est["linestyle"] = "None"
+        est["marker"] = "*"
+        est.setdefault("markersize", 8)
+    elif opt in ("circles", "circle", "o"):
+        est["linestyle"] = "None"
+        est["marker"] = "o"
+        est.setdefault("markersize", 6)
+    elif opt in ("points", "point", "dots", "dot", "."):
+        est["linestyle"] = "None"
+        est["marker"] = "."
+        est.setdefault("markersize", 6)
+    elif opt in ("diamonds", "diamond", "d"):
+        est["linestyle"] = "None"
+        est["marker"] = "D"
+        est.setdefault("markersize", 6)
+    elif opt in ("squares", "square", "s"):
+        est["linestyle"] = "None"
+        est["marker"] = "s"
+        est.setdefault("markersize", 6)
+    elif opt in ("triangles", "triangle", "^"):
+        est["linestyle"] = "None"
+        est["marker"] = "^"
+        est.setdefault("markersize", 6)
+    elif opt in ("lines", "line", "solid", "-"):
+        est["linestyle"] = "-"
+    elif opt in ("dashed_lines", "dashed", "--"):
+        est["linestyle"] = "--"
+    elif opt in ("dashdot_lines", "dashdot", "-."):
+        est["linestyle"] = "-."
+    elif opt in ("dotted_lines", "dotted", ":"):
+        est["linestyle"] = ":"
+    else:
+        # If user passed a custom matplotlib linestyle or marker string
+        if opt in ("-", "--", "-.", ":"):
+            est["linestyle"] = opt
+        else:
+            est["linestyle"] = "None"
+            est["marker"] = opt
+            est.setdefault("markersize", 7)
+
+    return est
+
+
 _ureg = None
 
 
@@ -1169,6 +1262,11 @@ def _pretty_species_label(name, rel_elem=None):
         "POC_fast": "POC$_{fast}$",
         "POC_slow": "POC$_{slow}$",
         "D_bio": r"1e6 $\times$ D$_{bio}$ [$m^{2}/s$]",
+        "CH4": r"CH$_{4}$",
+        "Ca2": r"Ca$^{2+}$",
+        "TPO4": r"PO$_{4}^{3-}$",
+        "TNH4": r"NH$_{4}^{+}$",
+        "CaCO3": r"CaCO$_{3}$",
     }
     base = label_map.get(name, name)
     if rel_elem:
@@ -1249,6 +1347,7 @@ def _compile_single_spec(
     color_idx_state,
     palette,
     mapped_external_series,
+    measured_data_as=None,
 ):
     """
     Compile a single spec dictionary (liquid, solid, reaction_rate, or isotope)
@@ -1260,6 +1359,7 @@ def _compile_single_spec(
     lim = spec.get("lim")
     broken = spec.get("broken_axis") or spec.get("broken_y")
     units = spec.get("units")
+    spec_measured_data_as = spec.get("measured_data_as", measured_data_as)
     rel_to = spec.get("relative_to")
     if isinstance(units, (list, tuple)):
         units = units[0]
@@ -1415,11 +1515,7 @@ def _compile_single_spec(
                         )
                 else:
                     ez, ey, elbl = ext_info
-                est = dict(st)
-                est["linestyle"] = ":"
-                est.pop("fill_only", None)
-                est.pop("fill", None)
-                est.pop("fillonly", None)
+                est = _resolve_measured_data_style(st, spec_measured_data_as)
                 series_data.append([ez, ey, elbl, est])
 
         target_subplot[pos_axis_key] = series_data
@@ -1462,11 +1558,7 @@ def _compile_single_spec(
                         )
                 else:
                     ez, ey, elbl = ext_info
-                est = dict(st)
-                est["linestyle"] = ":"
-                est.pop("fill_only", None)
-                est.pop("fill", None)
-                est.pop("fillonly", None)
+                est = _resolve_measured_data_style(st, spec_measured_data_as)
                 series_data.append([ez, ey, elbl, est])
 
         target_subplot[pos_axis_key] = series_data
@@ -1492,6 +1584,7 @@ def _compile_panel(
     palette,
     mapped_external_series,
     default_spec_kind=None,
+    measured_data_as=None,
 ):
     """Compile a list of specs (or single spec) forming one subplot panel."""
     if not isinstance(panel_specs, (list, tuple)):
@@ -1553,6 +1646,7 @@ def _compile_panel(
             color_idx_state,
             palette,
             mapped_external_series,
+            measured_data_as=measured_data_as,
         )
 
     return subplot_dict
@@ -1649,8 +1743,11 @@ def compile_declarative_layout(module, df, layout_path, measured_data_path=None)
             ext_col = spec_val[0]
 
             # Validation: key and value must exist in respective dataframes
-            if f"c_{sp_key}" not in df.columns and sp_key not in df.columns and f"f_{sp_key}" not in df.columns:
-                raise KeyError(f"Species mapping key '{sp_key}' does not exist in mantis dataframe.")
+            try:
+                _resolve_species_column(df, sp_key)
+            except KeyError:
+                if f"f_{sp_key}" not in df.columns and f"c_{sp_key}" not in df.columns and sp_key not in df.columns:
+                    raise KeyError(f"Species mapping key '{sp_key}' does not exist in mantis dataframe.")
             if ext_col not in ext_df.columns:
                 raise KeyError(
                     f"Mapped external column '{ext_col}' does not exist in comparison data '{comp_file}'. "
@@ -1709,6 +1806,11 @@ def compile_declarative_layout(module, df, layout_path, measured_data_path=None)
             }
 
     # 3. Build subplots
+    measured_data_as = getattr(
+        module,
+        "measured_data_as",
+        getattr(module, "comparison_data_as", "dotted_lines"),
+    )
     plt_desc = {}
 
     ordinal_names = ["first_subplot", "second_subplot", "third_subplot", "fourth_subplot", "fifth_subplot"]
@@ -1728,6 +1830,7 @@ def compile_declarative_layout(module, df, layout_path, measured_data_path=None)
                 color_idx_state,
                 palette,
                 mapped_external_series,
+                measured_data_as=measured_data_as,
             )
     else:
         # Fallback to default panel composition from top-level variables
@@ -1773,6 +1876,7 @@ def compile_declarative_layout(module, df, layout_path, measured_data_path=None)
                 color_idx_state,
                 palette,
                 mapped_external_series,
+                measured_data_as=measured_data_as,
             )
 
     if not plt_desc:

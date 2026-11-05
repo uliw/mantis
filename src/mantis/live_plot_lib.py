@@ -605,6 +605,12 @@ def capture_state(
             ksp_val = float(mp_params.Ksp_calcite)
             data["Omega_calcite"] = (data["c_Ca2"] * data["c_CO3"]) / (ksp_val + 1e-30)
 
+    # 5. Composite solids (e.g. Total CaCO3 = Calcite + Aragonite)
+    if "c_Calcite" in data and "c_Aragonite" in data:
+        data["c_CaCO3"] = data["c_Calcite"] + data["c_Aragonite"]
+        if "f_Calcite" in data and "f_Aragonite" in data:
+            data["f_CaCO3"] = data["f_Calcite"] + data["f_Aragonite"]
+
     phi_raw = mp_params.phi.value if hasattr(mp_params.phi, "value") else mp_params.phi
     phi_arr = np.asarray(phi_raw, dtype=np.float64)
     data["phi"] = phi_arr if phi_arr.ndim > 0 and len(phi_arr) == len(z) else np.full(len(z), float(phi_arr))

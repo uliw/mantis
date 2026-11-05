@@ -744,6 +744,62 @@ plot_panels = [
         np.testing.assert_allclose(ext_fes[1], expected_wt)
 
 
+def test_measured_data_as_options(sample_df):
+    """Test global and per-panel measured_data_as configurations ('stars', 'lines', 'dotted_lines')."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        ext_data_path = os.path.join(tmpdir, "meas.csv")
+        ext_df = pd.DataFrame({
+            "depth_cm": [0.0, 10.0],
+            "so4_pw": [28.0, 15.0],
+            "hs_pw": [0.0, 5.0],
+        })
+        ext_df.to_csv(ext_data_path, index=False)
+
+        layout_content = f"""
+comparison_data = "{os.path.basename(ext_data_path)}"
+measured_data_as = "stars"
+
+species_mapping = {{
+    "z": ["depth_cm", "cm", "m"],
+    "SO4": ["so4_pw", "mmol/L", "mmol/L"],
+    "HS": ["hs_pw", "mmol/L", "mmol/L"],
+}}
+
+liquid_panel_1 = liquid_species({{
+    "species": ["SO4"],
+    "units": "mmol/L",
+}})
+
+liquid_panel_2 = liquid_species({{
+    "species": ["HS"],
+    "units": "mmol/L",
+    "measured_data_as": "lines",
+}})
+
+plot_panels = [
+    [liquid_panel_1],
+    [liquid_panel_2],
+]
+"""
+        layout_path = os.path.join(tmpdir, "plot_layout.py")
+        with open(layout_path, "w") as f:
+            f.write(layout_content)
+
+        plt_desc = load_layout_from_file(sample_df, layout_path)
+        
+        # Panel 1 should inherit global measured_data_as = 'stars'
+        p1 = plt_desc["first_subplot"]
+        ext_so4 = p1["left"][1]
+        assert ext_so4[3]["linestyle"] == "None"
+        assert ext_so4[3]["marker"] == "*"
+
+        # Panel 2 should override with measured_data_as = 'lines'
+        p2 = plt_desc["second_subplot"]
+        ext_hs = p2["left"][1]
+        assert ext_hs[3]["linestyle"] == "-"
+
+
+
 
 
 
