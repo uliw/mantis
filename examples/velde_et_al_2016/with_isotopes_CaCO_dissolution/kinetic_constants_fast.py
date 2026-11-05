@@ -42,6 +42,8 @@ def get_reaction_constants(
         "K_SO4": "0.9 umol/cm^3",
         "K_Fe3_diss_red": "10.4 umol/cm^3",
         "K_Fe3": "1e-3 dimensionless",
+        "k_calcite_precip": "0.08 mol/(m^3*year)",
+        "k_calcite_diss": "0.015, 1/year",
     }
 
     return velde

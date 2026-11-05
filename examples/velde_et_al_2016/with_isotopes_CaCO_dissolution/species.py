@@ -178,11 +178,10 @@ species = {
         "formula": "HCO3",
         "diff_coeff_function": "diff_coeff",
         "diffusion": "DIC",
-        "bc_top": {"Dirichlet": 4.76},  # Table 1: TA_carb (2.26) + HS- (2.5) = 4.76 mM
-        "bc_bot": {"Dirichlet": 29.394},  # Calcite equilibrium at bottom: CA (15.83) + HS- (13.57) = 29.4 mM (Table 1: 29.4 mM)
+        "bc_top": {"Dirichlet": 2.2},  # Table 1: TA_carb (2.26) + HS- (2.5) = 4.76 mM
         "prefill": True,
     },
-     "Calcite": {
+     "CaCO3": {
         "phase": "solid",
         "include": True,
         "formula": "CaCO3",
@@ -240,6 +239,11 @@ speciation = {
         "type": "carbonate_system",
         "primary": {"dic": "DIC", "ta": "TA"},
         "species": ["Hplus", "CO3", "HCO3"],
+        "pressure": 1.0,  # 
+        "salinity": 34.3,  # 35 PSU bottom water salinity
+        "adjust_omega": True,  # Retain exact boundary values without forcing calcite equilibrium
+        "ph_scale": "free",
+        "controls": ["DIC", "pH"],
     },
 }
 

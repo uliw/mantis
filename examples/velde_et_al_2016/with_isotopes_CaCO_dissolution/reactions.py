@@ -52,6 +52,10 @@ limiters = {
     # Custom isotope explicit fractionation limiters 
     "SO4_alpha_explicit": "c.SO4 / (c.SO4 + 1e-3)",
     "TS2_alpha_explicit": "c.TS2 / (c.TS2 + 1e-3)",
+
+     # Calcite saturation and rate limiters (Equation 4: RPPT = kPPT * (Omega - 1))
+    "calcite_precip_limiter": "np.maximum((c.Ca2 * c.CO3) / (mp.Ksp_calcite + 1e-30) - 1.0, 0.0)",
+    "calcite_diss_limiter": "np.maximum(1.0 - (c.Ca2 * c.CO3) / (mp.Ksp_calcite + 1e-30), 0.0)",
 }
 
 reactions = [
@@ -171,18 +175,5 @@ reactions = [
         "reaction": "Ca2 + DIC + 2 TA -> CaCO3",
         "k_value_name": "k_calcite_precip",
         "limiters": ["calcite_precip_limiter"],
-    },
-
-    # -------------------------------------------------------------------------
-    # Mineral Precipitation & Dissolution (Smooth Transition)
-    # -------------------------------------------------------------------------
-    {
-        "reaction_name": "FeS_precipitation_dissolution",
-        "reaction": "Fe2_liq + HS -> FeS",
-        "k_value_name": {
-            "precipitation": "FeS_isp",
-            "dissolution": "FeS_isd",
-            "equilibrium": "FeS_sp",
-        },
     },
 ]
