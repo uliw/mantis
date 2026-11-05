@@ -35,12 +35,6 @@ solid_species_1 = solid_species([
         "species": ["CaCO3"],
         # "lim": (0, 5),
     },
-    {
-        "scale": "lin",
-        "units": "pH",
-        "species": ["pH"],
-        #"lim": (6.5, 9),
-    },
 ])
 
 pH = solid_species([
@@ -50,6 +44,12 @@ pH = solid_species([
         "species": ["pH"],
         #"lim": (6.5, 9),
     },
+    {
+        "scale": "lin",
+        "units": r"$\Omega$",
+        "species": ["Omega_calcite"],
+        #"lim": (6.5, 9),
+    }
 ])
 
 # ----  reaction rate data panel  --- #
@@ -67,9 +67,14 @@ isotopes_1 = isotopes({
     "lim": (-45, -37, 20, 30),  # broken y-axis: exclude -37 to 20
 })
 
+isotopes_2 = isotopes({
+    "species": ["d13C_DIC", "d13C_CaCO3"],
+    # "lim": (-45, -37, 20, 30),  # broken y-axis: exclude -37 to 20
+})
+
 
 plot_panels = [
     [liquid_species_1, solid_species_1],
     [reaction_rates_1, pH],
-    [isotopes_1],
+    [isotopes_1, isotopes_2],
 ]

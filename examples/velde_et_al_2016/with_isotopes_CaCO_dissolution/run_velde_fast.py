@@ -36,7 +36,7 @@ if __name__ == "__main__":
             ["0.1 cm", "4.0 cm", "0.05 mm", "0.05 mm"],
             ["4.0 cm", "50 cm", "0.05 mm", "1.0 cm"],
         ],
-        t_end="2 kyr",
+        t_end="5 kyr",
         dt_max="10 year",
         temp=[10.0, 10.1],
         w="0.2 cm/yr",

@@ -24,7 +24,7 @@ Each key in the `species` dictionary represents a chemical species name:
 - bc: (Optional) Default boundary condition dict:
 - bc: (Optional) Default boundary condition dict:
     * {'top/bottom': float or pint-string, 'type': 'Dirichlet', 'Robin' or 'Neumann'}
-    * unless specified, bottom bc defaults to Neumann 
+    * unless specified, bottom bc defaults to Neumann
     * For Hplus: {'pH': 7.5} sets porewater pH as the single source of truth.
 - isotopes: (Optional){"isotope_species_name": "element"}
 - isotope_of: (Optional) Base species name if this entry is an isotope companion.
@@ -44,6 +44,12 @@ isotope_standards: dict = {
         "ratio": 0.044162589,  # 34S / 32S
         "unit": "mUr",
     },
+    "d13C": {
+        "element": "C",
+        "standard": "VPDB",
+        "ratio": 0.0112372,  # 13C / 12C
+        "unit": "mUr",
+    },
 }
 
 
@@ -53,13 +59,13 @@ Table 4.8 in Boudreau 1996.  If no parameters are availble, please provide any c
 functions here.  Note that diffusions coefficients are only needed for species that are
 par of the reaction-transport martrix (i.e., where include = True).
 """
+
+
 def boudreau_o2(T_profile, phi):
     """Temperature porosity corrected O2 molecular diffusion."""
     phi_val = phi.value if hasattr(phi, "value") else phi
     return (
-        (0.2604 + 0.006363 * (T_profile + 273.15))
-        * 1e-9
-        / (1.0 - np.log(phi_val**2))
+        (0.2604 + 0.006363 * (T_profile + 273.15)) * 1e-9 / (1.0 - np.log(phi_val**2))
     )
 
 
@@ -95,7 +101,6 @@ species = {
         "bc_top": {"Dirichlet": 0.28},
         "prefill": True,
     },
-
     # -------------------------------------------------------------------------
     # Diagnostic Speciation Solutes
     # -------------------------------------------------------------------------
@@ -106,7 +111,6 @@ species = {
         "bc_top": {"Dirichlet": 7.5},  # Single source of truth for porewater pH
         "prefill": True,
     },
-
     # -------------------------------------------------------------------------
     # Mixed / Lumped Species (Porewater + Sorbed Solid)
     # -------------------------------------------------------------------------
@@ -118,7 +122,6 @@ species = {
         "diffusion": {"m0": 3.31, "m1": 0.15},
         "bc_top": {"Dirichlet": 0.0},
     },
-
     # -------------------------------------------------------------------------
     # Solid Mineral & Particulate Species (Burial + Bioturbation)
     # -------------------------------------------------------------------------
@@ -127,14 +130,16 @@ species = {
         "include": True,
         "formula": "CH2O6",
         "diffusion": None,
-        "bc_top": {"Robin": "365 umol/(cm^2 * yr)"},
+        "bc_top": {"Robin": "365 umol/(cm^2 * yr)", "d13C": -28},
+        "isotopes": {"POC_fast_C12": "C"},
     },
     "POC_slow": {
         "phase": "solid",
         "include": True,
         "formula": "CH2O6",
         "diffusion": None,
-        "bc_top": {"Robin": "183 umol/(cm^2 * yr)"},
+        "bc_top": {"Robin": "183 umol/(cm^2 * yr)", "d13C": -28},
+        "isotopes": {"POC_slow_C12": "C"},
     },
     "Fe3": {
         "phase": "solid",
@@ -151,7 +156,6 @@ species = {
         "isotopes": {"FeS_S32": "S"},
         "bc_top": {"Robin": 0.0, "d34S": 0},
     },
-    
     "Ca2": {
         "phase": "liquid",
         "include": True,
@@ -159,18 +163,17 @@ species = {
         "diff_coeff_function": "diff_coeff",
         "diffusion": {"m0": 4.19, "m1": 0.231},
         "bc_top": {"Dirichlet": 10.1},  # mM from salinity
-        "bc_bot": {"Dirichlet": 3.5},
         "prefill": True,
-    }, # species we need for the carbonate system
+    },  # species we need for the carbonate system
     "DIC": {
         "phase": "liquid",
         "include": True,
         "formula": "CO2",
         "diff_coeff_function": "diff_coeff",
         "diffusion": {"m0": 5.06, "m1": 0.278},
-        "bc_top": {"Dirichlet": 2.53},  # CO2(0.3) + HCO3-(2.2) + CO32-(0.03) = 2.53 mM
-        "bc_bot": {"Dirichlet": 16.55}, # CO2(0.75) + HCO3-(15.6) + CO32-(0.2) = 16.55 mM
+        "bc_top": {"Dirichlet": 2.53, "d13C": 0},
         "prefill": True,
+        "isotopes": {"DIC_C12": "C"},
     },
     "TA": {
         "phase": "liquid",
@@ -181,15 +184,16 @@ species = {
         "bc_top": {"Dirichlet": 2.2},  # Table 1: TA_carb (2.26) + HS- (2.5) = 4.76 mM
         "prefill": True,
     },
-     "CaCO3": {
+    "CaCO3": {
         "phase": "solid",
         "include": True,
         "formula": "CaCO3",
         "diffusion": None,
-        "bc_top": {"Robin": "100.0 umol/(cm^2 * yr)"},
+        "bc_top": {"Robin": "0.5 umol/(cm^2 * yr)", "d13C": 0},
         # Background sediment carbonate (~18 wt% = 4500 mol/m^3_solid)
-        #"init": lambda z: np.full_like(z, 4500.0),
+        # "init": lambda z: np.full_like(z, 4500.0),
         "prefill": True,
+        "isotopes": {"CaCO3_C12": "C"},
     },
     # External / Reaction Balance Species (Excluded from transport)
     "CO2": {"phase": "liquid", "include": False, "formula": "CO2"},
@@ -234,18 +238,15 @@ speciation = {
             "Fe2_liq": {"phase": "liquid", "alias_of": "Fe2_total.dissolved"},
             "Fe2_sorbed": {"phase": "solid", "alias_of": "Fe2_total.sorbed"},
         },
-    }, # carbonate speciation
+    },  # carbonate speciation
     "carbonate_system": {
         "type": "carbonate_system",
         "primary": {"dic": "DIC", "ta": "TA"},
         "species": ["Hplus", "CO3", "HCO3"],
-        "pressure": 1.0,  # 
+        "pressure": 1.0,  #
         "salinity": 34.3,  # 35 PSU bottom water salinity
         "adjust_omega": True,  # Retain exact boundary values without forcing calcite equilibrium
         "ph_scale": "free",
         "controls": ["DIC", "pH"],
     },
 }
-
-
-

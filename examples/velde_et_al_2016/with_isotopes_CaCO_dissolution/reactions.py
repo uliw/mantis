@@ -23,7 +23,6 @@ Template Structure & Design:
    - isotope_fractionation: (Optional) Isotope fractionation factor and limiter.
 """
 
-
 # -------------------------------------------------------------------------
 # Reaction Parameters & Isotope Fractionation Factors
 # -------------------------------------------------------------------------
@@ -48,12 +47,10 @@ limiters = {
     "SO4": "1.0 / (c.SO4 + K_SO4)",
     "Fe3": "1.0 / (np.maximum(c.Fe3, 0.0) + K_Fe3)",
     "Fe3_diss_red": "1.0 / (np.maximum(c.Fe3, 0.0) + K_Fe3_diss_red)",
-
-    # Custom isotope explicit fractionation limiters 
+    # Custom isotope explicit fractionation limiters
     "SO4_alpha_explicit": "c.SO4 / (c.SO4 + 1e-3)",
     "TS2_alpha_explicit": "c.TS2 / (c.TS2 + 1e-3)",
-
-     # Calcite saturation and rate limiters (Equation 4: RPPT = kPPT * (Omega - 1))
+    # Calcite saturation and rate limiters (Equation 4: RPPT = kPPT * (Omega - 1))
     "calcite_precip_limiter": "np.maximum((c.Ca2 * c.CO3) / (mp.Ksp_calcite + 1e-30) - 1.0, 0.0)",
     "calcite_diss_limiter": "np.maximum(1.0 - (c.Ca2 * c.CO3) / (mp.Ksp_calcite + 1e-30), 0.0)",
 }
@@ -62,7 +59,7 @@ reactions = [
     # -------------------------------------------------------------------------
     # Organic Carbon Primary Respiration
     # -------------------------------------------------------------------------
-   # -------------------------------------------------------------------------
+    # -------------------------------------------------------------------------
     # Organic Carbon Primary Respiration
     # -------------------------------------------------------------------------
     {
@@ -70,12 +67,14 @@ reactions = [
         "reaction": "POC_fast + O2 -> DIC",
         "k_value_name": "POC_fast",
         "limiters": ["O2"],
+        "isotope_species": {"POC_fast": "POC_fast_C12", "DIC": "DIC_C12"},
     },
     {
         "reaction_name": "aerobic_respiration_slow",
         "reaction": "POC_slow + O2 -> DIC",
         "k_value_name": "POC_slow",
         "limiters": ["O2"],
+        "isotope_species": {"POC_slow": "POC_slow_C12", "DIC": "DIC_C12"},
     },
     {
         "reaction_name": "dissimilatory_iron_reduction_fast",
@@ -83,6 +82,7 @@ reactions = [
         "k_value_name": "POC_fast",
         "limiters": ["Fe3_diss_red"],
         "inhibitors": ["O2"],
+        "isotope_species": {"POC_fast": "POC_fast_C12", "DIC": "DIC_C12"},
     },
     {
         "reaction_name": "dissimilatory_iron_reduction_slow",
@@ -90,6 +90,7 @@ reactions = [
         "k_value_name": "POC_slow",
         "limiters": ["Fe3_diss_red"],
         "inhibitors": ["O2"],
+        "isotope_species": {"POC_slow": "POC_slow_C12", "DIC": "DIC_C12"},
     },
     {
         "reaction_name": "sulfate_reduction_fast",
@@ -97,7 +98,12 @@ reactions = [
         "k_value_name": "POC_fast",
         "limiters": ["SO4"],
         "inhibitors": ["O2", "Fe3_diss_red"],
-        "isotope_species": {"SO4": "SO4_S32", "TS2": "TS2_S32"},
+        "isotope_species": {
+            "SO4": "SO4_S32",
+            "TS2": "TS2_S32",
+            "POC_fast": "POC_fast_C12",
+            "DIC": "DIC_C12",
+        },
         "isotope_fractionation": {
             "SO4_S32 to TS2_S32": ["msr_alpha", "SO4_alpha_explicit"]
         },
@@ -108,12 +114,16 @@ reactions = [
         "k_value_name": "POC_slow",
         "limiters": ["SO4"],
         "inhibitors": ["O2", "Fe3_diss_red"],
-        "isotope_species": {"SO4": "SO4_S32", "TS2": "TS2_S32"},
+        "isotope_species": {
+            "SO4": "SO4_S32",
+            "TS2": "TS2_S32",
+            "POC_slow": "POC_slow_C12",
+            "DIC": "DIC_C12",
+        },
         "isotope_fractionation": {
             "SO4_S32 to TS2_S32": ["msr_alpha", "SO4_alpha_explicit"]
         },
     },
-
     # -------------------------------------------------------------------------
     # Secondary Redox & Sulfide Oxidation
     # -------------------------------------------------------------------------
@@ -146,7 +156,6 @@ reactions = [
         "k_value_name": "FeS_O2",
         "isotope_species": {"FeS": "FeS_S32", "SO4": "SO4_S32"},
     },
-
     # -------------------------------------------------------------------------
     # Mineral Precipitation & Dissolution (Smooth Transition)
     # -------------------------------------------------------------------------
@@ -160,7 +169,6 @@ reactions = [
         },
         "isotope_species": {"TS2": "TS2_S32", "FeS": "FeS_S32", "HS": "HS_S32"},
     },
-
     # -------------------------------------------------------------------------
     # Calcite Precipitation & Dissolution
     # -------------------------------------------------------------------------
@@ -169,11 +177,13 @@ reactions = [
         "reaction": "CaCO3 -> Ca2 + DIC + 2 TA",
         "k_value_name": "k_calcite_diss",
         "limiters": ["calcite_diss_limiter"],
+        "isotope_species": {"CaCO3": "CaCO3_C12", "DIC": "DIC_C12"},
     },
     {
         "reaction_name": "calcite_precipitation",
         "reaction": "Ca2 + DIC + 2 TA -> CaCO3",
         "k_value_name": "k_calcite_precip",
         "limiters": ["calcite_precip_limiter"],
+        "isotope_species": {"CaCO3": "CaCO3_C12", "DIC": "DIC_C12"},
     },
 ]
