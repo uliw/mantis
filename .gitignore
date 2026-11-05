@@ -39,6 +39,7 @@ CLAUDE.md
 !examples/velde_et_al_2016/with_isotopes/run_velde_fast_reference.csv
 !examples/SimpleFe/run_simplefe_reference.csv
 !examples/SimpleFe/SimpleFe_Du_2023.csv
+!examples/Luff_and_Wallmann_2003/run_luff_model_reference.csv
 
 # Virtual environments
 .venv

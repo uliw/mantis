@@ -1,6 +1,7 @@
 numba
 numpy
 pandas
+scipy
 matplotlib
 pint
 watchdog
