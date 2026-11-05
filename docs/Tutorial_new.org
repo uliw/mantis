@@ -151,7 +151,7 @@ import pint
 *** Age-dependent reaction rates
 Organic matter reactivity decreases with depth as sediment ages and labile compounds are degraded. In MANTIS, age-dependent reaction rate constants can be defined using the built-in ~sed_age~ function from ~mantis.diff_lib~:
 
-#+BEGIN_SRC jupyter-python
+#+BEGIN_SRC python
 from mantis.diff_lib import sed_age
 
 def get_reaction_constants(pH, phi):
@@ -499,7 +499,7 @@ speciation = {
     },
  #+END_SRC
 
- Further, we need to supply species definitions for TA, DIC, \ce{H+} as well as $\ce{Ca^2+}$  - see the species files in ~mantis/examples/SimpleFe/~.  Next we need to define the carbonate speciation, and associated parameters 
+ Further, we need to supply species definitions for TA, DIC, \ce{H+} as well as $\ce{Ca^2+}$  - see the species files in ~mantis/examples/SimpleFe/~.  Next we must define the carbonate speciation, and associated parameters 
 #+BEGIN_SRC jupyter-python
  # -------------------------------------------------------------------------
     # Marine Carbonate System Speciation (DIC + TA -> CO3, HCO3, Hplus, pH)
@@ -518,5 +518,69 @@ speciation = {
 Note that any species that contributes to TA (e.g., \ce{HS-}) must define their effect on TA by setting ~include_in_TA": 1.0~ (see e.g., the species definition for H_{2}S above). The Du 2023 SimpleFe model further shows how to then use pH to calculate dissolved iron speciation and sorption.
 
 ** Adding CaCO_{3} dissolution 
+In diagenetic models, authigenic calcium carbonate (\ce{CaCO3}, such as calcite or aragonite) undergoes reversible precipitation and dissolution depending on the porewater saturation state:
+\[ \Omega = \frac{[\ce{Ca^2+}][\ce{CO3^2-}]}{K'_{sp}} \]
+
+*** Why not a single reversible reaction arrow?
+For simple minerals like iron monosulfide (\ce{FeS}), Mantis supports the compact reversible syntax:
+#+BEGIN_SRC python
+{
+    "reaction_name": "FeS_precipitation_dissolution",
+    "reaction": "Fe2_liq + HS -> FeS",
+    "k_value_name": {
+        "precipitation": "FeS_isp",
+        "dissolution": "FeS_isd",
+        "equilibrium": "FeS_sp",
+    },
+}
+#+END_SRC
+In that formulation, both reactants (\ce{Fe^2+} and \ce{HS-}) are direct linear fractions of single transport variables (\ce{Fe2_total} and \ce{TS2}), and their product $[\ce{Fe^2+}][\ce{HS-}]$ directly forms the saturation state.
+
+For \ce{CaCO3}, however:
+1. *Nonlinear speciation*: \ce{CO3^2-} is not a linear fraction of a single variable, but a nonlinear thermodynamic function of two master variables: \ce{DIC} and \ce{TA}.
+2. *Asymmetric kinetic rate laws*: Precipitation is typically independent of the mineral mass (\(R_{precip} = k_{precip} \cdot \max(\Omega - 1, 0)\), i.e., zero-order in \ce{CaCO3}), whereas dissolution depends directly on the reactive surface area/abundance of the solid mineral phase (\(R_{diss} = k_{diss} \cdot [\ce{CaCO3}] \cdot \max(1 - \Omega, 0)\), i.e., first-order in \ce{CaCO3}).
+3. *Mass-balance coupling*: Writing the reaction in terms of transport state variables requires coupling to \ce{Ca^2+}, \ce{DIC}, and \(2 \times \ce{TA}\).
+
+*** How to implement CaCO_{3} precipitation and dissolution
+To correctly model both processes, define saturation limiters in the ~limiters~ dictionary, and separate the forward precipitation and dissolution reactions in ~reactions.py~:
+
+#+BEGIN_SRC jupyter-python
+limiters = {
+    # Precipitation occurs when Omega > 1 (zero-order in solid)
+    "calcite_precip_limiter": "np.maximum((c.Ca2 * c.CO3) / (mp.Ksp_calcite + 1e-30) - 1.0, 0.0)",
+
+    # Dissolution occurs when Omega < 1 (first-order in solid Calcite)
+    "calcite_diss_limiter": "np.maximum(1.0 - (c.Ca2 * c.CO3) / (mp.Ksp_calcite + 1e-30), 0.0)",
+}
+
+reactions = [
+    # Precipitation: Ca2+ + CO3^2- -> CaCO3
+    # Net in transport variables: Ca2 + DIC + 2 TA -> Calcite
+    {
+        "reaction_name": "calcite_precipitation",
+        "reaction": "Ca2 + DIC + 2 TA -> Calcite",
+        "k_value_name": "k_calcite_precip",
+        "limiters": ["calcite_precip_limiter"],
+        "reaction_order": 0,  # Purely k * limiter(Omega - 1)
+    },
+
+    # Dissolution: CaCO3 -> Ca2+ + CO3^2-
+    # Net in transport variables: Calcite -> Ca2 + DIC + 2 TA
+    {
+        "reaction_name": "calcite_dissolution",
+        "reaction": "Calcite -> Ca2 + DIC + 2 TA",
+        "k_value_name": "k_calcite_diss",
+        "limiters": ["calcite_diss_limiter"],
+        "reaction_order": 1,  # First-order in Calcite: k * [Calcite] * limiter(1 - Omega)
+    },
+]
+#+END_SRC
+
+This ensures that:
+- \(\Omega\) evaluates using the exact thermodynamic speciation \ce{c.CO3} from the carbonate solver.
+- The Jacobian and Newton solver correctly couple \ce{Ca^2+}, \ce{DIC}, and \ce{TA} without nonphysical cross-multiplication of reactant concentrations.
+- Zero-order precipitation and first-order mineral dissolution remain numerically stable and physically accurate across both undersaturated and supersaturated regimes.
+
+A working example of a model with carbonate dissolution/precipitation reactions is in the examples folder (~examples/luff_2003~).
 
 
