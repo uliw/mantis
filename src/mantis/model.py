@@ -1119,9 +1119,9 @@ class DiageneticModel:
             if adjust_omega:
                 carb_spec, adjust_msg = adjust_for_calcite_equilibrium(
                     ca2_top=ca2_top,
-                    dic=dic_top,
-                    ta=ta_top,
-                    ph=ph_top,
+                    dic=dic_top if has_dic else None,
+                    ta=ta_top if has_ta else None,
+                    ph=ph_top if has_ph else None,
                     const=carb_constants,
                 )
                 self.mp.pH = carb_spec["pH"]
