@@ -456,6 +456,28 @@ def parse_and_validate_species_dict(
 
         top_val_comp = get_l_mass(top_val_bulk * stoich, delta_val, std_ratio)
 
+        # Inherit and scale initial condition if parent specifies 'init' and companion does not
+        if "init" in parent_meta and parent_meta["init"] is not None and comp_entry.get("init") is None:
+            p_init = parent_meta["init"]
+            iso_frac = 1.0 / (1.0 + std_ratio * (1.0 + delta_val / 1000.0))
+            if callable(p_init):
+                def _scaled_init(z, _fn=p_init, _fac=iso_frac * stoich):
+                    return np.asarray(_fn(z), dtype=np.float64) * _fac
+                comp_entry["init"] = _scaled_init
+            elif isinstance(p_init, (int, float)):
+                comp_entry["init"] = float(p_init) * iso_frac * stoich
+            elif isinstance(p_init, str):
+                if any(k in p_init for k in ("z", "np.", "lambda")):
+                    def _expr_init(z, _expr=p_init, _fac=iso_frac * stoich):
+                        return np.asarray(eval(_expr, {"z": z, "np": np}), dtype=np.float64) * _fac
+                    comp_entry["init"] = _expr_init
+                else:
+                    try:
+                        val_mag = ureg(p_init).to("mol/m^3").magnitude if ureg else float(p_init)
+                        comp_entry["init"] = float(val_mag) * iso_frac * stoich
+                    except Exception:
+                        comp_entry["init"] = p_init
+
         comp_bc_entry: Dict[str, Any] = {
             "type": parent_bc["type"],
             "top": top_val_comp,

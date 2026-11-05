@@ -356,6 +356,39 @@ class ReactionSystemValidator:
 
         raise ValueError(f"[MANTIS ERROR] No isotope standard found for species '{iso_sp}'.")
 
+    def get_species_element(self, sp: str) -> Optional[str]:
+        """Resolves the element tracked by an isotope species or parent species."""
+        species_defs = getattr(self, "species_defs", {})
+        meta = species_defs.get(sp, {})
+        if "element" in meta:
+            return meta["element"]
+        if "isotopes" in meta and isinstance(meta["isotopes"], dict):
+            first_iso = next(iter(meta["isotopes"].values()))
+            return species_defs.get(first_iso, {}).get("element", first_iso)
+        std_key = meta.get("isotope_standard")
+        if std_key:
+            stds = getattr(self, "isotope_standards", {})
+            if std_key in stds and "element" in stds[std_key]:
+                return stds[std_key]["element"]
+        parent = self.get_parent_species(sp)
+        if parent and parent != sp:
+            return self.get_species_element(parent)
+        return None
+
+    def derive_isotope_species_maps(self, r: Dict[str, Any]) -> List[Dict[str, str]]:
+        """Derives or retrieves isotope species mappings grouped by element for a reaction."""
+        raw_map = self.derive_isotope_species_map(r)
+        if not raw_map:
+            return []
+
+        # Group isotope species by element
+        groups: Dict[str, Dict[str, str]] = {}
+        for p_sp, i_sp in raw_map.items():
+            elem = self.get_species_element(i_sp) or self.get_species_element(p_sp) or "default"
+            groups.setdefault(elem, {})[p_sp] = i_sp
+
+        return list(groups.values())
+
     def derive_isotope_species_map(self, r: Dict[str, Any]) -> Dict[str, str]:
         """Derives or retrieves the isotope species mapping for a reaction.
 
@@ -1113,18 +1146,20 @@ class EquationSystemGenerator:
             '    )',
         ])
 
-        iso_sp_map = self.validator.derive_isotope_species_map(r)
-        if iso_sp_map:
-            # Find the reactant that participates in isotope tracking
-            iso_r_candidates = [
-                (coeff, sp, self.validator.get_parent_species(sp))
-                for coeff, sp in reactants
-                if self.validator.get_parent_species(sp) in iso_sp_map
-            ]
-            if iso_r_candidates:
+        iso_sp_maps = self.validator.derive_isotope_species_maps(r)
+        if iso_sp_maps:
+            lines.append('    if getattr(mp, "isotopes", False):')
+            for iso_idx, iso_sp_map in enumerate(iso_sp_maps):
+                # Find the reactant that participates in isotope tracking
+                iso_r_candidates = [
+                    (coeff, sp, self.validator.get_parent_species(sp))
+                    for coeff, sp in reactants
+                    if self.validator.get_parent_species(sp) in iso_sp_map
+                ]
+                if not iso_r_candidates:
+                    continue
                 iso_master_coeff, iso_orig_sp, iso_master_parent = iso_r_candidates[0]
                 iso_master = iso_sp_map[iso_master_parent]
-                lines.append('    if getattr(mp, "isotopes", False):')
 
                 # Build rate coefficient for the isotope reaction w.r.t iso_master_parent
                 iso_coeff_expr = 'k_num'
@@ -1146,8 +1181,20 @@ class EquationSystemGenerator:
                     iso_coeff_expr += f' * _inh_{i_name}'
 
                 iso_frac = r.get("isotope_fractionation")
+                # Only apply fractionation if fractionation keys match species in this isotope group
+                matched_frac = None
                 if iso_frac:
-                    frac_key, frac_val = next(iter(iso_frac.items()))
+                    for f_key, f_val in iso_frac.items():
+                        f_src = f_key.split(" ")[0]
+                        for b_sp, i_sp in iso_sp_map.items():
+                            if f_src in (b_sp, i_sp):
+                                matched_frac = (f_key, f_val)
+                                break
+                        if matched_frac:
+                            break
+
+                if matched_frac:
+                    frac_key, frac_val = matched_frac
                     alpha_name, lim_name = frac_val[0], frac_val[1]
                     raw_src = frac_key.split(" ")[0]
                     # Map raw_src back to its base parent if raw_src is an isotope companion
@@ -1159,14 +1206,16 @@ class EquationSystemGenerator:
                     src_sp = self.validator.get_parent_species(src_sp)
                     src_iso_sp = iso_sp_map.get(src_sp)
                     lines.extend([
-                        f'        _coeff_base_iso = {iso_coeff_expr}',
-                        f'        _alpha = 1.0 + (getattr(mp, "{alpha_name}", 1.0) - 1.0) * lim.get("{lim_name}", 1.0)',
-                        f'        coeff_master_iso = calculate_fractionated_rate_coeff(',
-                        f'            _coeff_base_iso, getattr(c, "{src_sp}"), getattr(c, "{src_iso_sp}"), _alpha, eps=1e-30',
+                        f'        _coeff_base_iso_{iso_idx} = {iso_coeff_expr}',
+                        f'        _alpha_{iso_idx} = 1.0 + (getattr(mp, "{alpha_name}", 1.0) - 1.0) * lim.get("{lim_name}", 1.0)',
+                        f'        coeff_master_iso_{iso_idx} = calculate_fractionated_rate_coeff(',
+                        f'            _coeff_base_iso_{iso_idx}, getattr(c, "{src_sp}"), getattr(c, "{src_iso_sp}"), _alpha_{iso_idx}, eps=1e-30',
                         '        )',
                     ])
+                    coeff_var_name = f'coeff_master_iso_{iso_idx}'
                 else:
-                    lines.append(f'        coeff_master_iso = {iso_coeff_expr}')
+                    lines.append(f'        coeff_master_iso_{iso_idx} = {iso_coeff_expr}')
+                    coeff_var_name = f'coeff_master_iso_{iso_idx}'
 
                 iso_other_reactants = {}
                 for coeff, sp in reactants:
@@ -1179,14 +1228,16 @@ class EquationSystemGenerator:
                     if p_sp in iso_sp_map:
                         iso_products[iso_sp_map[p_sp]] = coeff
 
-                iso_rxn_name = f"{r_name}_iso"
+                iso_elem = self.validator.get_species_element(iso_master) or ""
+                iso_suffix = f"_{iso_elem}" if len(iso_sp_maps) > 1 and iso_elem else ""
+                iso_rxn_name = f"{r_name}_iso{iso_suffix}"
                 lines.extend([
                     '        add_coupled_reaction(',
                     '            CROSS=CROSS, LHS=LHS, RATES=RATES, mp=mp,',
                     f'            master_species={{"{iso_master}": {iso_master_coeff}}},',
                     f'            reactants={iso_other_reactants},',
                     f'            products={iso_products},',
-                    f'            coeff_master=coeff_master_iso, rate_master=coeff_master_iso * getattr(c, "{iso_master}"),',
+                    f'            coeff_master={coeff_var_name}, rate_master={coeff_var_name} * getattr(c, "{iso_master}"),',
                     f'            has_solid=has_solid, reaction_name="{iso_rxn_name}",',
                     f'            ref_species="{ref_sp}", stoich_ref={ref_coeff},',
                     '        )',
@@ -1868,8 +1919,8 @@ class EquationSystemGenerator:
                 lines.append(f'        J[:, idx["{p_tgt}"], idx["{diff_p}"]] += {coeff_p} * {d_var}')
 
             # Companion isotopes (e.g. 32S, 13C, 15N)
-            iso_sp_map = self.validator.derive_isotope_species_map(r)
-            if iso_sp_map:
+            iso_sp_maps = self.validator.derive_isotope_species_maps(r)
+            for iso_sp_map in iso_sp_maps:
                 iso_r_candidates = [
                     (c, s, self.validator.get_parent_species(s))
                     for c, s in reactants
