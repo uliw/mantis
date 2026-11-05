@@ -1,30 +1,33 @@
-- [Installation](#orgff743e4)
-- [Running your first model](#orgd69fd05)
-  - [Model structure](#orgf7accd8)
-    - [The main model file](#org8139db8)
-    - [Setting up a grid](#org4c530f2)
-    - [Defining the species that participate in the model](#orga670bb4)
-    - [Defining kinetic constants](#orgab960af)
-      - [Age-dependent reaction rates](#org05e6369)
-    - [Setting up reactions](#org8fd0c93)
-    - [Defining the plot output](#org62c72a3)
-    - [A note on Units](#org25813f4)
-      - [Output Units](#orge6bb2ed)
-      - [B. Converting to Dry Weight Percent ($\text{wt}\%$)](#org53e9855)
-    - [Adding measured data](#orga5a0a3b)
-- [Advanced usage](#org05afb78)
-  - [Kinetic Isotope Effects](#orgbf84bf6)
-  - [Sorption](#org476bf59)
-    - [The Three Physical Phases in MANTIS](#orgd4f0f59)
-    - [The `basis` Keyword: Porewater vs. Solid Volume Units](#org5858fba)
-    - [How MANTIS Handles Mixed-Phase Transport and Bioturbation](#org744f49c)
-    - [Declaring Lumped Species in `species.py`](#org1597985)
-  - [Speciation, pH and Equilibrium Isotope Effects](#org9f0bfc6)
-  - [Carbonate Chemistry](#org606f867)
+- [Installation](#org41f7f6e)
+- [Running your first model](#org76bfdff)
+  - [Model structure](#orgfea40b2)
+    - [The main model file](#org9b0afc3)
+    - [Defining the species that participate in the model](#orga201f97)
+    - [Defining kinetic constants](#org1f5795f)
+    - [Age-dependent reaction rates](#org0078453)
+    - [Setting up reactions](#orgd25d30f)
+    - [How Mantis determines reaction order](#org45fe054)
+    - [Defining the plot output](#org46fa532)
+    - [A note on Units](#orgc781af3)
+      - [Output Units](#org74a118d)
+      - [B. Converting to Dry Weight Percent ($\text{wt}\%$)](#org3fbd5bb)
+    - [Adding measured data](#org1174b64)
+- [Advanced usage](#org15cd169)
+  - [Kinetic Isotope Effects](#org36ecc6a)
+  - [Sorption & Speciation](#org64d8eff)
+    - [The Three Physical Phases in MANTIS](#orge80d3ca)
+    - [The `basis` Keyword: Porewater vs. Solid Volume Units](#org4b5f129)
+    - [How MANTIS Handles Mixed-Phase Transport and Bioturbation](#org321702b)
+    - [Declaring Lumped Species in `species.py`](#org982046a)
+  - [Speciation and Equilibrium Isotope Effects](#org7c4287d)
+  - [Dynamic pH and Carbonate Chemistry](#org31bb0f7)
+  - [Adding CaCO<sub>3</sub> dissolution](#org13adb27)
+    - [Why not a single reversible reaction arrow?](#org16c80b3)
+    - [How to implement CaCO<sub>3</sub> precipitation and dissolution](#orgfda01e7)
 
 
 
-<a id="orgff743e4"></a>
+<a id="org41f7f6e"></a>
 
 # Installation
 
@@ -32,21 +35,21 @@
 -   Optional: In an empty directory run `mantis_create_examples.py`
 
 
-<a id="orgd69fd05"></a>
+<a id="org76bfdff"></a>
 
 # Running your first model
 
 After creating the example directory, go to `./examples/start_here/basic_transport_and_reaction`
 
 
-<a id="orgf7accd8"></a>
+<a id="orgfea40b2"></a>
 
 ## Model structure
 
 A typical MANTIS project directory contains five primary configuration files, alongside the master run script:
 
 ```
-./velde_et_al_2016/
+./basic_transport_reaction/
 ├── species.py           <- Who lives in the sediment? (chemical species, phases, diffusion, BCs)
 ├── reactions.py         <- What reactions happen? (stoichiometry, kinetics, limiters)
 ├── kinetic_constants.py <- How fast do reactions happen? (rate constants, half-saturation values)
@@ -62,7 +65,7 @@ When you execute `python run_model.py`, MANTIS automatically detects these files
 -   `<model_name>.mp4` (optional): An animated video showing the transient evolution
 
 
-<a id="org8139db8"></a>
+<a id="org9b0afc3"></a>
 
 ### The main model file
 
@@ -106,17 +109,7 @@ if __name__ == "__main__":
 ```
 
 
-<a id="org4c530f2"></a>
-
-### Setting up a grid
-
--   uniform grid
--   single increasing grid distance
--   defining on more reaction zones
--   a word on grid resolution and its effect on dt and the accuracy of results along steep reaction fronts
-
-
-<a id="orga670bb4"></a>
+<a id="orga201f97"></a>
 
 ### Defining the species that participate in the model
 
@@ -160,7 +153,7 @@ species = {
 ```
 
 
-<a id="orgab960af"></a>
+<a id="org1f5795f"></a>
 
 ### Defining kinetic constants
 
@@ -194,13 +187,13 @@ import pint
 ```
 
 
-<a id="org05e6369"></a>
+<a id="org0078453"></a>
 
-#### Age-dependent reaction rates
+### Age-dependent reaction rates
 
 Organic matter reactivity decreases with depth as sediment ages and labile compounds are degraded. In MANTIS, age-dependent reaction rate constants can be defined using the built-in `sed_age` function from `mantis.diff_lib`:
 
-```jupyter-python
+```python
 from mantis.diff_lib import sed_age
 
 def get_reaction_constants(pH, phi):
@@ -225,7 +218,7 @@ Two scaling modes are supported:
 The sediment age profile $A(z)$ is computed automatically from 1D advective-diffusive transport accounting for burial velocity ($w$), porosity compaction ($\phi$), and bioturbation mixing ($D_b$).
 
 
-<a id="org8fd0c93"></a>
+<a id="orgd25d30f"></a>
 
 ### Setting up reactions
 
@@ -264,7 +257,33 @@ reactions = [
 ```
 
 
-<a id="org62c72a3"></a>
+<a id="org45fe054"></a>
+
+### How Mantis determines reaction order
+
+By default, Mantis assigns reaction order based on the number of reactants in the reaction stoichiometry:
+
+-   **Single-reactant reactions** (e.g. `POC -> DIC`) are treated as **first-order**: $$ R = k \cdot [A] \cdot \prod \text{limiters} \cdot \prod \text{inhibitors} $$
+-   **Multiple-reactant reactions** (e.g. `CH4 + SO4 -> TS2 + DIC`) follow **second-order** mass-action kinetics: $$ R = k \cdot [A] \cdot [B] \cdot \prod \text{limiters} \cdot \prod \text{inhibitors} $$
+
+You can explicitly override this default for any reaction by specifying the `reaction_order` property (values: `0`, `1`, or `2`):
+
+-   `"reaction_order": 0`: Zero-order in reactant concentrations ($R = k \cdot \prod \text{limiters} \cdot \prod \text{inhibitors}$). This is essential for mineral precipitation or dissolution governed purely by saturation state ($\Omega - 1$), where the reaction stoichiometry determines PDE mass balance and phase coupling, but the kinetic rate law must not multiply reactant concentrations:
+    
+    ```python
+    {
+        "reaction_name": "calcite_precipitation",
+        "reaction": "Ca2 + DIC + 2 TA -> CaCO3",
+        "k_value_name": "k_calcite_precip",
+        "limiters": ["calcite_precip_limiter"],
+        "reaction_order": 0,  # Rate is purely k * limiter(Omega - 1)
+    }
+    ```
+-   `"reaction_order": 1`: First-order in the primary reactant only ($R = k \cdot [A] \cdot \prod \text{limiters}$), preventing secondary stoichiometric reactants from being multiplied into the rate.
+-   `"reaction_order": 2`: Explicit second-order mass action ($R = k \cdot [A] \cdot [B] \cdot \prod \text{limiters}$).
+
+
+<a id="org46fa532"></a>
 
 ### Defining the plot output
 
@@ -304,7 +323,7 @@ plot_panels = [
 ```
 
 
-<a id="org25813f4"></a>
+<a id="orgc781af3"></a>
 
 ### A note on Units
 
@@ -319,7 +338,7 @@ Crucially, concentrations are defined **per unit volume of their respective phas
 -   **Depths and Transport**: Depth $z$ is in meters ($\text{m}$), time $t$ in seconds ($\text{s}$), and diffusion coefficients in $\text{m}^2/\text{s}$.
 
 
-<a id="orge6bb2ed"></a>
+<a id="org74a118d"></a>
 
 #### Output Units
 
@@ -345,7 +364,7 @@ c_fes_umol_g = solid_conc_to_umol_per_g(df.c_FeS, d=2.6)
 ```
 
 
-<a id="org53e9855"></a>
+<a id="org3fbd5bb"></a>
 
 #### B. Converting to Dry Weight Percent ($\text{wt}\%$)
 
@@ -361,7 +380,7 @@ fes_wt_pct = solid_conc_to_wt_percent(df.c_FeS, mw=87.91, d=2.6, phi=df.phi)
 ```
 
 
-<a id="orga5a0a3b"></a>
+<a id="org1174b64"></a>
 
 ### Adding measured data
 
@@ -384,18 +403,18 @@ species_mapping = {
 ```
 
 
-<a id="org05afb78"></a>
+<a id="org15cd169"></a>
 
 # Advanced usage
 
 
-<a id="orgbf84bf6"></a>
+<a id="org36ecc6a"></a>
 
 ## Kinetic Isotope Effects
 
 To model isotope effects the main model script must set `isotopes=True`, the species file must define isotope species, and the reaction file must define isotope effects (you also need to update the plot file). A full example is available in the `examples/velde_et_al_2016/with_isotopes/` directory. The below snippets outline the basic steps.
 
-In the species file we need to add basic information about the isotope system we are using, a boundary condition for the isotope ratio, and we need to define that sulfate will have $\ce{^{32}S}$ as isotope of the element S
+In the species file we have to add basic information about the isotope system we are using, a boundary condition for the isotope ratio, and we need to define that sulfate will have $\ce{^{32}S}$ as isotope of the element S
 
 ```jupyter-python
 isotope_standards: dict = {
@@ -413,7 +432,7 @@ isotope_standards: dict = {
   },
 ```
 
-Reactions without kinetic isotope effects do not need to be modified. If a reaction involves a kinetic isotope effect we need to add the fractionation factor to the `reaction_parameters` dictionary, and then add a line that specifies which isotope, and which species are involved. Since the isotope effect of microbially mediated sulfate reduction is concentration dependent, the below code additionally specifies a Monod-type limiter for the fractionation factor. Please note the dictionary key must follow the `species_isotope to species_isotope` pattern. Otherwise the parser will fail.
+Reactions without kinetic isotope effects do not need to be modified. If a reaction involves a kinetic isotope effect we must add the fractionation factor to the `reaction_parameters` dictionary, and then add a line that specifies which isotope, and which species are involved. Since the isotope effect of microbially mediated sulfate reduction is concentration dependent, the below code additionally specifies a Monod-type limiter for the fractionation factor. Please note the dictionary key must follow the `species_isotope to species_isotope` pattern. Otherwise the parser will fail.
 
 ```jupyter-python
 reaction_parameters = {
@@ -432,16 +451,16 @@ reaction_parameters = {
 ```
 
 
-<a id="org476bf59"></a>
+<a id="org64d8eff"></a>
 
-## Sorption
+## Sorption & Speciation
 
-Many reactive chemical species in marine sediments undergo rapid, reversible adsorption and desorption onto solid surfaces (such as particulate organic carbon, iron and manganese oxyhydroxides, or clay minerals). Common examples include ferrous iron ($\text{Fe}^{2+}$), manganese ($\text{Mn}^{2+}$), and ammonium ($\text{NH}_4^+$).
+Many reactive chemical species in marine sediments undergo rapid, reversible adsorption and desorption onto solid surfaces (such as particulate organic carbon, iron and manganese oxihydroxides, or clay minerals). Common examples include ferrous iron ($\text{Fe}^{2+}$), manganese ($\text{Mn}^{2+}$), and ammonium ($\text{NH}_4^+$).
 
 Because sorption reactions typically reach local chemical equilibrium on timescales of seconds to minutes—far faster than the transport timescales of burial and diffusion (years to millennia)—tracking dissolved and adsorbed pools as separate, stiff differential equations is both computationally expensive and numerically unstable. Instead, MANTIS allows you to model these pools as a single **lumped species** (also referred to as a **mixed-phase species**).
 
 
-<a id="orgd4f0f59"></a>
+<a id="orge80d3ca"></a>
 
 ### The Three Physical Phases in MANTIS
 
@@ -452,7 +471,7 @@ When declaring a species in `species.py`, the `phase` attribute controls its phy
 -   `"phase": "mixed"`: Lumped pools containing both a dissolved porewater fraction and a surface-adsorbed solid fraction (e.g., $\text{Fe}^{2+}_{\text{total}}$).
 
 
-<a id="org5858fba"></a>
+<a id="org4b5f129"></a>
 
 ### The `basis` Keyword: Porewater vs. Solid Volume Units
 
@@ -463,14 +482,14 @@ Because a lumped pool resides partially in the pore fluid and partially in the s
 -   `"basis": "solid"` (default if omitted): The lumped concentration is expressed per unit volume of dry solid sediment ($\text{mol} \cdot \text{m}^{-3}_{\text{solid}}$). This convention is typically used when the species is predominantly solid-bound (e.g., in Velde et al., 2016, where $>99\%$ of ferrous iron is sorbed). MANTIS uses the solid volume fraction ($\phi_{\text{eff}} = 1 - \phi$): $$C_{\text{total, solid}} = C_{\text{sorb}} + \frac{\phi}{1 - \phi} C_{\text{dis}}$$
 
 
-<a id="org744f49c"></a>
+<a id="org321702b"></a>
 
 ### How MANTIS Handles Mixed-Phase Transport and Bioturbation
 
-In a lumped pool, the dissolved fraction and the sorbed fraction experience completely different physical transport processes:
+In a lumped pool, the dissolved fraction and the adsorbed fraction experience entirely different physical transport processes:
 
 1.  The ****dissolved fraction**** ($f_{\text{dis}}$) diffuses through pore fluids via molecular diffusion ($D_{\text{mol}}$) and is advected by porewater flow.
-2.  The ****sorbed fraction**** ($1 - f_{\text{dis}}$) is bound to solid particles and is mixed upwards and downwards by macrofaunal bioturbation ($D_{\text{bio}}$) and buried at the sediment accumulation rate ($w_{\text{sed}}$).
+2.  The ****adsorbed fraction**** ($1 - f_{\text{dis}}$) is bound to solid particles and is mixed upwards and downwards by macrofaunal bioturbation ($D_{\text{bio}}$) and buried at the sediment accumulation rate ($w_{\text{sed}}$).
 
 MANTIS automatically constructs a unified effective transport stencil that partitions transport according to the instantaneous local dissolved fraction $f_{\text{dis}}(z)$:
 
@@ -483,7 +502,7 @@ This dynamic partitioning has crucial physical consequences:
 -   When $f_{\text{dis}} \to 1$ (no sorption), $D_{\text{eff}}$ seamlessly reduces to pure molecular diffusion. When $f_{\text{dis}} \to 0$ (completely sorbed), $D_{\text{eff}}$ reduces to solid particle biodiffusion.
 
 
-<a id="org1597985"></a>
+<a id="org982046a"></a>
 
 ### Declaring Lumped Species in `species.py`
 
@@ -546,14 +565,175 @@ speciation = {
 }
 ```
 
-In reaction equations (in `reactions.py`), you can use the diagnostic species (e.g., `Fe2_liq + HS -> FeS`) so that precipitation rates respond specifically to the active free dissolved solute concentration, while MANTIS conserves mass across the total lumped pool.
+In reaction equations (in `reactions.py`), you can use the diagnostic species (e.g., `Fe2_liq + HS -> FeS`) so that precipitation rates respond specifically to the active free dissolved solute concentration, while MANTIS conserves mass across the total lumped pool. The model code in `examples/velde_et_al_2016/no_isotopes/` contains an example of how to use this in a model.
 
 
-<a id="org9f0bfc6"></a>
+<a id="org7c4287d"></a>
 
-## Speciation, pH and Equilibrium Isotope Effects
+## Speciation and Equilibrium Isotope Effects
+
+Some species, e.g., H<sub>2</sub>S exist in different forms depending on pH (\ce{H<sub>2</sub>S <-> HS- + H+}), which may also include an equilibrium isotope effect. The below example shows the pH dependent speciation of H<sub>2</sub>S and the associated fractionation. The full code is in the species file in `examples/velde_et_al_2016/with_isotopes/` . Note that in this model, H<sub>2</sub>S is called `TS2`
+
+```jupyter-python
+speciation = {
+    "sulfide_acid_base": {
+        "type": "acid_base",
+        "primary": "TS2",
+        "constants": {"pKa1": 7.0},
+        "equilibrium_fractionation": {
+            "standard": "d34S",
+            "alpha": {"H2S_S32_to_HS_S32": 0.99991542},
+        },
+        "species": {
+            "HS": {
+                "phase": "liquid",
+                "fraction": "Ka1 / (Hplus + Ka1)",
+                "include_in_TA": 1.0,
+                "isotopes": {"HS_S32": "S"},
+            },
+            "H2S": {
+                "phase": "liquid",
+                "fraction": "Hplus / (Hplus + Ka1)",
+                "isotopes": {"H2S_S32": "S"},
+            },
+        },
+    },
+```
+
+Since a species can have more than one isotope system (e.g., sulfate has sulfur and oxygen), we must explicitly state which isotopes participate in a reaction, and, in case they involve a kinetic isotope effect, include that as well. The below example is from `examples/velde_et_al_2016/with_isotopes_CaCO_dissolution`
+
+```jupyter-python
+{
+        "reaction_name": "sulfate_reduction_slow",
+        "reaction": "2 POC_slow + SO4 -> TS2 + 2 DIC + 2 TA",
+        "k_value_name": "POC_slow",
+        "limiters": ["SO4"],
+        "inhibitors": ["O2", "Fe3_diss_red"],
+        "isotope_species": {
+            "SO4": "SO4_S32",
+            "TS2": "TS2_S32",
+            "POC_slow": "POC_slow_C12",
+            "DIC": "DIC_C12",
+        },
+        "isotope_fractionation": {
+            "SO4_S32 to TS2_S32": ["msr_alpha", "SO4_alpha_explicit"]
+        },
+```
 
 
-<a id="org606f867"></a>
+<a id="org31bb0f7"></a>
 
-## Carbonate Chemistry
+## Dynamic pH and Carbonate Chemistry
+
+Mantis computes pH as a function of DIC and TA as master variables, rather than solving the transport equations for \ce{H+}. As such, the reaction file needs to specify how each reaction affects DIC and TA. For dissimilatory iron reduction, we can write e.g.,
+
+```jupyter-python
+{
+       "reaction_name": "iron_reduction_poc",
+       "reaction": "POC + 4 FeOOH -> DIC + 4 Fe2_total + 8 TA",
+       "k_value_name": "k_POC",
+       "ref_species": "POC",
+       "limiters": ["FeOOH"],
+   },
+```
+
+Further, we need to supply species definitions for TA, DIC, \ce{H+} as well as $\ce{Ca^2+}$ - see the species files in `mantis/examples/SimpleFe/`. Next we must define the carbonate speciation, and associated parameters
+
+```jupyter-python
+# -------------------------------------------------------------------------
+   # Marine Carbonate System Speciation (DIC + TA -> CO3, HCO3, Hplus, pH)
+   # -------------------------------------------------------------------------
+   "carbonate_system": {
+       "type": "carbonate_system",
+       "primary": {"dic": "DIC", "ta": "TA"},
+       "species": ["Hplus", "CO3", "HCO3"],
+       "pressure": 50.0,       # 500 m water depth (~50 bar hydrostatic pressure)
+       "salinity": 35.0,       # 35 PSU bottom water salinity
+       "adjust_omega": False,  # Retain exact boundary values without forcing calcite equilibrium
+       "ph_scale": "free",
+       "controls": ["DIC", "pH"],
+   },
+```
+
+Note that any species that contributes to TA (e.g., \ce{HS-}) must define their effect on TA by setting `include_in_TA": 1.0` (see e.g., the species definition for H<sub>2</sub>S above). The Du 2023 SimpleFe model further shows how to then use pH to calculate dissolved iron speciation and sorption.
+
+
+<a id="org13adb27"></a>
+
+## Adding CaCO<sub>3</sub> dissolution
+
+In diagenetic models, authigenic calcium carbonate (\ce{CaCO3}, such as calcite or aragonite) undergoes reversible precipitation and dissolution depending on the porewater saturation state: $$ \Omega = \frac{[\ce{Ca^2+}][\ce{CO3^2-}]}{K'_{sp}} $$
+
+
+<a id="org16c80b3"></a>
+
+### Why not a single reversible reaction arrow?
+
+For simple minerals like iron monosulfide (\ce{FeS}), Mantis supports the compact reversible syntax:
+
+```python
+{
+    "reaction_name": "FeS_precipitation_dissolution",
+    "reaction": "Fe2_liq + HS -> FeS",
+    "k_value_name": {
+        "precipitation": "FeS_isp",
+        "dissolution": "FeS_isd",
+        "equilibrium": "FeS_sp",
+    },
+}
+```
+
+In that formulation, both reactants (\ce{Fe^2+} and \ce{HS-}) are direct linear fractions of single transport variables (\ce{Fe2_total} and \ce{TS2}), and their product $[\ce{Fe^2+}][\ce{HS-}]$ directly forms the saturation state.
+
+For \ce{CaCO3}, however:
+
+1.  **Nonlinear speciation**: \ce{CO3^2-} is not a linear fraction of a single variable, but a nonlinear thermodynamic function of two master variables: \ce{DIC} and \ce{TA}.
+2.  **Asymmetric kinetic rate laws**: Precipitation is typically independent of the mineral mass ($R_{precip} = k_{precip} \cdot \max(\Omega - 1, 0)$, i.e., zero-order in \ce{CaCO3}), whereas dissolution depends directly on the reactive surface area/abundance of the solid mineral phase ($R_{diss} = k_{diss} \cdot [\ce{CaCO3}] \cdot \max(1 - \Omega, 0)$, i.e., first-order in \ce{CaCO3}).
+3.  **Mass-balance coupling**: Writing the reaction in terms of transport state variables requires coupling to \ce{Ca^2+}, \ce{DIC}, and $2 \times \ce{TA}$.
+
+
+<a id="orgfda01e7"></a>
+
+### How to implement CaCO<sub>3</sub> precipitation and dissolution
+
+To correctly model both processes, define saturation limiters in the `limiters` dictionary, and separate the forward precipitation and dissolution reactions in `reactions.py`:
+
+```jupyter-python
+limiters = {
+    # Precipitation occurs when Omega > 1 (zero-order in solid)
+    "calcite_precip_limiter": "np.maximum((c.Ca2 * c.CO3) / (mp.Ksp_calcite + 1e-30) - 1.0, 0.0)",
+
+    # Dissolution occurs when Omega < 1 (first-order in solid Calcite)
+    "calcite_diss_limiter": "np.maximum(1.0 - (c.Ca2 * c.CO3) / (mp.Ksp_calcite + 1e-30), 0.0)",
+}
+
+reactions = [
+    # Precipitation: Ca2+ + CO3^2- -> CaCO3
+    # Net in transport variables: Ca2 + DIC + 2 TA -> Calcite
+    {
+        "reaction_name": "calcite_precipitation",
+        "reaction": "Ca2 + DIC + 2 TA -> Calcite",
+        "k_value_name": "k_calcite_precip",
+        "limiters": ["calcite_precip_limiter"],
+        "reaction_order": 0,  # Purely k * limiter(Omega - 1)
+    },
+
+    # Dissolution: CaCO3 -> Ca2+ + CO3^2-
+    # Net in transport variables: Calcite -> Ca2 + DIC + 2 TA
+    {
+        "reaction_name": "calcite_dissolution",
+        "reaction": "Calcite -> Ca2 + DIC + 2 TA",
+        "k_value_name": "k_calcite_diss",
+        "limiters": ["calcite_diss_limiter"],
+        "reaction_order": 1,  # First-order in Calcite: k * [Calcite] * limiter(1 - Omega)
+    },
+]
+```
+
+This ensures that:
+
+-   $\Omega$ evaluates using the exact thermodynamic speciation \ce{c.CO3} from the carbonate solver.
+-   The Jacobian and Newton solver correctly couple \ce{Ca^2+}, \ce{DIC}, and \ce{TA} without nonphysical cross-multiplication of reactant concentrations.
+-   Zero-order precipitation and first-order mineral dissolution remain numerically stable and physically accurate across both undersaturated and supersaturated regimes.
+
+A working example of a model with carbonate dissolution/precipitation reactions is in the examples folder (`examples/luff_2003`).
