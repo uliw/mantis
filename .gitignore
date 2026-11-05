@@ -40,6 +40,7 @@ CLAUDE.md
 !examples/SimpleFe/run_simplefe_reference.csv
 !examples/SimpleFe/SimpleFe_Du_2023.csv
 !examples/Luff_and_Wallmann_2003/run_luff_model_reference.csv
+!docs/Tutorial_new.pdf
 
 # Virtual environments
 .venv
