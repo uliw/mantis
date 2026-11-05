@@ -654,10 +654,11 @@ plot_panels = [
         assert "[uM]" in p1["left_ylabel"]
 
         # 2. Solid species scaled to umol/g dry sediment (divided by rho_solid = 2.6)
+        # In panel 2, solid_species_1 is the first plot object so it defaults to left
         p2 = plt_desc["second_subplot"]
-        y_scaled_solid = p2["right1"][0][0]
+        y_scaled_solid = p2["left"][0][0]
         np.testing.assert_allclose(y_scaled_solid, sample_df["c_FeS"] / 2.6)
-        assert "[umol/g]" in p2["right1_ylabel"]
+        assert "[umol/g]" in p2["left_ylabel"]
 
         # 3. Reaction rate scaled from mol/(m^3*s) to nmol/(cm^3*d)
         # 1 mol/(m^3*s) = 1e9 nmol / (1e6 cm^3 * (1/86400 d)) = 86400 * 1000 = 8.64e7 nmol/(cm^3*d)
@@ -736,10 +737,10 @@ plot_panels = [
         assert ext_fe[3]["linestyle"] == ":"
         np.testing.assert_allclose(ext_fe[1], [150.0, 250.0, 100.0])
 
-        # FeS: external series in second_subplot right1
+        # FeS: external series in second_subplot (first object in panel 2 defaults to left)
         # wt% Fe = 0.03 * 55.845 / 26.0 ≈ 0.064436
         p2 = plt_desc["second_subplot"]
-        ext_fes = p2["right1"][1]
+        ext_fes = p2["left"][1]
         expected_wt = ext_df["fes_solid"] * 1000.0 * 55.845 / (10000.0 * 2.6)
         np.testing.assert_allclose(ext_fes[1], expected_wt)
 
@@ -797,6 +798,58 @@ plot_panels = [
         p2 = plt_desc["second_subplot"]
         ext_hs = p2["left"][1]
         assert ext_hs[3]["linestyle"] == "-"
+
+
+def test_positional_default_left_and_subsequent_right(sample_df):
+    """Test that the first plot object in a panel defaults to 'left' and subsequent objects default to 'right'."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Create an extra isotope column in sample_df
+        df_test = sample_df.copy()
+        df_test["d13C_DIC"] = -10.0
+
+        layout_content = """
+isotopes_1 = isotopes({
+    "species": ["d34S_SO4"],
+})
+
+isotopes_2 = isotopes({
+    "species": ["d13C_DIC"],
+})
+
+solid_species_1 = solid_species({
+    "species": ["FeS"],
+    "units": "wt%",
+    "relative_to": "Fe",
+})
+
+liquid_species_1 = liquid_species({
+    "species": ["SO4"],
+})
+
+plot_panels = [
+    [isotopes_1, isotopes_2],       # First defaults to left, second defaults to right1
+    [solid_species_1, liquid_species_1], # Solid defaults to left, liquid defaults to right1
+]
+"""
+        layout_path = os.path.join(tmpdir, "plot_layout.py")
+        with open(layout_path, "w") as f:
+            f.write(layout_content)
+
+        plt_desc = load_layout_from_file(df_test, layout_path)
+
+        p1 = plt_desc["first_subplot"]
+        assert len(p1["left"]) == 1
+        assert "d34S_SO4" in p1["left"][0][1]
+        assert "right1" in p1
+        assert len(p1["right1"]) == 1
+        assert "d13C_DIC" in p1["right1"][0][1]
+
+        p2 = plt_desc["second_subplot"]
+        assert len(p2["left"]) == 1
+        assert "FeS" in p2["left"][0][1]
+        assert "right1" in p2
+        assert len(p2["right1"]) == 1
+        assert "SO$_{4}$" in p2["right1"][0][1]
 
 
 

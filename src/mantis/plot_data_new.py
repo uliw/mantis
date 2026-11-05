@@ -1282,6 +1282,8 @@ def _pretty_species_label(name, rel_elem=None):
         "TPO4": r"PO$_{4}^{3-}$",
         "TNH4": r"NH$_{4}^{+}$",
         "CaCO3": r"CaCO$_{3}$",
+        "Omega_calcite": r"$\Omega_{calcite}$",
+        "Omega_aragonite": r"$\Omega_{aragonite}$",
     }
     base = label_map.get(name, name)
     if rel_elem:
@@ -1334,6 +1336,8 @@ def _infer_spec_kind(spec):
     if "relative_to" in spec:
         return "solid"
     species = spec.get("species", [])
+    if isinstance(species, (str, bytes)):
+        species = [species]
     if species:
         first_sp = species[0]
         sp_name, _ = _unpack_species_entry(first_sp)
@@ -1370,6 +1374,8 @@ def _compile_single_spec(
     """
     kind = _infer_spec_kind(spec)
     species_list = spec.get("species", [])
+    if isinstance(species_list, (str, bytes)):
+        species_list = [species_list]
     scale = spec.get("scale")
     lim = spec.get("lim")
     broken = spec.get("broken_axis") or spec.get("broken_y")
@@ -1627,11 +1633,12 @@ def _compile_panel(
     }
 
     right_count = 0
-    for spec in flat_specs:
+    for idx, spec in enumerate(flat_specs):
         if not isinstance(spec, dict):
             continue
-        kind = _infer_spec_kind(spec)
-        default_pos = "right" if kind == "solid" else "left"
+        # Positional default: first plot object in a panel defaults to 'left',
+        # subsequent plot objects in the panel default to 'right'.
+        default_pos = "left" if idx == 0 else "right"
         pos = spec.get("position", default_pos)
         pos = str(pos).strip().lower()
 
@@ -1860,15 +1867,21 @@ def compile_declarative_layout(module, df, layout_path, measured_data_path=None)
                 raw_solid = module.solid_species
                 if isinstance(raw_solid, (list, tuple)):
                     for s in raw_solid:
-                        if isinstance(s, dict) and "_kind" not in s:
+                        if isinstance(s, dict):
                             s = dict(s)
-                            s["_kind"] = "solid"
+                            if "_kind" not in s:
+                                s["_kind"] = "solid"
+                            if "position" not in s:
+                                s["position"] = "right"
                         first_panel.append(s)
                 else:
                     s = raw_solid
-                    if isinstance(s, dict) and "_kind" not in s:
+                    if isinstance(s, dict):
                         s = dict(s)
-                        s["_kind"] = "solid"
+                        if "_kind" not in s:
+                            s["_kind"] = "solid"
+                        if "position" not in s:
+                            s["position"] = "right"
                     first_panel.append(s)
             panel_map["first_subplot"] = first_panel
 
