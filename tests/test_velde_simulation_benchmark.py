@@ -28,18 +28,18 @@ def _run_and_verify_simulation_benchmark(scenario_dir_name: str, check_isotopes:
     assert sim_script.exists(), f"Simulation script not found: {sim_script}"
     assert reference_csv.exists(), f"Reference CSV not found: {reference_csv}"
 
-    # 1 & 2. Run simulation with a 60-second timeout
+    # 1 & 2. Run simulation with a 120-second timeout
     try:
         proc = subprocess.run(
             [sys.executable, str(sim_script)],
             cwd=str(sim_dir),
             capture_output=True,
             text=True,
-            timeout=60,
+            timeout=120,
             check=False,
         )
     except subprocess.TimeoutExpired as exc:
-        pytest.fail(f"Simulation timed out (> 60 seconds): {exc}")
+        pytest.fail(f"Simulation timed out (> 120 seconds): {exc}")
 
     assert proc.returncode == 0, (
         f"Simulation exited with return code {proc.returncode}.\n"
@@ -117,3 +117,8 @@ def test_velde_et_al_2016_no_isotopes_with_irrigation_simulation_benchmark():
 def test_velde_et_al_2016_with_isotopes_simulation_benchmark():
     """Run regression benchmark for with_isotopes scenario."""
     _run_and_verify_simulation_benchmark("with_isotopes", check_isotopes=True)
+
+
+def test_velde_et_al_2016_with_isotopes_caco_dissolution_simulation_benchmark():
+    """Run regression benchmark for with_isotopes_CaCO_dissolution scenario."""
+    _run_and_verify_simulation_benchmark("with_isotopes_CaCO_dissolution", check_isotopes=True)

@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-11-05
+
+### Added
+
+- **Multi-Element Isotope Tracking & Grouping (`derive_isotope_species_maps`)**:
+  - Implemented automatic element-based grouping for reactions involving multiple isotope systems simultaneously (e.g. tracking carbon $^{13}\text{C}$ and sulfur $^{34}\text{S}$ concurrently in combined diagenetic reactions).
+  - Added element resolution helper `get_species_element()` to identify tracked elements from species definitions and standards.
+  - Enhanced initial condition inheritance and rate coefficient evaluation with element-specific suffixes and group-matched fractionation limiters.
+- **Vectorized Carbonate Speciation via Newton-Raphson (`compute_carbonate_speciation`)**:
+  - Replaced iterative fixed-point speciation with a vectorized 1D Newton-Raphson solver in $\ln([\text{H}^+])$ across all sediment depth cells.
+  - Significantly improves convergence rate, robustness, and numerical stability when tightly coupled with non-carbonate acid-base systems and total alkalinity.
+- **Reaction Order Support in Equation Generator**:
+  - Added explicit reaction order parsing supporting zero-, first-, and second-order reaction kinetics directly in declarative reaction networks.
+- **Composite Species & Advanced Measured Data Styling in Plotting**:
+  - Added support for composite species evaluation in declarative plot layouts (e.g., automatically summing $\text{Calcite} + \text{Aragonite}$ as $\text{CaCO}_3$ or $\text{POC}_{\text{fast}} + \text{POC}_{\text{slow}}$ as $\text{POC}$).
+  - Introduced configurable styling for measured/external comparison data (`measured_data_as`) supporting markers (`*`, `o`, `.`, `D`, `s`, `^`), line styles, and custom keyword argument dictionaries globally and per-panel.
+  - Added module aliasing and explicit `__all__` exports for `plot_data_new` in `mantis/__init__.py`.
+- **New Benchmark Models & Python 3.15 Support**:
+  - Added the **Luff & Wallmann (2003)** carbonate dissolution and precipitation benchmark model (`examples/Luff_and_Wallmann_2003/`) with comparison plotting and regression tests.
+  - Added the **Velde et al. (2016)** variant with coupled carbon and sulfur isotopes during $\text{CaCO}_3$ dissolution (`with_isotopes_CaCO_dissolution`).
+  - Added `scipy >= 1.18.1` as a core dependency for scientific computing and updated the CI matrix and package classifiers to support Python 3.15.
+
+## [0.6.1] - 2026-10-31
+
+- Updated changelog and release notes for the v0.6.0 release.
+
 ## [0.6.0] - 2026-10-31
 
 ### Added
