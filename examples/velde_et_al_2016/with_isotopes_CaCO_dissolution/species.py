@@ -189,7 +189,7 @@ species = {
         "include": True,
         "formula": "CaCO3",
         "diffusion": None,
-        "bc_top": {"Robin": "0.5 umol/(cm^2 * yr)", "d13C": 0},
+        "bc_top": {"Robin": "100 umol/(cm^2 * yr)", "d13C": 0},
         # Background sediment carbonate (~18 wt% = 4500 mol/m^3_solid)
         # "init": lambda z: np.full_like(z, 4500.0),
         "prefill": True,
