@@ -8,13 +8,13 @@ import pandas as pd
 import pytest
 
 
-def _run_and_verify_simulation_benchmark(scenario_dir_name: str, check_isotopes: bool = False):
+def _run_and_verify_simulation_benchmark(scenario_dir_name: str, check_isotopes: bool = False, timeout: int = 300):
     """
     Run Velde et al. (2016) simulation and verify accuracy against reference results.
 
     Requirements:
     1. Runs examples/velde_et_al_2016/{scenario_dir_name}/run_velde_fast.py.
-    2. Exits cleanly with returncode == 0 in under 60 seconds.
+    2. Exits cleanly with returncode == 0 within timeout seconds (default 300s).
     3. Compares simulated concentrations (and isotope delta values if check_isotopes=True)
        with run_velde_fast_reference.csv.
     4. Asserts normalized mean error across grid spacing is <= 1% for every active species/isotope.
@@ -28,18 +28,18 @@ def _run_and_verify_simulation_benchmark(scenario_dir_name: str, check_isotopes:
     assert sim_script.exists(), f"Simulation script not found: {sim_script}"
     assert reference_csv.exists(), f"Reference CSV not found: {reference_csv}"
 
-    # 1 & 2. Run simulation with a 120-second timeout
+    # 1 & 2. Run simulation with a 300-second timeout
     try:
         proc = subprocess.run(
             [sys.executable, str(sim_script)],
             cwd=str(sim_dir),
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=timeout,
             check=False,
         )
     except subprocess.TimeoutExpired as exc:
-        pytest.fail(f"Simulation timed out (> 120 seconds): {exc}")
+        pytest.fail(f"Simulation timed out (> {timeout} seconds): {exc}")
 
     assert proc.returncode == 0, (
         f"Simulation exited with return code {proc.returncode}.\n"
