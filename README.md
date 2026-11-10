@@ -2,7 +2,7 @@
 
 [![Build Status](https://github.com/uliw/mantis/actions/workflows/tests.yml/badge.svg)](https://github.com/uliw/mantis/actions/workflows/tests.yml)
 [![PyPI Version](https://img.shields.io/pypi/v/mantis-rtm.svg)](https://pypi.org/project/mantis-rtm/)
-[![Python Versions](https://img.shields.io/badge/python-3.12%20%7C%203.13%20%7C%203.14-blue.svg)](https://pypi.org/project/mantis-rtm/)
+[![Python Versions](https://img.shields.io/badge/python-3.12%20%7C%203.13%20%7C%203.15-blue.svg)](https://pypi.org/project/mantis-rtm/)
 [![License: AGPL-3.0-or-later](https://img.shields.io/badge/License-AGPL_3.0--or--later-blue.svg)](https://github.com/uliw/mantis/blob/main/LICENSE)
 
 **MANTIS** is a high-performance 1D reactive-transport modeling (RTM) framework written in Python. Unlike most reaction-transport codes, Mantis uses a fully coupled monolithic equation system. This approach allows to solve  stiff, tightly coupled, non-linear advection-diffusion-reaction networks efficiently with minimal computational overhead. Mantis supports non-uniform grids, speciation, and adsorption as well as kinetic and equilibrium isotope effects.
