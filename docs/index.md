@@ -1,12 +1,15 @@
 # MANTIS Documentation
 
-**MANTIS** (*A Monolithic Assembly of Nonlinear Transport Interactions Solver*) is a high-performance Python package for reactive transport modeling (RTM) in aquatic and sediment geochemistry.
+**MANTIS** (*A Monolithic Assembly of Nonlinear Transport Interactions Solver*) is a high-performance Python package for reactive transport modeling (RTM) in porous sediments.
+
+
 
 ## Features
-- **Monolithic Block Newton Solver**: Coupled implicit solution of advective-diffusive-reactive transport and complex reaction networks.
-- **Accurate Speciation & Thermodynamics**: Built-in seawater and porewater carbonate equilibria.
-- **Isotope Fractionation**: Automated parsing and solving of multi-isotope systems (e.g. $\delta^{34}\text{S}$, $\delta^{13}\text{C}$).
-- **Numba Acceleration**: High-speed vector norms, residual evaluations, and step-control kernels.
+- An easy to read templating scheme to define species, kinetic parameters, and reactions
+- Native support for kinetic and equilibrium isotope effects. 
+- Monolithic Block Newton Solver: Coupled implicit solution of advective-diffusive-reactive transport and complex reaction networks.
+- Accurate Speciation & Thermodynamics with built-in seawater and porewater carbonate equilibria.
+
 
 ```{toctree}
 :maxdepth: 2
@@ -18,9 +21,18 @@ Tutorial_2
 
 ```{toctree}
 :maxdepth: 2
-:caption: API Reference
+:caption: API & Module Reference
 
 api/index
+```
+
+```{toctree}
+:maxdepth: 1
+:caption: Project & Links
+
+changelog
+license
+GitHub Repository <https://github.com/uliw/mantis>
 ```
 
 ## Indices and Tables

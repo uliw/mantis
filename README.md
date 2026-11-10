@@ -1,8 +1,9 @@
 # MANTIS: A Python framework to solve extremely stiff isotope enabled reaction-transport equations using a *M*onolithic *A*ssembly of *N*onlinear *T*ransport *I*nteractions *S*olver (MANTIS)
 
 [![Build Status](https://github.com/uliw/mantis/actions/workflows/tests.yml/badge.svg)](https://github.com/uliw/mantis/actions/workflows/tests.yml)
+[![Documentation Status](https://readthedocs.org/projects/mantis-rtm/badge/?version=latest)](https://mantis-rtm.readthedocs.io/en/latest/?badge=latest)
 [![PyPI Version](https://img.shields.io/pypi/v/mantis-rtm.svg)](https://pypi.org/project/mantis-rtm/)
-[![Python Versions](https://img.shields.io/badge/python-3.12%20%7C%203.13%20%7C%203.15-blue.svg)](https://pypi.org/project/mantis-rtm/)
+[![Python Versions](https://img.shields.io/badge/python-3.12%20%7C%203.13%20%7C%203.14%20%7C%203.15-blue.svg)](https://pypi.org/project/mantis-rtm/)
 [![License: AGPL-3.0-or-later](https://img.shields.io/badge/License-AGPL_3.0--or--later-blue.svg)](https://github.com/uliw/mantis/blob/main/LICENSE)
 
 **MANTIS** is a high-performance 1D reactive-transport modeling (RTM) framework written in Python. Unlike most reaction-transport codes, Mantis uses a fully coupled monolithic equation system. This approach allows to solve  stiff, tightly coupled, non-linear advection-diffusion-reaction networks efficiently with minimal computational overhead. Mantis supports non-uniform grids, speciation, and adsorption as well as kinetic and equilibrium isotope effects.
@@ -32,24 +33,9 @@ While MANTIS provides robust and unconditionally stable solutions for stiff reac
    - The temperature profile of $T(z)$ is steady-state. Dynamic thermal evolution and time-dependent diffusion coefficients or rate constants driven by non-isothermal thermal transients are not currently supported.
 
 
-## Installation
-MANTIS requires Python 3.12 or newer. Clone the repository and install in editable mode:
+## Installation & Documentation 
 
-```bash
-pip install mantis-rtm 
-mantis_create_examples.py 
-```
-
-Dependencies include `numpy`, `pandas`, `matplotlib`, `numba`, `sympy`, `chempy`, and `watchdog`.
-
-## Quick Start Example
-A quick-start tutorial is available in the `./docs` folder
-
-## Running Tests
-Run the unit test suite using `pytest`:
-```bash
-pytest
-```
+Please refer to https://mantis-rtm.readthedocs.io/en/latest
 
 ## License
 This project is licensed under the GPL-3.0 License. See the [LICENSE](LICENSE) file for details.
