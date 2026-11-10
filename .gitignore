@@ -47,3 +47,7 @@ CLAUDE.md
 .venv
 env/
 venv/
+
+# Sphinx documentation build
+docs/_build/
+docs/api/generated/
