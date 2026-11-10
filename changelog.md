@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.1] - 2026-11-10
+
+### Added
+
+- **Sphinx Documentation & Read the Docs Integration**:
+  - Added full Sphinx documentation configuration (`docs/conf.py`), Read the Docs specification (`.readthedocs.yaml`), custom autosummary templates, and API reference index.
+  - Updated documentation dependencies in `pyproject.toml` (`sphinx`, `sphinx-rtd-theme`, `myst-parser`, `sphinx-copybutton`).
+- **Restructured Multi-Part Tutorial Guides**:
+  - Restructured tutorial into modular guides: `Tutorial_1` (fundamentals, model configuration, and initial-boundary conditions) and `Tutorial_2` (advanced multi-element isotopes, carbonate chemistry, and calcite precipitation/dissolution).
+  - Added automated tutorial export tooling (`docs/export_tutorials.sh`).
+- **Coupled $^{13}\text{C}$ and $^{34}\text{S}$ Carbonate Dissolution Model**:
+  - Added carbon isotope tracking ($^{13}\text{C}$) to the Velde et al. (2016) calcite dissolution benchmark (`with_isotopes_CaCO_dissolution`).
+- **Codebase & CI Maintenance**:
+  - Comprehensive docstring cleanups across `diff_lib`, `model`, `seawater_carbonate`, `plot_data_new`, and solvers.
+  - Updated CI workflows to actions v6 (`actions/checkout@v6`, `actions/setup-python@v6`) and increased test suite simulation timeouts.
+  - Added missing benchmark reference datasets and test coverage for the Luff & Wallmann (2003) model.
+
 ## [0.7.0] - 2026-11-05
 
 ### Added
