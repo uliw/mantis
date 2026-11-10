@@ -1,6 +1,4 @@
-"""model.py
-
-Unified, declarative DiageneticModel interface for MANTIS reaction-transport simulations.
+"""Unified, declarative DiageneticModel interface for MANTIS reaction-transport simulations.
 
 Provides a clean object-oriented entry point that:
 - Automatically resolves paths relative to the calling script.
@@ -18,44 +16,73 @@ import copy
 import importlib.util
 import inspect
 import os
-from pathlib import Path
-import sys
 import re
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+import sys
+from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pint
 
 from mantis.diff_lib import (
     VariableArray as CellVariable,
+)
+from mantis.diff_lib import (
     check_peclet_numbers,
     compute_bio_irrigation_alpha,
     compute_exponential_db,
     compute_sigmoidal_db,
     data_container,
-    diff_coeff,
-    get_l_mass,
-    get_total_delta,
     make_grid_from_sections,
-    make_grid2,
     read_state,
     save_data,
     save_state,
 )
 from mantis.generate_equation_system import resolve_and_prepare_equations
 from mantis.live_plot_lib import LivePlotter
-from mantis.monolithic_solver import run_non_steady_state_solver_monolithic as run_solver
+from mantis.monolithic_solver import (
+    run_non_steady_state_solver_monolithic as run_solver,
+)
 
 
 class DiageneticModelResult:
-    """Encapsulates the output of a completed DiageneticModel simulation."""
+    """Encapsulate the output of a completed DiageneticModel simulation.
+
+    Parameters
+    ----------
+    mp : data_container
+        Master model parameter container with all grid, transport, and solver settings.
+    c : data_container
+        Concentration state variables for each chemical species (CellVariable arrays).
+    k : data_container
+        Reaction rate constants and half-saturation parameters.
+    species_list : list of str
+        List of transport species active in the PDE solve.
+    z : numpy.ndarray
+        Sediment depth coordinates at cell centers [m].
+    D_mol : data_container
+        Molecular diffusion coefficient profiles for each species [m^2/s].
+    diagenetic_reactions : callable
+        Compiled function evaluating reaction source/sink rates.
+    converged : str
+        Simulation termination status (e.g. 'steady state reached', 'max time reached').
+    step : int
+        Total number of adaptive time steps completed.
+    total_time : float
+        Total simulated physical time [seconds].
+    df : pandas.DataFrame or None, optional
+        Tabular dataframe containing depth profiles of concentrations and rates.
+    fqfn : str or None, optional
+        Fully qualified file path to saved CSV output.
+
+    """
 
     def __init__(
         self,
         mp: data_container,
         c: data_container,
         k: data_container,
-        species_list: List[str],
+        species_list: list[str],
         z: np.ndarray,
         D_mol: data_container,
         diagenetic_reactions: Any,
@@ -63,8 +90,9 @@ class DiageneticModelResult:
         step: int,
         total_time: float,
         df: Any = None,
-        fqfn: Optional[str] = None,
+        fqfn: str | None = None,
     ):
+        """Initialize simulation result container."""
         self.mp = mp
         self.c = c
         self.k = k
@@ -78,8 +106,15 @@ class DiageneticModelResult:
         self.df = df
         self.fqfn = fqfn
 
-    def save_csv(self) -> Tuple[Any, str]:
-        """Saves tabular concentration and rate data to CSV."""
+    def save_csv(self) -> tuple[Any, str]:
+        """Save tabular concentration and rate data to a CSV file.
+
+        Returns
+        -------
+        tuple of (pandas.DataFrame, str)
+            Dataframe of results and the fully qualified output file path.
+
+        """
         df, fqfn = save_data(
             self.mp, self.c, self.k, self.species_list, self.z, self.D_mol, self.diagenetic_reactions
         )
@@ -87,8 +122,21 @@ class DiageneticModelResult:
         self.fqfn = fqfn
         return df, fqfn
 
-    def save_state(self, filepath: Optional[Union[str, Path]] = None) -> str:
-        """Saves complete CellVariable array state to a compressed .npz archive."""
+    def save_state(self, filepath: str | Path | None = None) -> str:
+        """Save complete state variable arrays to a compressed .npz archive.
+
+        Parameters
+        ----------
+        filepath : str, Path, or None, optional
+            Destination .npz file path. If None, saves as '<plot_name>_state.npz'
+            in the model directory.
+
+        Returns
+        -------
+        str
+            Saved archive file path.
+
+        """
         if filepath is None:
             caller_dir = getattr(self.mp, "base_dir", None) or getattr(self.mp, "_caller_dir", None) or Path.cwd()
             filepath = Path(caller_dir) / f"{self.mp.plot_name}_state.npz"
@@ -96,8 +144,22 @@ class DiageneticModelResult:
         save_state(self.c, filepath_str, mp=self.mp)
         return filepath_str
 
-    def plot_summary(self, layout_file: Optional[Union[str, Path]] = None, outfile: Optional[str] = None) -> Optional[str]:
-        """Renders the final summary plot PDF."""
+    def plot_summary(self, layout_file: str | Path | None = None, outfile: str | None = None) -> str | None:
+        """Render the final summary plot PDF.
+
+        Parameters
+        ----------
+        layout_file : str, Path, or None, optional
+            Path to layout definition file (default: model's layout_file or 'plot_layout.py').
+        outfile : str or None, optional
+            Destination PDF filename. If None, defaults to '<plot_name>.pdf'.
+
+        Returns
+        -------
+        str or None
+            Path to generated PDF, or None if plotting was skipped or failed.
+
+        """
         import mantis.plot_data_new as pdn
         layout = layout_file or getattr(self.mp, "layout_file", "plot_layout.py")
         p_layout = Path(layout)
@@ -138,19 +200,59 @@ class DiageneticModelResult:
 
 
 class DiageneticModel:
-    """Declarative Diagenetic Model Runner."""
+    """Unified declarative Diagenetic Model Runner for MANTIS reaction-transport simulations.
+
+    Provides a clean, object-oriented entry point for setting up sediment columns,
+    assembling advective-diffusive-reactive partial differential equations, configuring
+    chemical equilibrium and kinetic reactions, and solving the resulting nonlinear system
+    using an implicit monolithic block Newton method.
+
+    Parameters
+    ----------
+    species : str or Path, default="species.py"
+        Path to species definition file declaring participating dissolved and solid
+        phases, diffusion coefficients, and boundary conditions.
+    reactions : str, Path, or None, default="reactions.py"
+        Path to declarative chemical reactions file containing stoichiometries and rate
+        laws. If None or empty, simulation runs in purely diffusive transport mode.
+    constants : str, Path, or None, default="reaction_constants.py"
+        Path to reaction kinetic constants and half-saturation parameters.
+    equations : str, Path, or None, optional
+        Pre-compiled equation module filename. If omitted, MANTIS automatically compiles
+        declarative reactions into an assembled system on demand.
+    limiters : str, Path, or None, optional
+        Path to custom limitation/inhibition expressions.
+    layout : str or Path, default="plot_layout.py"
+        Path to declarative plot layout specification used for live video rendering
+        and post-run PDF summaries.
+    experiment : str or None, optional
+        Simulation experiment name used as the base filename for outputs (.csv, .npz, .mp4, .pdf).
+        If omitted, inferred automatically from the caller script filename.
+    base_dir : str, Path, or None, optional
+        Root directory for resolving relative file paths. Defaults to caller script's directory.
+
+    Examples
+    --------
+    >>> from mantis import DiageneticModel
+    >>> model = DiageneticModel(species="species.py", reactions="reactions.py")
+    >>> model.configure(w="0.2 cm/yr", t_end="10 kyr", max_depth="0.5 m")
+    >>> result = model.run()
+    >>> df, csv_path = result.save_csv()
+
+    """
 
     def __init__(
         self,
-        species: Union[str, Path] = "species.py",
-        reactions: Optional[Union[str, Path]] = "reactions.py",
-        constants: Optional[Union[str, Path]] = "reaction_constants.py",
-        equations: Optional[Union[str, Path]] = None,
-        limiters: Optional[Union[str, Path]] = None,
-        layout: Union[str, Path] = "plot_layout.py",
-        experiment: Optional[str] = None,
-        base_dir: Optional[Union[str, Path]] = None,
+        species: str | Path = "species.py",
+        reactions: str | Path | None = "reactions.py",
+        constants: str | Path | None = "reaction_constants.py",
+        equations: str | Path | None = None,
+        limiters: str | Path | None = None,
+        layout: str | Path = "plot_layout.py",
+        experiment: str | None = None,
+        base_dir: str | Path | None = None,
     ):
+        """Initialize DiageneticModel instance and resolve simulation paths."""
         # 1. Determine caller directory and caller frame automatically
         caller_frame = None
         for frame_info in inspect.stack()[1:]:
@@ -210,13 +312,13 @@ class DiageneticModel:
 
         # Master parameter container
         self.mp = data_container()
-        self.p_dict: Dict[str, Any] = {}
+        self.p_dict: dict[str, Any] = {}
         self._user_configured_keys: set = set()
 
         # Default parameters
         self._init_defaults()
 
-    def _exit_with_missing_file_error(self, filename: Union[str, Path], file_description: str) -> None:
+    def _exit_with_missing_file_error(self, filename: str | Path, file_description: str) -> None:
         """Prints a user-friendly error message and exits when a simulation file cannot be found."""
         print(f"\n[MANTIS ERROR] Could not find {file_description}: '{filename}'", file=sys.stderr)
         print("Searched locations:", file=sys.stderr)
@@ -242,7 +344,7 @@ class DiageneticModel:
         if self._orig_limiters is not None and self.limiters_file is not None and not self.limiters_file.exists():
             self._exit_with_missing_file_error(self._orig_limiters, "limiters file")
 
-    def _resolve(self, path_like: Union[str, Path], fallbacks: Optional[List[str]] = None) -> Path:
+    def _resolve(self, path_like: str | Path, fallbacks: list[str] | None = None) -> Path:
         p = Path(path_like)
         # Check absolute path
         if p.is_absolute() and p.exists():
@@ -357,19 +459,67 @@ class DiageneticModel:
         return val
 
     def configure(self, **kwargs) -> DiageneticModel:
-        """Sets or overrides model configuration parameters with automatic unit handling.
+        """Set or override model configuration parameters with automatic physical unit handling.
 
-        Any parameter passed with units (as a string or Pint Quantity) is automatically
-        detected and converted to standard SI simulation units based on its physical dimensionality:
-        - [time] -> seconds (e.g. t_end='2 kyr', dt_max='1 year', dt_min='1 second')
-        - [length] -> meters (e.g. max_depth='0.5 m', initial_spacing='0.01 mm')
-        - [length] / [time] -> m/s (e.g. w='0.2 cm/yr')
-        - [length]^2 / [time] -> m^2/s (e.g. BT0='4 cm^2/year')
-        - 1 / [time] -> 1/s (e.g. BI0='0.1 /year')
-        - [substance] / [length]^3 -> mol/m^3 (e.g. concentration='0.001 umol/cm^3')
-        - [substance] / ([length]^2 * [time]) -> mol/(m^2*s) (e.g. flux='1.2 mol/(m^2*yr)')
+        Accepts simulation options across grid geometry, physical transport, adaptive time-stepping,
+        numerical solver convergence, and video recording. Any parameter passed with physical units
+        (as a string such as ``'0.5 m'``, ``'10 kyr'``, or a Pint Quantity) is automatically detected
+        and converted into canonical SI simulation units:
 
-        Nested structures (dicts, lists, tuples) are handled recursively.
+        - **Time**: converted to seconds (e.g. ``t_end='2 kyr'``, ``dt_max='1 year'``, ``dt_min='1 s'``)
+        - **Length**: converted to meters (e.g. ``max_depth='0.5 m'``, ``initial_spacing='0.01 mm'``)
+        - **Advection Velocity**: converted to m/s (e.g. ``w='0.2 cm/yr'``)
+        - **Diffusion / Bioturbation**: converted to m²/s (e.g. ``BT0='4 cm^2/year'``)
+        - **Irrigation Rate**: converted to 1/s (e.g. ``BI0='0.1 /year'``)
+        - **Concentration**: converted to mol/m³ (e.g. ``'0.001 umol/cm^3'``)
+        - **Flux**: converted to mol/(m²·s) (e.g. ``'1.2 mol/(m^2*yr)'``)
+
+        Parameters
+        ----------
+        **kwargs : Any
+            Named configuration parameters. Supported options include:
+
+            **Grid & Domain Dimensions**
+            * ``max_depth`` (float or str, default=1.0 m): Total vertical depth of the modeled sediment column.
+            * ``display_length`` (float or str, optional): Vertical column depth shown in video frames and PDF plots.
+            * ``initial_spacing`` or ``dx_min`` (float or str, default=0.1 mm): Grid resolution at the sediment-water interface.
+            * ``grid_sections`` (list of tuples): Non-uniform piecewise grid definition ``[(fraction, cells), ...]``.
+
+            **Duration & Adaptive Timestepping**
+            * ``t_end`` (float or str, default='1 kyr'): Total physical duration to simulate.
+            * ``dt_init`` (float or str, default='1 day'): Initial time step size.
+            * ``dt_min`` (float or str, default='1 minute'): Minimum allowable time step size before aborting.
+            * ``dt_max`` (float or str, default='1 year'): Maximum ceiling on adaptive time step expansion.
+            * ``dt_tolerance`` (float, default=1e-5): Error threshold controlling adaptive time step growth.
+            * ``steady_state_tolerance`` (float, default=1e-5): Convergence threshold to declare steady-state.
+
+            **Transport Processes**
+            * ``w`` (float or str, default=0.0): Sediment accumulation rate / burial velocity (e.g. ``'0.1 cm/yr'``).
+            * ``diffusive_boundary_layer`` or ``dbl`` (float or str, default=0.0): Thickness of stagnant boundary layer above SWI.
+            * ``bioturbation`` (dict): Solid-phase biodiffusion parameterization, e.g. ``{'BT0': '4 cm^2/yr', 'depth': '10 cm', 'profile': 'exponential'}``.
+            * ``bioirrigation`` (dict): Solute flushing parameterization, e.g. ``{'BI0': '2 /yr', 'depth': '5 cm', 'profile': 'exponential'}``.
+
+            **Chemical & Solver Settings**
+            * ``pH`` (float, optional): Fixed or master water-column pH.
+            * ``solver`` (str, default='monolithic'): Nonlinear solver engine (``'monolithic'``).
+            * ``newton_tol`` (float, default=1e-3): Convergence tolerance for block Newton iterations.
+            * ``newton_norm`` (str, default='linf'): Residual norm metric (``'linf'`` or ``'wrms'``).
+            * ``max_newton_iters`` (int, default=12): Maximum Newton iterations per time step.
+            * ``newton_target_optimal`` (int, default=4): Iterations target to trigger time step expansion.
+            * ``newton_max_acceptable`` (int, default=8): Iterations threshold before time step reduction.
+            * ``use_numerical_jacobian`` (bool, default=False): Fall back to finite-difference numerical Jacobian.
+            * ``check_reactant_coexistence`` (bool, default=False): Verify mutual exclusivity of designated reactants.
+
+            **Live Video Recording**
+            * ``video_dt`` (float, str, or None, default=None): Time interval between video frames (e.g. ``'10 yr'``).
+            * ``video_dpi`` (int, default=120): Output resolution for generated video frames.
+            * ``video_workers`` (int or None, optional): Background thread/process count for rendering.
+
+        Returns
+        -------
+        DiageneticModel
+            Self reference, enabling fluent chaining (e.g. ``model.configure(...).run()``).
+
         """
         self._user_configured_keys.update(kwargs.keys())
         for key, val in kwargs.items():
@@ -423,7 +573,7 @@ class DiageneticModel:
         self.mp.update(self.p_dict)
         return self
 
-    def parse_cli_args(self, args: Optional[List[str]] = None) -> None:
+    def parse_cli_args(self, args: list[str] | None = None) -> None:
         """Parses CLI arguments if requested, supporting category inspection and option overrides."""
         cur_solver = self.p_dict.get("solver", "monolithic")
         cur_tol = self.p_dict.get("newton_tol", 1e-3)
@@ -496,7 +646,7 @@ class DiageneticModel:
             nargs="?",
             const="__SHOW__",
             metavar="BACKEND",
-            help=f"Solver backend: 'monolithic' or 'coupled' (or query section: pass flag with no value)",
+            help="Solver backend: 'monolithic' or 'coupled' (or query section: pass flag with no value)",
         )
         parser.add_argument(
             "--solver-tol",
@@ -554,7 +704,7 @@ class DiageneticModel:
             nargs="?",
             const="__SHOW__",
             metavar="INTERVAL",
-            help=f"Live video recording interval, e.g. '10 year' or 'none' (or query section: pass flag with no value)",
+            help="Live video recording interval, e.g. '10 year' or 'none' (or query section: pass flag with no value)",
         )
         parser.add_argument(
             "--video-dpi",
@@ -624,7 +774,7 @@ class DiageneticModel:
         parsed, _ = parser.parse_known_args(args)
 
         # Check section queries first
-        def _print_section(title: str, rows: List[Tuple[str, Any, str]]) -> None:
+        def _print_section(title: str, rows: list[tuple[str, Any, str]]) -> None:
             print(f"\n[{self.experiment}] {title}:")
             for flag, cur_val, desc in rows:
                 print(f"  {flag:<30} : {str(cur_val):<12} ({desc})")
@@ -694,7 +844,7 @@ class DiageneticModel:
         if parsed.display_length is not None:
             self.configure(display_length=parsed.display_length)
 
-    def _load_species_definitions(self) -> Dict[str, Any]:
+    def _load_species_definitions(self) -> dict[str, Any]:
         """Loads and parses the species definitions dictionary from species.py."""
         if not self.species_file.exists():
             self._exit_with_missing_file_error(self._orig_species, "species definitions file")
@@ -717,7 +867,7 @@ class DiageneticModel:
             return True
         if hasattr(self, "reactions_file") and self.reactions_file and self.reactions_file.exists():
             try:
-                with open(self.reactions_file, "r") as f:
+                with open(self.reactions_file) as f:
                     rxn_tree = ast.parse(f.read())
                 for node in rxn_tree.body:
                     if isinstance(node, ast.Assign):
@@ -729,7 +879,7 @@ class DiageneticModel:
                 pass
         return False
 
-    def check_requires_ph(self, species_defs: Dict[str, Any], speciation_defs: Dict[str, Any]) -> Tuple[bool, str]:
+    def check_requires_ph(self, species_defs: dict[str, Any], speciation_defs: dict[str, Any]) -> tuple[bool, str]:
         """Detects whether the chemical model (species, speciation, reactions, or kinetic constants) requires pH."""
         ph_re = re.compile(r"\b(pH|Hplus|H\+)\b")
 
@@ -766,7 +916,7 @@ class DiageneticModel:
         # 3. Kinetic constants file
         if hasattr(self, "constants_file") and self.constants_file and self.constants_file.exists():
             try:
-                with open(self.constants_file, "r") as f:
+                with open(self.constants_file) as f:
                     const_tree = ast.parse(f.read())
                 for node in const_tree.body:
                     if isinstance(node, ast.FunctionDef) and node.name == "get_reaction_constants":
@@ -783,7 +933,7 @@ class DiageneticModel:
         # 4. Reactions file
         if hasattr(self, "reactions_file") and self.reactions_file and self.reactions_file.exists():
             try:
-                with open(self.reactions_file, "r") as f:
+                with open(self.reactions_file) as f:
                     rxn_tree = ast.parse(f.read())
                 for node in rxn_tree.body:
                     if isinstance(node, ast.Assign):
@@ -800,22 +950,17 @@ class DiageneticModel:
 
         return False, "no reactions or species depend on pH or Hplus"
 
-    def classify_jacobian_strategy(self) -> Tuple[bool, str]:
-        """Classifies whether the model requires the vectorized numerical Jacobian
-        or can safely and optimally use the analytical SymPy Jacobian.
+    def classify_jacobian_strategy(self) -> tuple[bool, str]:
+        """Classify whether the model requires the vectorized numerical Jacobian or analytical SymPy Jacobian.
 
         Classification Heuristic:
-          - Tier 1 (Static / Uncoupled Speciation, e.g. Velde 2016 with fixed pH):
-            All speciation fractions are constant scalars or depend only on fixed constants.
-            -> Algebraic SymPy Jacobian is mathematically exact, fastest, 0% FD error.
-          - Tier 2 (Implicit / Iterative / Coupled Speciation, e.g. SimpleFe, dynamic carbonate):
-            Speciation fractions dynamically couple multiple primary state variables,
-            or dynamic carbonate equilibrium is coupled to mineral saturation.
-            -> Vectorized Numerical Jacobian provides exact total derivatives, preventing
-               Newton divergence, dt cutbacks, and solver failure.
+        - Tier 1 (Static / Uncoupled Speciation): All speciation fractions are constant scalars or depend only on fixed constants.
+        - Tier 2 (Implicit / Iterative / Coupled Speciation): Speciation fractions dynamically couple multiple primary state variables.
 
-        Returns:
-            (requires_numerical: bool, rationale: str)
+        Returns
+        -------
+        tuple of (bool, str)
+            (requires_numerical, rationale)
         """
         species_defs = getattr(self.mp, "species_defs", {})
         speciation_defs = getattr(self.mp, "speciation", {})
@@ -894,7 +1039,7 @@ class DiageneticModel:
         # 4. Otherwise, all speciation fractions are static scalars (fixed pH, constant Kd)
         return False, "all speciation fractions are static scalars / uncoupled (analytical SymPy Jacobian is mathematically exact)"
 
-    def setup(self, plot_queue=None) -> Tuple[data_container, data_container, data_container, List[str], np.ndarray, data_container, Any]:
+    def setup(self, plot_queue=None) -> tuple[data_container, data_container, data_container, list[str], np.ndarray, data_container, Any]:
         """Assembles grid, species variables, transport coefficients, and compiles reaction equations."""
         self.validate_simulation_files()
         self.mp.update(self.p_dict)
@@ -933,7 +1078,10 @@ class DiageneticModel:
         raw_stds = getattr(self._species_mod, "isotope_standards", {})
         raw_speciation = getattr(self._species_mod, "speciation", None)
 
-        from mantis.species_parser import parse_and_validate_species_dict, validate_and_normalize_speciation
+        from mantis.species_parser import (
+            parse_and_validate_species_dict,
+            validate_and_normalize_speciation,
+        )
         species_defs, self._parsed_bc_map, iso_stds = parse_and_validate_species_dict(
             raw_species, raw_stds, ureg=self.Q_
         )
@@ -981,10 +1129,10 @@ class DiageneticModel:
 
         if is_carbonate:
             from mantis.seawater_carbonate import (
-                calc_carbonate_constants,
                 adjust_for_calcite_equilibrium,
-                solve_carbonate_speciation_from_ta_dic,
+                calc_carbonate_constants,
                 solve_carbonate_speciation_from_dic_ph,
+                solve_carbonate_speciation_from_ta_dic,
                 solve_carbonate_speciation_from_ta_ph,
             )
 
@@ -1298,15 +1446,15 @@ class DiageneticModel:
                 setattr(self.mp, k_name, k_val)
 
         # 7. Species lists & phase classification
-        species_transport: List[str] = []
-        species_all: List[str] = []
-        bc_map: Dict[str, Dict[str, Any]] = {}
+        species_transport: list[str] = []
+        species_all: list[str] = []
+        bc_map: dict[str, dict[str, Any]] = {}
         D_mol = data_container()
         c = data_container()
 
         # Dynamic speciation & phase partition calculations from species_defs
         Hplus = 10.0 ** (-float(self.mp.pH)) if self.mp.pH is not None else None
-        eval_ctx: Dict[str, Any] = {
+        eval_ctx: dict[str, Any] = {
             "k": k,
             "mp": self.mp,
             "np": np,
@@ -1395,7 +1543,6 @@ class DiageneticModel:
                             setattr(self.mp, f"{sp_keys[1].lower()}_{sp_keys[0].lower()}_alpha", val)
                             setattr(self.mp, f"{sp_keys[0].lower()}_{sp_keys[1].lower()}_alpha", 1.0 / val)
 
-
         # Initialize CellVariables
         zeros = np.zeros(self.mp.grid_points)
         T_profile = np.linspace(self.mp.temp[0], self.mp.temp[1], self.mp.grid_points)
@@ -1409,9 +1556,8 @@ class DiageneticModel:
             is_inc = meta.get("include", True)
             is_iso = "isotope_of" in meta
 
-            if is_inc:
-                if not is_iso or self.mp.isotopes:
-                    species_transport.append(sp_name)
+            if is_inc and (not is_iso or self.mp.isotopes):
+                species_transport.append(sp_name)
 
         # Build boundary conditions from strictly parsed bc_map
         bc_map = copy.deepcopy(self._parsed_bc_map)
@@ -1530,6 +1676,7 @@ class DiageneticModel:
         w_top = self.mp.w
         if hasattr(phi_val, "__getitem__") and len(phi_val) > 1 and np.ndim(self.mp.w) == 0:
             w_top = float(self.mp.w) * (1.0 - phi_bottom) / np.maximum(1.0 - phi_top, 1e-6)
+
         def _eval_init(init_raw: Any) -> Any:
             """Evaluates initial condition specifications (scalars, units, callables, or spatial expressions)."""
             if callable(init_raw):
@@ -1641,7 +1788,22 @@ class DiageneticModel:
         return self.mp, c, k, species_transport, z, D_mol, eq_mod.diagenetic_reactions
 
     def run(self, plot_queue=None, **override_kwargs) -> DiageneticModelResult:
-        """Runs the simulation and returns a DiageneticModelResult object."""
+        """Run the reactive transport simulation to completion or steady-state.
+
+        Parameters
+        ----------
+        plot_queue : multiprocessing.Queue or None, optional
+            Queue for streaming video frames to the background video renderer.
+        **override_kwargs : Any
+            Convenience overrides for model configuration parameters before running
+            (forwarded to :meth:`configure`).
+
+        Returns
+        -------
+        DiageneticModelResult
+            Results object containing state variables, parameters, grid, and output helpers.
+
+        """
         if override_kwargs:
             self.configure(**override_kwargs)
 

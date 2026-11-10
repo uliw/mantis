@@ -1,6 +1,4 @@
-"""
-Numba-accelerated numerical kernels for direct assembled reactive transport solvers.
-"""
+"""Numba-accelerated numerical kernels for direct assembled reactive transport solvers."""
 
 from __future__ import annotations
 
@@ -15,8 +13,7 @@ def solve_tridiagonal_thomas(
     out: np.ndarray,
     c_prime: np.ndarray,
 ) -> None:
-    """
-    O(N) In-place Thomas algorithm (TDMA) for tridiagonal systems in SciPy banded (1, 1) layout.
+    """O(N) In-place Thomas algorithm (TDMA) for tridiagonal systems in SciPy banded (1, 1) layout.
 
     Matrix layout in ab (shape 3, N):
       - row 0: superdiagonal (ab[0, 1:] contains A[i, i+1] for i = 0..N-2)
@@ -55,9 +52,11 @@ def compute_species_residual_wrms(
     inner_tol: float,
     atol: float,
 ) -> float:
-    """
-    Computes WRMS norm for a single species:
-        sqrt( (1/N) * sum( ( |c_curr - c_prev| / (inner_tol * |c_curr| + atol) )^2 ) )
+    r"""Compute WRMS norm for a single species.
+
+    .. math::
+
+        \sqrt{\frac{1}{N} \sum \left( \frac{|c_{\text{curr}} - c_{\text{prev}}|}{\text{inner\_tol} \cdot |c_{\text{curr}}| + \text{atol}} \right)^2}
     """
     n = len(curr_val)
     sum_sq = 0.0
@@ -84,9 +83,11 @@ def compute_species_residual_linf(
     inner_tol: float,
     atol: float,
 ) -> float:
-    """
-    Computes L-infinity norm for a single species:
-        max( |c_curr - c_prev| / (inner_tol * |c_curr| + atol) )
+    r"""Compute L-infinity norm for a single species.
+
+    .. math::
+
+        \max \frac{|c_{\text{curr}} - c_{\text{prev}}|}{\text{inner\_tol} \cdot |c_{\text{curr}}| + \text{atol}}
     """
     n = len(curr_val)
     max_ratio = 0.0
@@ -115,9 +116,9 @@ def compute_fractional_trust_region_alpha(
     atol_vec: np.ndarray,
     max_fractional_step: float = 0.5,
 ) -> float:
-    """
-    Computes a fractional step limit alpha in (0, 1] to prevent excessive
-    relative state changes in a single Newton iteration:
+    """Compute a fractional step limit alpha in (0, 1] to prevent excessive state changes.
+
+    Limits relative state changes in a single Newton iteration:
       - Depletion (delta_u < 0): bounded by max_fractional_step * (max(u, 0) + atol)
       - Growth (delta_u > 0):
           * if established (u >= atol): bounded by max_fractional_step * (u + atol)
@@ -152,9 +153,11 @@ def compute_weighted_residual_norm_wrms(
     atol_vec: np.ndarray,
     inner_tol: float,
 ) -> float:
-    """
-    Computes component-weighted RMS norm of residual R:
-        sqrt( (1 / (N * S)) * sum_{i, s} ( R_{i, s} / (inv_dt_diag_{i, s} * (inner_tol * |u_{i, s}| + atol_s)) )^2 )
+    r"""Compute component-weighted RMS norm of residual R.
+
+    .. math::
+
+        \sqrt{\frac{1}{N \cdot S} \sum_{i, s} \left( \frac{R_{i, s}}{\text{inv\_dt\_diag}_{i, s} \cdot (\text{inner\_tol} \cdot |u_{i, s}| + \text{atol}_s)} \right)^2}
     """
     N, S = R.shape
     sum_sq = 0.0
@@ -172,7 +175,6 @@ def compute_weighted_residual_norm_wrms(
     return np.sqrt(sum_sq / (N * S))
 
 
-
 @nb.njit(fastmath=True)
 def solve_block_tridiagonal_thomas(
     A: np.ndarray,
@@ -183,8 +185,7 @@ def solve_block_tridiagonal_thomas(
     C_prime: np.ndarray,
     D_prime: np.ndarray,
 ) -> None:
-    """
-    O(N * S^3) In-place Block Tridiagonal Matrix Algorithm (Block TDMA) for 1D monolithic systems.
+    """O(N * S^3) In-place Block Tridiagonal Matrix Algorithm (Block TDMA) for 1D monolithic systems.
 
     Solves the block-tridiagonal linear system:
         A_i * U_{i-1} + B_i * U_i + C_i * U_{i+1} = D_i   for i = 0 .. N-1

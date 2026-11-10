@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
-import time
 import argparse
-import pandas as pd
 import pathlib as pl
-from watchdog.observers import Observer
+import time
+
+import pandas as pd
 from watchdog.events import FileSystemEventHandler
+from watchdog.observers import Observer
 
 # Import project-specific modules
 import mantis.plot_data_new as plot_data_new
+
 
 class PlotUpdateHandler(FileSystemEventHandler):
     """Handles file system events for the results CSV."""
@@ -61,7 +63,7 @@ class PlotUpdateHandler(FileSystemEventHandler):
                 pass
 
     def trigger_plot(self):
-        print(f"[Monitor] Change detected. Updating plots...")
+        print("[Monitor] Change detected. Updating plots...")
         try:
             # Short sleep to ensure the file is fully written/closed by the simulation
             time.sleep(0.5)
@@ -149,13 +151,13 @@ def main():
     observer = Observer()
     observer.schedule(event_handler, path, recursive=False)
 
-    print(f"Starting Plot Monitor...")
+    print("Starting Plot Monitor...")
     print(f"Watching: {args.file}")
     if args.output:
         print(f"Output: {args.output}")
     print(f"Layout: {args.layout}")
     print(f"Display Length: {args.display_length}m")
-    print(f"Press Ctrl+C to stop.")
+    print("Press Ctrl+C to stop.")
 
     observer.start()
     try:

@@ -6,8 +6,7 @@ import queue
 import signal
 import subprocess
 import sys
-import time
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pandas as pd
@@ -15,21 +14,19 @@ import pandas as pd
 from mantis.live_plot_lib import BoundedVideoQueue
 
 if TYPE_CHECKING:
-    import pathlib as pl
+    pass
 
 
 def get_default_video_workers() -> int:
-    """
-    Return the default number of worker processes for parallel video rendering.
+    """Return the default number of worker processes for parallel video rendering.
     Restricted to 60% of all available CPU cores, minimum 1.
     """
     cores = os.cpu_count() or 1
     return max(1, int(cores * 0.6))
 
 
-def detect_ffmpeg_encoder(target_ext: str = ".mp4") -> Tuple[str, List[str]]:
-    """
-    Detect the most suitable FFmpeg video encoder available on the system.
+def detect_ffmpeg_encoder(target_ext: str = ".mp4") -> tuple[str, list[str]]:
+    """Detect the most suitable FFmpeg video encoder available on the system.
     Tests candidate encoders with a minimal 1-frame probe to ensure compatibility.
     Prioritizes libx264, libopenh264, mpeg4, and libvpx-vp9.
     """
@@ -100,8 +97,7 @@ def detect_ffmpeg_encoder(target_ext: str = ".mp4") -> Tuple[str, List[str]]:
 
 
 class IndexedVideoQueue:
-    """
-    Queue wrapper that intercepts put() calls from the simulation solver,
+    """Queue wrapper that intercepts put() calls from the simulation solver,
     attaches an incrementing frame index (0, 1, 2, ...), caches the latest snapshot,
     and delegates to an underlying BoundedVideoQueue.
     """
@@ -109,13 +105,13 @@ class IndexedVideoQueue:
     def __init__(self, bounded_queue: BoundedVideoQueue):
         self._bq = bounded_queue
         self._frame_idx = 0
-        self._last_snapshot: Optional[Tuple[Dict[str, np.ndarray], str]] = None
+        self._last_snapshot: tuple[dict[str, np.ndarray], str] | None = None
 
     @property
-    def last_snapshot(self) -> Optional[Tuple[Dict[str, np.ndarray], str]]:
+    def last_snapshot(self) -> tuple[dict[str, np.ndarray], str] | None:
         return self._last_snapshot
 
-    def put(self, item: Any, block: bool = True, timeout: Optional[float] = None) -> bool:
+    def put(self, item: Any, block: bool = True, timeout: float | None = None) -> bool:
         if item is None:
             return self._bq.put(None, block=block, timeout=timeout)
 
@@ -128,7 +124,7 @@ class IndexedVideoQueue:
     def put_nowait(self, item: Any) -> bool:
         return self.put(item, block=False)
 
-    def get(self, block: bool = True, timeout: Optional[float] = None) -> Any:
+    def get(self, block: bool = True, timeout: float | None = None) -> Any:
         return self._bq.get(block=block, timeout=timeout)
 
     def get_nowait(self) -> Any:
@@ -157,13 +153,12 @@ def _video_render_worker(
     worker_id: int,
     layout_path: str,
     display_length: float,
-    measured_data_path: Optional[str],
+    measured_data_path: str | None,
     dpi: int,
     task_queue: Any,
     result_queue: Any,
 ) -> None:
-    """
-    Worker process target function.
+    """Worker process target function.
     Reads (frame_idx, data, title) from task_queue, renders plot into Matplotlib Agg,
     extracts raw RGBA bytes, and pushes (frame_idx, buf, width, height) to result_queue.
     Reuses figure handle across frames for maximum speed.
@@ -185,6 +180,7 @@ def _video_render_worker(
     matplotlib.rcParams["figure.dpi"] = dpi
     matplotlib.rcParams["savefig.dpi"] = dpi
     import matplotlib.pyplot as plt
+
     import mantis.plot_data_new as plot_data_new
 
     fig = None
@@ -260,10 +256,9 @@ def _video_sequencer(
     result_queue: Any,
     stop_event: Any,
     codec_name: str,
-    codec_args: List[str],
+    codec_args: list[str],
 ) -> None:
-    """
-    Sequencer process target function.
+    """Sequencer process target function.
     Collects rendered frames from workers, reassembles them in strict sequential order
     (0, 1, 2, ...), and streams raw RGBA buffers directly into FFmpeg's stdin pipe.
     """
@@ -280,10 +275,10 @@ def _video_sequencer(
         signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 
     next_frame_idx = 0
-    pending_frames: Dict[int, Tuple[Optional[bytes], int, int]] = {}
-    ffmpeg_proc: Optional[subprocess.Popen] = None
+    pending_frames: dict[int, tuple[bytes | None, int, int]] = {}
+    ffmpeg_proc: subprocess.Popen | None = None
     workers_finished = 0
-    last_valid_buf: Optional[bytes] = None
+    last_valid_buf: bytes | None = None
     total_encoded_frames = 0
 
     def _ensure_ffmpeg(w: int, h: int) -> None:
@@ -378,8 +373,7 @@ def _video_sequencer(
 
 
 class ParallelVideoManager:
-    """
-    Manages multi-core concurrent video rendering for MANTIS.
+    """Manages multi-core concurrent video rendering for MANTIS.
     Spawns worker processes (defaulting to 60% of all CPU cores) and a sequencer process.
     Provides backpressure through an IndexedVideoQueue (default max 100 entries).
     """
@@ -389,10 +383,10 @@ class ParallelVideoManager:
         layout_path: str,
         display_length: float,
         video_path: str,
-        measured_data_path: Optional[str] = None,
+        measured_data_path: str | None = None,
         fps: int = 15,
         video_dpi: int = 120,
-        video_workers: Optional[int] = None,
+        video_workers: int | None = None,
         max_queue_size: int = 100,
         resume_threshold: int = 50,
     ):
@@ -422,8 +416,8 @@ class ParallelVideoManager:
         self._result_queue = self._ctx.Queue()
         self._stop_event = self._ctx.Event()
 
-        self._workers: List[mp.Process] = []
-        self._sequencer: Optional[mp.Process] = None
+        self._workers: list[mp.Process] = []
+        self._sequencer: mp.Process | None = None
         self._started = False
 
     @property
@@ -502,7 +496,7 @@ class ParallelVideoManager:
         if self._sequencer and self._sequencer.is_alive():
             self._sequencer.join(timeout=45)
             if self._sequencer.is_alive():
-                print(f"[ParallelVideoManager] Sequencer did not terminate; killing.", flush=True)
+                print("[ParallelVideoManager] Sequencer did not terminate; killing.", flush=True)
                 self._sequencer.terminate()
                 self._sequencer.join(timeout=2)
 

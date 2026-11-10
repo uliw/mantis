@@ -1,5 +1,4 @@
-"""
-Utility library for the mantis package.
+"""Utility library for the mantis package.
 
 This package provides a small collection of functions and a lightweight container class
 used throughout the Pyrite Burial model.
@@ -28,7 +27,9 @@ processes in geological simulations.
 """
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
+from collections.abc import Sequence
+from typing import Any
+
 import numpy as np
 
 
@@ -256,7 +257,7 @@ def diff_coeff(T, m0, m1, phi):
     return (m0 + m1 * T) * 1e-10 / (1 - np.log(phi_val**2))
 
 
-def get_delta(c, li, r, threshold: Union[float, np.ndarray, None] = 1e-6):
+def get_delta(c, li, r, threshold: float | np.ndarray | None = 1e-6):
     """Calculate the delta from the mass of light and heavy isotope.
 
     :param c: total mass/concentration
@@ -289,7 +290,7 @@ def get_delta(c, li, r, threshold: Union[float, np.ndarray, None] = 1e-6):
 
 
 def get_delta_from_concentration(
-    c, li, r, threshold: Union[float, np.ndarray, None] = 1e-6
+    c, li, r, threshold: float | np.ndarray | None = 1e-6
 ):
     """Calculate the delta from the mass of light and heavy isotope.
 
@@ -315,10 +316,10 @@ def is_solid_species(species_name: str, mp: Any = None) -> bool:
     """Determine whether a chemical species is in the solid/particulate phase.
 
     Checks (in priority order):
+
     1. mp.bc_map: if species has 'type' in ('particulate', 'solid')
     2. mp.species or mp.species_defs: if species dict has 'solid': True
-    3. Standard diagenetic species conventions (FeS, FeS2, S0, Fe3, POC are solid;
-       SO4, TS2, h2s, hs, Fe2_total, O2 are dissolved/liquid).
+    3. Standard diagenetic species conventions (FeS, FeS2, S0, Fe3, POC are solid).
     """
     if not species_name:
         return False
@@ -368,15 +369,14 @@ def get_species_delta_threshold(
     species_name: str,
     mp: Any = None,
     phi: Any = None,
-) -> Union[float, np.ndarray]:
-    """Computes concentration threshold for isotope delta calculation based on species type.
+) -> float | np.ndarray:
+    """Compute concentration threshold for isotope delta calculation based on species type.
 
     Precedence:
+
     1. Species-specific parameter: <speciesname>_delta_threshold (e.g. TS2_delta_threshold).
     2. Phase-specific override: mp.delta_threshold_solid or mp.delta_threshold_liquid.
-    3. Defaults:
-       - Liquids: 0.001 mmol/L (1 umol/L porewater).
-       - Solids: bulk-equivalent concentration: thresh_liq * phi / (1 - phi) mmol/L (solid).
+    3. Defaults: Liquids 0.001 mmol/L; solids bulk-equivalent concentration.
     """
     if not species_name:
         return 0.001
@@ -469,8 +469,7 @@ def relax_solution(curr_sol, last_sol, fraction):
 
 
 def bioturbation_profile(z, D_max, cutoff_depth, threshold=1e-12):
-    """
-    Calculate the necessary steepness.
+    """Calculate the necessary steepness.
 
     To fit a mixing profile into 'cutoff_depth', ensuring D_max at surface and
     'threshold' at cutoff.
@@ -509,8 +508,7 @@ def bioturbation_profile(z, D_max, cutoff_depth, threshold=1e-12):
 
 
 def bioturbation_profile_2(z, D_max, cutoff_depth, threshold=1e-12):
-    """
-    Generate a sigmoid mixing profile.
+    """Generate a sigmoid mixing profile.
 
     That fits EXACTLY within 'cutoff_depth'.  Calculates dynamic steepness so shallow
     depths get sharper curves automatically.
@@ -550,8 +548,7 @@ def bioturbation_profile_2(z, D_max, cutoff_depth, threshold=1e-12):
 
 
 def compute_sigmoidal_db(z, Db0, xL, xbm):
-    """
-    Compute the bio-diffusivity (Db) at a specific depth (z).
+    """Compute the bio-diffusivity (Db) at a specific depth (z).
 
     Using Equation 4 from van de Velde and Meysman (2016).
 
@@ -569,6 +566,7 @@ def compute_sigmoidal_db(z, Db0, xL, xbm):
     Returns
     -------
     float or np.ndarray: The bio-diffusivity at depth z.
+
     """
     z_cm = z * 100
     xL_cm = xL * 100
@@ -586,8 +584,7 @@ def compute_sigmoidal_db(z, Db0, xL, xbm):
 
 
 def compute_exponential_db(z, Db0, x_atten):
-    """
-    Compute the bio-diffusivity (Db) with exponential attenuation with depth.
+    """Compute the bio-diffusivity (Db) with exponential attenuation with depth.
 
     Db(z) = Db0 * exp(-z / x_atten)
 
@@ -604,6 +601,7 @@ def compute_exponential_db(z, Db0, x_atten):
     -------
     float or np.ndarray
         The bio-diffusivity at depth z.
+
     """
     if Db0 == 0.0 or x_atten <= 0.0:
         return np.zeros_like(z, dtype=np.float64)
@@ -612,8 +610,7 @@ def compute_exponential_db(z, Db0, x_atten):
 
 
 def compute_bio_irrigation_alpha(z, alpha0, x_irr):
-    """
-    Compute the bio-irrigation coefficient (alpha) at a specific depth (z).
+    """Compute the bio-irrigation coefficient (alpha) at a specific depth (z).
 
     Using Equation 6 from van de Velde and Meysman (2016).
 
@@ -630,6 +627,7 @@ def compute_bio_irrigation_alpha(z, alpha0, x_irr):
     -------
     float or np.ndarray
         The irrigation intensity at depth z.
+
     """
     if alpha0 == 0.0 or x_irr <= 0.0:
         return np.zeros_like(z, dtype=np.float64)
@@ -642,23 +640,25 @@ def compute_bio_irrigation_alpha(z, alpha0, x_irr):
 
 
 def make_grid(L, initial_spacing, max_spacing, r=1.05):
-    """
-    Construct a 1D grid driven by spacing constraints.
+    """Construct a 1D grid driven by spacing constraints.
 
     Growth is geometric (at rate r) until max_spacing is reached.
 
-    Args:
-    -----
-        L (float): Total length of the domain (max depth).
-        initial_spacing (float): The size of the first cell (at z=0).
-        max_spacing (float): Maximum cell size allowed.
-        r (float): Geometric growth rate (default 1.05).
+    Parameters
+    ----------
+    L : float
+        Total length of the domain (max depth).
+    initial_spacing : float
+        The size of the first cell (at z=0).
+    max_spacing : float
+        Maximum cell size allowed.
+    r : float, default=1.05
+        Geometric growth rate.
 
     Returns
     -------
-        tuple (mesh, z_centers)
-            mesh: A Mesh1D object.
-            z_centers: A numpy array of cell center coordinates.
+    tuple of (Mesh1D, numpy.ndarray)
+        (mesh, z_centers)
     """
     if initial_spacing >= max_spacing:
         initial_spacing = max_spacing
@@ -694,8 +694,7 @@ def make_grid(L, initial_spacing, max_spacing, r=1.05):
 def save_data(
     mp, c, k, species_list, z, D_mol, diagenetic_reactions, equilibrium_reactions=None
 ):
-    """
-    Save the model results to a CSV file (Synchronous).
+    """Save the model results to a CSV file (Synchronous).
     """
     c_numpy = data_container(
         {s: ArrayProxy(val.value if hasattr(val, "value") else val) for s, val in c.items()}
@@ -710,8 +709,9 @@ def save_data(
 
 def _save_data_to_disk(mp, c, k, species_list, z, D_mol, f_final):
     """Internal helper to write data to disk."""
-    import pandas as pd
     import pathlib as pl
+
+    import pandas as pd
 
     update_all_species(c, mp)
 
@@ -846,8 +846,7 @@ def _save_data_to_disk(mp, c, k, species_list, z, D_mol, f_final):
 
 
 def save_state(c, filename, mp=None):
-    """
-    Save the current concentration profiles (state) to a compressed numpy file.
+    """Save the current concentration profiles (state) to a compressed numpy file.
 
     :param c: data_container containing species as CellVariables
     :param filename: Path to save the NPZ file
@@ -877,8 +876,7 @@ def save_state(c, filename, mp=None):
 
 
 def read_state(c, filename):
-    """
-    Read concentration profiles (state) from a compressed numpy file and update c.
+    """Read concentration profiles (state) from a compressed numpy file and update c.
 
     :param c: data_container containing species as CellVariables
     :param filename: Path to the NPZ file
@@ -909,10 +907,9 @@ def read_state(c, filename):
 def safe_ratio(
     num: np.ndarray,
     den: np.ndarray,
-    fill: Union[float, int],
+    fill: float | int,
 ) -> np.ndarray:
-    """
-    Return ``num / den`` element‑wise while protecting against division‑by‑zero.
+    """Return ``num / den`` element‑wise while protecting against division‑by‑zero.
 
     Parameters
     ----------
@@ -936,6 +933,7 @@ def safe_ratio(
       creation of intermediate infinities and suppresses the runtime warning.
     * The output array is allocated with ``np.empty_like(num, dtype=float)`` so
       the result is always a floating‑point array, even if the inputs are integer.
+
     """
     # Ensure float output – division of ints would truncate otherwise
     out = np.empty_like(num, dtype=float)
@@ -949,8 +947,7 @@ def safe_ratio(
 
 
 def calculate_k_iron_reduction(Fe3, h2s):
-    """
-    Calculates the rate constant k_FeOx-SII for an array of ratios.
+    """Calculates the rate constant k_FeOx-SII for an array of ratios.
     Fe3+/H2S
 
     Based on Equation 46 and 47 from Halevy et al. (2023).
@@ -975,8 +972,7 @@ def calculate_k_iron_reduction(Fe3, h2s):
 
 
 def wt_percent_to_solid_conc(wp, mw, d, phi):
-    """
-    Convert a weight‑percent (dry mass) of a solid component to its
+    """Convert a weight‑percent (dry mass) of a solid component to its
     concentration in bulk solution (mmol L⁻¹, i.e. mol m⁻³).
 
     Parameters
@@ -999,6 +995,7 @@ def wt_percent_to_solid_conc(wp, mw, d, phi):
     -----
     The conversion assumes a representative bulk volume of 1 m³.
     1 m³ = 1 000 000 cm³, hence the factor 1e6 in the formula.
+
     """
     # Ensure inputs are NumPy arrays for broadcasting (works also for scalars)
     wp = np.asarray(wp, dtype=float)
@@ -1023,8 +1020,7 @@ def wt_percent_to_solid_conc(wp, mw, d, phi):
 
 
 def solid_conc_to_umol_per_g(C_solid, d):
-    """
-    Convert a concentration that is expressed per unit solid volume
+    """Convert a concentration that is expressed per unit solid volume
     (mmol L⁻¹ solid) to mol/dry weight.
 
     Parameters
@@ -1040,14 +1036,13 @@ def solid_conc_to_umol_per_g(C_solid, d):
     -------
     umol_gram : float or np.ndarray
         umol/g *dry* sediment
-    """
 
+    """
     return C_solid / d
 
 
 def solid_conc_to_wt_percent(C_solid, mw, d, phi):
-    """
-    Convert a concentration that is expressed per unit solid volume
+    """Convert a concentration that is expressed per unit solid volume
     (mmol L⁻¹ solid) to a weight‑percent of the dry sediment matrix.
 
     Parameters
@@ -1083,12 +1078,13 @@ def solid_conc_to_wt_percent(C_solid, mw, d, phi):
     3. Dry bulk density of the sediment:
        rho_dry = d * (1‑phi) * 1e6  [g m⁻³].
 
-    4. Weight fraction = m_sol / rho_dry, then *100 for wt %.
+    4. Weight fraction = m_sol / rho_dry, then multiplied by 100 for wt%.
 
     Because the factor (1‑phi) appears in both numerator and denominator,
     it cancels analytically, leaving a result that is independent of porosity.
     The implementation keeps the full expression for clarity and to
     guard against accidental misuse.
+
     """
     # -----------------------------------------------------------------
     # 1. Input handling / validation
@@ -1114,8 +1110,7 @@ def solid_conc_to_wt_percent(C_solid, mw, d, phi):
 
 
 def liquid_conc_to_wt_percent(C_pw, mw, d, phi):
-    """
-    Convert a dissolved‑species concentration expressed as
+    """Convert a dissolved‑species concentration expressed as
     mmol L⁻¹ of pore‑water to a weight‑percentage of the dry sediment
     (wt % dry‑mass).
 
@@ -1161,6 +1156,7 @@ def liquid_conc_to_wt_percent(C_pw, mw, d, phi):
 
     The function is fully vectorised (accepts NumPy arrays) and
     performs basic input validation.
+
     """
     # -----------------------------------------------------------------
     # 1. Input validation
@@ -1186,8 +1182,7 @@ def liquid_conc_to_wt_percent(C_pw, mw, d, phi):
 
 
 def solid_conc_to_wt_percent_old(C_bulk, mw, d, phi):
-    """
-    Convert a bulk concentration (mmol L⁻¹ ≡ mol m⁻³) back to weight
+    """Convert a bulk concentration (mmol L⁻¹ ≡ mol m⁻³) back to weight
     percentage of the component in the dry solid matrix.
 
     Parameters
@@ -1205,6 +1200,7 @@ def solid_conc_to_wt_percent_old(C_bulk, mw, d, phi):
     -------
     wp : float or np.ndarray
         Weight percentage (0–100 %) of the component in the dry mass.
+
     """
     C_bulk = np.asarray(C_bulk, dtype=float)
     phi = np.asarray(phi, dtype=float)
@@ -1265,7 +1261,7 @@ def check_peclet_numbers(mesh, mp, D_mol, species_list, bc_map):
             if max_pe > 2:
                 print(f"Species: {species:10} | Max Pe: {max_pe:.2f}")
                 print(
-                    f"  --> WARNING: Pe > 2. Numerical dispersion/oscillations likely."
+                    "  --> WARNING: Pe > 2. Numerical dispersion/oscillations likely."
                 )
 
 
@@ -1295,13 +1291,7 @@ def check_reactant_coexistence(
     reaction_pairs : list of dict, optional
         Custom list of reaction definitions to check. If None, default diagenetic
         redox/precipitation pairs are checked (TS2+O2, fe2+O2, fe2+TS2, Fe3+TS2, CH4+SO4).
-        Each dict can specify:
-            - 'name': str, human-readable name of reaction
-            - 'sp_A': str, reactant A species name or alias
-            - 'sp_B': str, reactant B species name or alias
-            - 'k': float (optional), rate constant (phase/model units)
-            - 'k_key': str (optional), attribute name in k object
-            - 'D_eff': float (optional), effective diffusion coefficient (m^2/s)
+        Each dict can specify: 'name', 'sp_A', 'sp_B', 'k', 'k_key', 'D_eff'.
     k : object or dict, optional
         Reaction constants container or dictionary.
     D_mol : object or dict, optional
@@ -1317,6 +1307,7 @@ def check_reactant_coexistence(
     -------
     list of dict
         Diagnostic report for each active reaction front found.
+
     """
     # 1. Extract coordinates and cell widths
     if hasattr(mesh_or_z, "dx") and hasattr(mesh_or_z, "cellCenters"):
@@ -1596,8 +1587,7 @@ def save_data_async(
     current_dt,
     title=None,
 ) -> None:
-    """
-    Schedule a background write of model results to CSV and return immediately.
+    """Schedule a background write of model results to CSV and return immediately.
     """
     # 1. Capture current rates in the main thread (FiPy objects aren't thread-safe)
     c_numpy = data_container(
@@ -1748,29 +1738,28 @@ def _geometric_progression_section(z0: float, z1: float, dz0: float, dz1: float)
 
 
 def make_grid_from_sections(
-    sections: Union[List, Tuple, np.ndarray],
+    sections: list | tuple | np.ndarray,
     smoothing: str = "geometric",
     smooth_discontinuities: bool = True,
     verbose: bool = True,
-) -> Tuple[Mesh1D, np.ndarray]:
+) -> tuple[Mesh1D, np.ndarray]:
     """Construct a 1D non-uniform mesh from one or more contiguous sections.
 
-    Each section is defined as:
-        [start, stop, initial_dz, final_dz]
+    Parameters
+    ----------
+    sections : list, tuple, or numpy.ndarray
+        List of sections, where each section is ``[start, stop, initial_dz, final_dz]``.
+    smoothing : str, default='geometric'
+        'geometric' for geometric progression per section, or 'spline' for monotonic PCHIP.
+    smooth_discontinuities : bool, default=True
+        Automatically blends across boundaries where final_dz != initial_dz.
+    verbose : bool, default=True
+        Whether to print grid summary.
 
-    Args:
-        sections: List of sections, where each section is [start, stop, initial_dz, final_dz].
-            Values can be numbers (meters) or strings with physical units (e.g. '0 cm', '1 mm', '50 um').
-        smoothing: 'geometric' (default) for exact geometric progression per section,
-            or 'spline' for monotonic PCHIP spline interpolation across knots.
-        smooth_discontinuities: If True (default), automatically blends across any boundary
-            where final_dz of section k != initial_dz of section k+1.
-        verbose: If True, prints grid summary.
-
-    Returns:
-        tuple (mesh, z_centers):
-            mesh: A Mesh1D object with cell faces, volumes, and coordinates.
-            z_centers: A 1D numpy array of cell center coordinates.
+    Returns
+    -------
+    tuple of (Mesh1D, numpy.ndarray)
+        (mesh, z_centers)
     """
     if not isinstance(sections, (list, tuple, np.ndarray)) or len(sections) == 0:
         raise ValueError(
@@ -1817,8 +1806,8 @@ def make_grid_from_sections(
         return mesh, mesh.cellCenters[0]
 
     if smoothing == "spline":
-        from scipy.interpolate import PchipInterpolator
         from scipy.integrate import cumulative_trapezoid
+        from scipy.interpolate import PchipInterpolator
 
         knots_z = []
         knots_log_dz = []
@@ -1850,10 +1839,7 @@ def make_grid_from_sections(
                 else:
                     knots_z.append(z0)
                     knots_log_dz.append(np.log(dz0))
-            if i == len(cleaned) - 1:
-                knots_z.append(z1)
-                knots_log_dz.append(np.log(dz1))
-            elif not np.isclose(dz0, dz1, rtol=1e-4):
+            if i == len(cleaned) - 1 or not np.isclose(dz0, dz1, rtol=1e-4):
                 knots_z.append(z1)
                 knots_log_dz.append(np.log(dz1))
 
@@ -1945,20 +1931,27 @@ def make_grid2(
 ):
     """Build a variable distance mesh.
 
-    The mesh will decrease from initial_spacing to reaction_zone_spacing, and then increases to max_spacing below the reaction zone. The reaction zone depth interval is given by the reaction_zone tuple e.g. (0.5, 1)
+    The mesh will decrease from initial_spacing to reaction_zone_spacing, and then increases to max_spacing below the reaction zone.
 
-    Args:
-    -----
-        L (float): Total length of the domain (max depth).
-        initial_spacing (float): The size of the first cell (at z=0).
-        max_spacing (float): Maximum cell size allowed.
-        r (float): Geometric growth rate (default 1.05).
+    Parameters
+    ----------
+    L : float
+        Total length of the domain (max depth).
+    initial_spacing : float
+        The size of the first cell (at z=0).
+    reaction_zone_spacing : float
+        Cell spacing within the target reaction zone.
+    max_spacing : float
+        Maximum cell size allowed.
+    reaction_zone : tuple
+        Reaction zone depth interval (e.g. `(0.5, 1.0)`).
+    r : float, default=1.05
+        Geometric growth rate.
 
-    Returns:
+    Returns
     -------
-        tuple (mesh, z_centers)
-            mesh: A Mesh1D object.
-            z_centers: A numpy array of cell center coordinates.
+    tuple of (Mesh1D, numpy.ndarray)
+        (mesh, z_centers)
     """
     rz_start, rz_end = reaction_zone
     dx_list = []
@@ -2015,10 +2008,10 @@ def make_grid2(
 def get_total_delta(
     c: Any,
     mp: Any,
-    species: Union[str, Sequence[str], None] = "SO4, TS2, FeS",
-    isotope_standard: Optional[Union[str, float]] = None,
-    index: Optional[int] = -1,
-    isotope_standart: Optional[Union[str, float]] = None,
+    species: str | Sequence[str] | None = "SO4, TS2, FeS",
+    isotope_standard: str | float | None = None,
+    index: int | None = -1,
+    isotope_standart: str | float | None = None,
     **kwargs: Any,
 ) -> float:
     """Calculate the total isotope delta (e.g. for buried species at boundary or whole column).
@@ -2058,6 +2051,7 @@ def get_total_delta(
     -------
     float or np.ndarray
         Calculated total delta value (permil / mUr).
+
     """
     # Backward compatibility: if an int or index-like object was passed as 3rd positional argument
     if isinstance(species, (int, np.integer)) and not isinstance(species, bool):
@@ -2100,7 +2094,7 @@ def get_total_delta(
                 if hasattr(mp, std_arg):
                     std_ratio = float(getattr(mp, std_arg))
                 elif std_arg.upper() in ("S", "VCDT") and hasattr(mp, "VCDT"):
-                    std_ratio = float(getattr(mp, "VCDT"))
+                    std_ratio = float(mp.VCDT)
 
     if std_ratio is None:
         raise ValueError(
@@ -2145,7 +2139,7 @@ def get_total_delta(
             val = val.value
         return val
 
-    def _extract_at_index(val: Any, idx: Optional[int]) -> Any:
+    def _extract_at_index(val: Any, idx: int | None) -> Any:
         if val is None:
             return None
         if idx is not None and hasattr(val, "__getitem__"):
@@ -2239,9 +2233,7 @@ def get_total_delta(
         )
 
     delta = get_delta(s_tot, s_iso, std_ratio)
-    if hasattr(delta, "shape") and delta.shape == ():
-        return float(delta)
-    elif isinstance(delta, (float, int, np.floating, np.integer)):
+    if hasattr(delta, "shape") and delta.shape == () or isinstance(delta, (float, int, np.floating, np.integer)):
         return float(delta)
     return delta
 
@@ -2318,10 +2310,9 @@ def add_monod_sink(
     """Add a Monod consumption term: R = multiplier * R_max * C / (C + K_m).
 
     Supports three linearization schemes:
-    - 'picard': Secant Picard linearization (unconditional positivity, matches legacy).
-    - 'newton': Tangent Newton-Raphson linearization (quadratic convergence).
-    - 'hybrid': Safeguarded Newton: Newton for C > K_m (zero-order regime),
-                smoothly reverting to Picard for C <= K_m (near-zero first-order regime).
+    * 'picard': Secant Picard linearization (unconditional positivity, matches legacy).
+    * 'newton': Tangent Newton-Raphson linearization (quadratic convergence).
+    * 'hybrid': Safeguarded Newton: Newton for C > K_m (zero-order regime), smoothly reverting to Picard for C <= K_m.
     """
     phi = mp.phi
     fac = (1.0 - phi) if has_solid else phi
@@ -2380,11 +2371,10 @@ def add_monod_sink(
 
 
 def smooth_ramp(x, eps=0.02):
-    """C1 continuous smooth ramp function:
-    Approximates max(x, 0) with continuous value and continuous first derivative:
-        S_eps(x) = 0                       for x <= -eps
-                 = (x + eps)^2 / (4 * eps) for -eps < x < eps
-                 = x                       for x >= eps
+    """Evaluate C1 continuous smooth ramp function.
+
+    Approximates ``max(x, 0)`` with continuous value and continuous first derivative:
+    ``S_eps(x) = 0 for x <= -eps; (x + eps)^2 / (4 * eps) for -eps < x < eps; x for x >= eps``.
     Eliminates discontinuous operator jumps across phase change boundaries (e.g. Omega = 1).
     """
     quad = (x + eps) * (x + eps) / (4.0 * eps)
@@ -2542,8 +2532,7 @@ def add_coupled_reaction(
 
 
 def calculate_fractionated_rate_coeff(coeff_total, c_total, c_iso, alpha, eps=1e-20):
-    """
-    Calculate the fractionated isotope rate coefficient for any light/bulk isotope pair.
+    """Calculate the fractionated isotope rate coefficient for any light/bulk isotope pair.
     """
     c_tot_np = np.asarray(c_total)
     c_iso_np = np.asarray(c_iso)
@@ -2563,8 +2552,7 @@ calculate_fractionated_coeff_32 = calculate_fractionated_rate_coeff
 def partition_equilibrium_isotope(
     c_iso, frac_target, frac_other, alpha_eq, eps=1e-30
 ):
-    """
-    Calculate the concentration of the isotope in a partitioned species
+    """Calculate the concentration of the isotope in a partitioned species
     under equilibrium fractionation.
     """
     denom = frac_target + alpha_eq * frac_other + eps
@@ -2572,7 +2560,6 @@ def partition_equilibrium_isotope(
 
 
 partition_equilibrium_isotope_32 = partition_equilibrium_isotope
-
 
 
 def compute_ph_from_ta_dic(ta: float, dic: float, mp: Any = None) -> float:
@@ -2614,13 +2601,12 @@ def compute_dic_from_ph_ta(pH: float, ta: float, mp: Any = None) -> float:
 def compute_calcite_equilibrium(dic: float, ca2: float, mp: Any = None) -> tuple[float, float, float]:
     """Calculate equilibrium pH, TA, and [CO32-] at calcite saturation (Omega_calcite = 1.0).
 
-    Given [Ca2+] and Ksp_calcite:
-        [CO32-]_eq = Ksp_calcite / [Ca2+]
+    Given [Ca2+] and Ksp_calcite: [CO32-]_eq = Ksp_calcite / [Ca2+].
     Then solves for [H+] such that DIC * alpha2 = [CO32-]_eq.
 
     Returns
     -------
-    tuple[float, float, float]
+    tuple of (float, float, float)
         (pH_eq, ta_eq, co3_eq)
     """
     pK1 = getattr(mp, "pK1_carb", 5.86) if mp is not None else 5.86
@@ -2670,6 +2656,7 @@ def compute_carbonate_speciation_from_ph_dic(pH: float, dic: float, mp: Any = No
     -------
     tuple[float, float, float, float]
         (ta, co3, hco3, co2) in same concentration units as dic.
+
     """
     pK1 = getattr(mp, "pK1_carb", 5.86) if mp is not None else 5.86
     pK2 = getattr(mp, "pK2_carb", 8.92) if mp is not None else 8.92
@@ -2683,7 +2670,6 @@ def compute_carbonate_speciation_from_ph_dic(pH: float, dic: float, mp: Any = No
     co2 = dic * (h_plus**2) / denom
     ta = hco3 + 2.0 * co3
     return float(ta), float(co3), float(hco3), float(co2)
-
 
 
 def compute_carbonate_speciation(c: Any, mp: Any) -> None:
@@ -2969,7 +2955,7 @@ def update_all_species(c: Any, mp: Any) -> None:
                 if sp_name == "Fe2_liq" and hasattr(mp, "fe2_liq_frac"):
                     child_val = parent_val * np.asarray(mp.fe2_liq_frac, dtype=np.float64)
                 elif sp_name in ("Fe2_dis", "Fe2_dissolved") and hasattr(c, "POC"):
-                    poc_arr = get_v(getattr(c, "POC"))
+                    poc_arr = get_v(c.POC)
                     dstopw = (1.0 - phi_val) / np.maximum(phi_val, 1e-6)
                     k_ads = float(getattr(mp, "KFe_ads", 0.001))
                     ads_fac = 1.0 + k_ads * poc_arr * dstopw
@@ -3174,11 +3160,11 @@ def compute_porosity_profile(
     z_half: float | str | None = None,
     z_decay: float | str | None = None,
 ) -> np.ndarray:
-    """Calculates exponential sediment porosity profile with depth.
+    """Calculate exponential sediment porosity profile with depth.
 
     Porosity decreases exponentially from phi_top at the sediment-water interface (z=0)
     towards an asymptotic baseline phi_bottom at depth:
-        phi(z) = phi_bottom + (phi_top - phi_bottom) * exp(-z / z_decay)
+    ``phi(z) = phi_bottom + (phi_top - phi_bottom) * exp(-z / z_decay)``
 
     Parameters
     ----------
@@ -3199,6 +3185,7 @@ def compute_porosity_profile(
     -------
     np.ndarray
         Porosity profile across depth coordinates z.
+
     """
     import pint
     ureg = pint.UnitRegistry()
@@ -3228,16 +3215,16 @@ def compute_sediment_age(
     phi: Any = None,
     Db: Any = None,
 ) -> np.ndarray:
-    """Calculates steady-state mean sediment age profile A(z) [yr].
+    """Calculate steady-state mean sediment age profile A(z) [yr].
 
     Solves the 1D advective-diffusive aging equation for solid sediment particles:
-        d/dz [ -(1 - phi) * Db * dA/dz + (1 - phi) * vs * A ] = 1 - phi
+    ``d/dz [ -(1 - phi) * Db * dA/dz + (1 - phi) * vs * A ] = 1 - phi``
 
     Physical considerations:
-    - Bioturbation (Db) mixes solid sediment grains, broadening particle age distributions
-      and increasing the mean age of particles near the sediment-water interface (A ~ Lb / w).
+
+    - Bioturbation (Db) mixes solid sediment grains, broadening particle age distributions.
     - Bioirrigation affects only dissolved solute flushing and does not alter solid particle age.
-    - If Db is None or 0, evaluates pure advective burial: A(z) = integral( dz' / vs(z') ).
+    - If Db is None or 0, evaluates pure advective burial.
     - Compaction is incorporated through the solid volume fraction (1 - phi).
 
     Parameters
@@ -3256,6 +3243,7 @@ def compute_sediment_age(
     -------
     np.ndarray
         Mean sediment age profile A(z) in [yr].
+
     """
     z_arr = np.asarray(z.value if hasattr(z, "value") else z, dtype=np.float64)
     N = len(z_arr)
@@ -3369,6 +3357,7 @@ def compute_apparent_rate_constant(
     -------
     np.ndarray
         Apparent degradation rate constant profile in SI units [1/s].
+
     """
     age_arr = np.asarray(age.value if hasattr(age, "value") else age, dtype=np.float64)
     sec_per_yr = 365.25 * 86400.0
@@ -3493,12 +3482,12 @@ def sed_age(
     phi: Any = None,
     Db: Any = None,
 ) -> AgeProfile:
-    """Creates a sediment-age dependent profile for organic matter reaction rate constants.
+    """Create a sediment-age dependent profile for organic matter reaction rate constants.
 
     Supports two operation modes:
-    - mode="relative": Dimensionless attenuation factor ((age + a0) / a0)**(-b) with surface value 1.0.
-      Used e.g. as "age * 0.01 1/year".
-    - mode="direct": Direct Middelburg apparent degradation rate constant [1/s]: a * (age + a0)**(-b).
+
+    * mode="relative": Dimensionless attenuation factor ((age + a0) / a0)**(-b) with surface value 1.0.
+    * mode="direct": Direct Middelburg apparent degradation rate constant [1/s]: a * (age + a0)**(-b).
 
     Parameters
     ----------
@@ -3523,6 +3512,7 @@ def sed_age(
     -------
     AgeProfile
         A profile proxy that scales reaction rate constants with depth/age.
+
     """
     profile = AgeProfile(mode=mode, a0=a0, a=a, b=b, z=z, w=w, phi=phi, Db=Db)
     _ActiveAgeContext.last_profile = profile
@@ -3605,9 +3595,11 @@ def convert_reaction_constants(
     ------
     ValueError
         If pint cannot parse or convert a unit string, with the file and line number.
+
     """
     import inspect
     import re
+
     import pint
 
     ureg = pint.UnitRegistry()

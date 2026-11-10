@@ -8,20 +8,22 @@ plot_description dictionary for complete control over plot structure.
 It also supports overlaying measured data from a CSV file and loading plot
 layouts dynamically from external Python files.
 
-Basic Usage:
------------
+Examples
+--------
+Basic Usage::
+
     import plot_data_new
     import pandas as pd
 
     df = pd.read_csv("model_output.csv")
     plot_data_new.plot(df, display_length=4, outfile="output.pdf")
 
-Overlaying Measured Data:
-------------------------
+Overlaying Measured Data::
+
     plot_data_new.plot(df, 4, "output.pdf", measured_data_path="measured.csv")
 
-Custom Plot Description:
------------------------
+Custom Plot Description::
+
     plot_description = {
         "first_subplot": {
             "xaxis": [df.z, "Depth [m]"],
@@ -32,10 +34,11 @@ Custom Plot Description:
             "left_ylabel": "Concentration [mmol/l]",
             "right": [[df.c_o2, "O2 [μmol]", {"color": "green"}]],
             "right_ylabel": "O2 [μmol/l]",
-            "options-left": ["set_ylim(-55, 30)", "exclude_y(-4, 20)"],  # Broken y-axis & methods
+            "options-left": ["set_ylim(-55, 30)", "exclude_y(-4, 20)"],
         },
     }
     plot_data_new.plot(df, 10, "output.pdf", plot_description=plot_description)
+
 """
 
 import argparse
@@ -76,37 +79,46 @@ MAX_RIGHT_AXES = 10
 
 class SpecConfig(dict):
     """Base dictionary wrapper for declarative plot specifications."""
+
     kind = "generic"
 
     def __new__(cls, *args, **kwargs):
+        """Construct new instance or wrap list of specification dictionaries."""
         if len(args) == 1 and isinstance(args[0], (list, tuple)):
             # If user passed a list of spec dicts, wrap each one
             return [cls(item) for item in args[0]]
         return super().__new__(cls)
 
     def __init__(self, *args, **kwargs):
+        """Initialize declarative spec dictionary with kind metadata."""
         if len(args) == 1 and isinstance(args[0], (list, tuple)):
             return
         super().__init__(*args, **kwargs)
         self["_kind"] = getattr(self, "kind", "generic")
 
 
-
 class liquid_species(SpecConfig):
+    """Declarative plot configuration for dissolved porewater solutes."""
+
     kind = "liquid"
 
 
 class solid_species(SpecConfig):
+    """Declarative plot configuration for solid sediment minerals."""
+
     kind = "solid"
 
 
 class reaction_rates(SpecConfig):
+    """Declarative plot configuration for reaction kinetic rates."""
+
     kind = "reaction_rates"
 
 
 class isotopes(SpecConfig):
-    kind = "isotopes"
+    """Declarative plot configuration for isotopic delta signatures."""
 
+    kind = "isotopes"
 
 
 def plot(
@@ -120,17 +132,36 @@ def plot(
     keep_open=False,
     title=None,
 ):
-    """Plot data dynamically based on plot_description.
+    """Plot sediment geochemical profiles dynamically based on a layout description.
 
-    Args
-    ----
-        df: DataFrame with data to plot
-        display_length: Length of x-axis to display
-        outfile: Output file path
-        show: Whether to show the plot
-        plot_description: Dictionary describing plot structure. If None, uses default structure.
-        measured_data_path: Path to CSV containing measured data to overlay as scatter plots.
-        fig_handle: Optional existing figure handle to reuse.
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Simulation output dataframe containing depth (`z`) and chemical concentrations/rates.
+    display_length : float
+        Maximum sediment depth to display on the profile axis [m].
+    outfile : str
+        Output file path for the rendered figure (e.g. `'output.pdf'`).
+    show : bool, default=True
+        Whether to display the plot interactively using `plt.show()`.
+    plot_description : dict or None, optional
+        Dictionary mapping subplot identifiers to axis configurations and series definitions.
+        If None, generates an automated default overview plot for all present species.
+    measured_data_path : str, Path, or None, optional
+        Optional path to a CSV file of empirical field or lab measurements to overlay
+        as scatter points on the simulated continuous profiles.
+    fig_handle : matplotlib.figure.Figure or None, optional
+        Optional existing matplotlib figure to clear and reuse (e.g. during live video frame rendering).
+    keep_open : bool, default=False
+        If True, prevents closing the matplotlib figure handle upon return.
+    title : str or None, optional
+        Title string displayed at the top of the plot.
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+        The rendered matplotlib Figure instance.
+
     """
     # Use default plot structure if none provided
     if plot_description is None:
@@ -377,16 +408,16 @@ def plot(
 
 
 def _load_measured_data(measured_data_path):
-    """
-    Load measured data from a CSV file.
+    """Load measured data from a CSV file.
 
-    Args
+    Args:
     ----
     measured_data_path: Path to the CSV file.
 
-    Returns
+    Returns:
     -------
     pd.DataFrame or None: Loaded data or None if path not provided/invalid.
+
     """
     if not measured_data_path:
         return None
@@ -399,21 +430,19 @@ def _load_measured_data(measured_data_path):
     return None
 
 
-
-
 def _setup_subplot_axes(ax_main, subplot_config):
-    """
-    Configure twin axes for a subplot based on configuration.
+    """Configure twin axes for a subplot based on configuration.
     Series under the same key share a twin axis.
 
-    Args
+    Args:
     ----
     ax_main: The primary matplotlib axis.
     subplot_config: Configuration dictionary for this subplot.
 
-    Returns
+    Returns:
     -------
     tuple: (ax_main, right_axes_list) where right_axes_list is [(ax, config_key, series_idx, series), ...]
+
     """
     right_axes = []
     current_axis_idx = 0
@@ -446,17 +475,17 @@ def _setup_subplot_axes(ax_main, subplot_config):
 
 
 def _get_xaxis_data(df, subplot_config):
-    """
-    Get x-axis data and label from subplot configuration.
+    """Get x-axis data and label from subplot configuration.
 
-    Args
+    Args:
     ----
     df: Data source.
     subplot_config: Subplot configuration.
 
-    Returns
+    Returns:
     -------
     tuple: (x_data, x_label)
+
     """
     xaxis_config = subplot_config.get("xaxis")
     if xaxis_config is None:
@@ -470,19 +499,19 @@ def _get_xaxis_data(df, subplot_config):
 
 
 def _draw_series(ax, x_data, series_list, df2):
-    """
-    Draw lines and measured scatter points on an axis.
+    """Draw lines and measured scatter points on an axis.
 
-    Args
+    Args:
     ----
     ax: Matplotlib axis.
     x_data: default x-axis data.
     series_list: List of series configurations.
     df2: Measured data DataFrame.
 
-    Returns
+    Returns:
     -------
     tuple: (lines, labels)
+
     """
     lines = []
     labels = []
@@ -546,14 +575,14 @@ def _draw_series(ax, x_data, series_list, df2):
 
 
 def _add_unified_legend(ax_main, right_axes, subplot_config):
-    """
-    Collect all labels from axes and add a unified legend.
+    """Collect all labels from axes and add a unified legend.
 
-    Args
+    Args:
     ----
     ax_main: Primary axis.
     right_axes: List of twin axes.
     subplot_config: Subplot configuration.
+
     """
     if not subplot_config.get("legend", True):
         return
@@ -606,14 +635,14 @@ def _add_unified_legend(ax_main, right_axes, subplot_config):
 
 
 def _apply_all_options(ax_main, right_axes, subplot_config):
-    """
-    Apply matplotlib options to all axes in a subplot.
+    """Apply matplotlib options to all axes in a subplot.
 
-    Args
+    Args:
     ----
     ax_main: Primary axis.
     right_axes: List of twin axes.
     subplot_config: Subplot configuration.
+
     """
     # Left axis
     if "options-left" in subplot_config:
@@ -762,8 +791,8 @@ def _unpack_species_entry(entry):
 
 
 def _extract_base_entity(name):
-    """
-    Extract the canonical chemical entity/species from a variable name.
+    """Extract the canonical chemical entity/species from a variable name.
+
     Examples:
         'd34S_SO4' -> 'SO4'
         'd18O_SO4' -> 'SO4'
@@ -773,6 +802,7 @@ def _extract_base_entity(name):
         'SO4'      -> 'SO4'
         'D_bio'    -> 'D_bio'
         'POC'      -> 'POC'
+
     """
     if not isinstance(name, str):
         return str(name)
@@ -834,8 +864,7 @@ def _collect_all_layout_species(module):
 
 
 def _build_layout_palette(module, colormap_spec, colormap_override):
-    """
-    Collect all data/species names that will be plotted across all layout panels,
+    """Collect all data/species names that will be plotted across all layout panels,
     establish entity groupings so related elements (e.g. SO4, f_SO4, d34S_SO4)
     share color attributes, and assign unified styles before building panels.
     """
@@ -1026,8 +1055,7 @@ def _get_species_style(species_name, colormap_spec=None, colormap_override=None,
 
 
 def _resolve_measured_data_style(base_style, measured_data_as=None):
-    """
-    Format style dict for measured / external comparison data overlay.
+    """Format style dict for measured / external comparison data overlay.
 
     Parameters
     ----------
@@ -1046,6 +1074,7 @@ def _resolve_measured_data_style(base_style, measured_data_as=None):
         - 'squares' / 's': square markers only
         - 'triangles' / '^': triangle markers only
         - dict: custom kwargs (e.g. {'marker': '*', 'linestyle': 'None', 'markersize': 8})
+
     """
     est = dict(base_style)
     est.pop("fill_only", None)
@@ -1131,8 +1160,7 @@ def _convert_concentration_unit(series, target_units, base_units="mmol/L"):
 
 
 def _convert_generic_unit(series, from_unit, to_unit, df=None, ext_df=None, rel_to="Fe"):
-    """
-    Convert data series from an arbitrary source unit to a target display unit.
+    """Convert data series from an arbitrary source unit to a target display unit.
     Supports Pint dimensional analysis as well as geochemical dry weight percent (wt%).
     """
     if from_unit is None or to_unit is None:
@@ -1202,7 +1230,6 @@ def _convert_generic_unit(series, from_unit, to_unit, df=None, ext_df=None, rel_
         return series
 
 
-
 def _convert_rate_unit(series, target_units, base_units="mol/(m^3*s)"):
     """Convert a reaction rate series from base_units (mol/(m^3*s)) to target_units using pint."""
     if not target_units:
@@ -1256,7 +1283,6 @@ def _convert_solid_to_umol_per_g(series, df):
     return solid_conc_to_umol_per_g(series, rho_solid)
 
 
-
 def _pretty_species_label(name, rel_elem=None):
     """Format chemical species nicely with subscripts/superscripts."""
     label_map = {
@@ -1307,24 +1333,23 @@ def _apply_lim_and_scale(config, lim, scale, axis_prefix="left"):
         else:
             config[f"{axis_prefix}_yscale"] = scale_val
 
-    if lim is not None:
-        if isinstance(lim, (list, tuple)):
-            if len(lim) == 2:
-                if axis_prefix == "left":
-                    config["ylim"] = tuple(lim)
+    if lim is not None and isinstance(lim, (list, tuple)):
+        if len(lim) == 2:
+            if axis_prefix == "left":
+                config["ylim"] = tuple(lim)
+            else:
+                config[f"{axis_prefix}_ylim"] = tuple(lim)
+        elif len(lim) == 4:
+            # Broken axis syntax (-45, -37, 20, 30)
+            opt_key = f"options-{axis_prefix}"
+            cmd = f"broken_axis({lim[0]}, {lim[1]}, {lim[2]}, {lim[3]})"
+            if opt_key in config:
+                if isinstance(config[opt_key], list):
+                    config[opt_key].append(cmd)
                 else:
-                    config[f"{axis_prefix}_ylim"] = tuple(lim)
-            elif len(lim) == 4:
-                # Broken axis syntax (-45, -37, 20, 30)
-                opt_key = f"options-{axis_prefix}"
-                cmd = f"broken_axis({lim[0]}, {lim[1]}, {lim[2]}, {lim[3]})"
-                if opt_key in config:
-                    if isinstance(config[opt_key], list):
-                        config[opt_key].append(cmd)
-                    else:
-                        config[opt_key] = [config[opt_key], cmd]
-                else:
-                    config[opt_key] = [cmd]
+                    config[opt_key] = [config[opt_key], cmd]
+            else:
+                config[opt_key] = [cmd]
 
 
 def _infer_spec_kind(spec):
@@ -1368,8 +1393,7 @@ def _compile_single_spec(
     mapped_external_series,
     measured_data_as=None,
 ):
-    """
-    Compile a single spec dictionary (liquid, solid, reaction_rate, or isotope)
+    """Compile a single spec dictionary (liquid, solid, reaction_rate, or isotope)
     into target_subplot at pos_axis_key ('left', 'right1', 'right2', etc.).
     """
     kind = _infer_spec_kind(spec)
@@ -1675,8 +1699,7 @@ def _compile_panel(
 
 
 def compile_declarative_layout(module, df, layout_path, measured_data_path=None):
-    """
-    Compile a declarative layout module into a plot_description dictionary.
+    """Compile a declarative layout module into a plot_description dictionary.
     Supports flexible 'plot_panels' list of panel specifications as well as
     top-level declarations ('liquid_species', 'solid_species', etc.).
     """
@@ -1839,7 +1862,7 @@ def compile_declarative_layout(module, df, layout_path, measured_data_path=None)
 
     if hasattr(module, "plot_panels") and module.plot_panels:
         for idx, panel_entry in enumerate(module.plot_panels):
-            subplot_key = ordinal_names[idx] if idx < len(ordinal_names) else f"subplot_{idx+1}"
+            subplot_key = ordinal_names[idx] if idx < len(ordinal_names) else f"subplot_{idx + 1}"
             plt_desc[subplot_key] = _compile_panel(
                 panel_entry,
                 df,
@@ -1917,18 +1940,21 @@ def compile_declarative_layout(module, df, layout_path, measured_data_path=None)
 
 
 def load_layout_from_file(df, layout_path, measured_data_path=None):
-    """
-    Load a plot layout from a Python file.
+    """Load a plot layout from a Python file.
 
-    Args
-    ----
-    df: DataFrame containing the data to plot.
-    layout_path: Path to the Python file containing the layout.
-    measured_data_path: Optional path to the measured data CSV.
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        DataFrame containing the data to plot.
+    layout_path : str or Path
+        Path to the Python file containing the layout.
+    measured_data_path : str, Path, or None, optional
+        Optional path to the measured data CSV.
 
     Returns
     -------
-    dict: The plot description dictionary.
+    dict
+        The plot description dictionary.
     """
     path = pl.Path(layout_path)
     if not path.exists():
@@ -1964,14 +1990,13 @@ def load_layout_from_file(df, layout_path, measured_data_path=None):
         builtins["reaction_rates"] = reaction_rates
         builtins["isotopes"] = isotopes
     else:
-        setattr(builtins, "liquid_species", liquid_species)
-        setattr(builtins, "solid_species", solid_species)
-        setattr(builtins, "reaction_rates", reaction_rates)
-        setattr(builtins, "isotopes", isotopes)
+        builtins.liquid_species = liquid_species
+        builtins.solid_species = solid_species
+        builtins.reaction_rates = reaction_rates
+        builtins.isotopes = isotopes
     spec.loader.exec_module(module)
 
     return compile_declarative_layout(module, df, path, measured_data_path=measured_data_path)
-
 
 
 class BrokenYTransform(mtransforms.Transform):
@@ -2249,13 +2274,20 @@ def _finalize_broken_axes(fig):
 def exclude_y(ax, y1, y2, gap_ratio=0.03, split_ratio=0.5, **kwargs):
     """Set a broken y-axis on an axis, excluding the interval [y1, y2].
 
-    Args
-    ----
-    ax: Matplotlib Axes object
-    y1, y2: Boundary values of the interval to exclude.
-    gap_ratio: Fraction of the axis height allocated to the visual break gap (default: 0.03).
-    split_ratio: Height fraction allocated to the lower section (default: 0.5 for equal split,
-                 or 'proportional' for proportional to data range).
+    Parameters
+    ----------
+    ax : matplotlib.axes.Axes
+        Target matplotlib axes object.
+    y1 : float
+        First boundary value of excluded interval.
+    y2 : float
+        Second boundary value of excluded interval.
+    gap_ratio : float, default=0.03
+        Fraction of axis height allocated to the visual break gap.
+    split_ratio : float or str, default=0.5
+        Height fraction allocated to the lower section (or 'proportional').
+    **kwargs : Any
+        Additional keyword arguments forwarded to the scale constructor.
     """
     y_low = min(float(y1), float(y2))
     y_high = max(float(y1), float(y2))
@@ -2292,18 +2324,22 @@ def exclude_y(ax, y1, y2, gap_ratio=0.03, split_ratio=0.5, **kwargs):
 def broken_axis(ax, *args, **kwargs):
     """Configure a broken axis by specifying the two intervals to display.
 
-    Usage:
+    Parameters
+    ----------
+    ax : matplotlib.axes.Axes
+        Target matplotlib axes object.
+    *args : float or tuple of float
+        Either 4 numbers (y1_min, y1_max, y2_min, y2_max) or 2 tuples/lists ((y1_min, y1_max), (y2_min, y2_max)).
+    **kwargs : Any
+        Keyword arguments including `gap_ratio` (default 0.03) and `split_ratio` (default 0.5).
+
+    Examples
+    --------
+    ::
+
         broken_axis(ax, -45, -35, 20, 30)
         broken_axis(ax, (-45, -35), (20, 30))
         broken_axis(ax, -45, -35, 20, 30, split_ratio=0.5, gap_ratio=0.03)
-
-    Args:
-        ax: Matplotlib Axes object.
-        *args: Either 4 numbers (y1_min, y1_max, y2_min, y2_max)
-               or 2 tuples/lists ((y1_min, y1_max), (y2_min, y2_max)).
-        gap_ratio: Fraction of axis height for the break gap (default: 0.03).
-        split_ratio: Height fraction for the lower section (default: 0.5 for equal split,
-                     or 'proportional').
     """
     gap_ratio = kwargs.pop("gap_ratio", 0.03)
     split_ratio = kwargs.pop("split_ratio", 0.5)
@@ -2344,12 +2380,13 @@ plt.Axes.broken_y = broken_axis
 def _apply_matplotlib_options(ax, options):
     """Apply arbitrary matplotlib method calls to an axis.
 
-    Args
+    Args:
     ----
     ax: Matplotlib axis object
     options: String or list/tuple containing matplotlib method calls.
              Separated by commas if multiple calls are within a single string.
-             Examples:
+
+    Examples:
                  "set_ylim(1e-10, 1e-5), set_title('My Title')"
                  ["broken_axis(-45, -35, 20, 30)"]
                  ["set_ylim(-55, 30)", "exclude_y(-4, 20)"]
@@ -2357,6 +2394,7 @@ def _apply_matplotlib_options(ax, options):
     The function safely parses and executes each method call on the provided axis.
     Each method call should be in the format: method_name(arg1, arg2, ...)
     Multiple calls can be separated by commas.
+
     """
     if not options:
         return
@@ -2477,7 +2515,7 @@ def _get_default_plot_description(df):
         delta_plots = []
         for i, col in enumerate(d_cols[:8]):
             d_name = col
-            delta_plots.append([df[col], d_name, {"color": f"C{(i+2) % 10}"}])
+            delta_plots.append([df[col], d_name, {"color": f"C{(i + 2) % 10}"}])
         plot_desc["isotopes"] = {
             "xaxis": [df.z, "Depth [m]"],
             "left": delta_plots,

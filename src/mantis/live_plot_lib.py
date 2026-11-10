@@ -1,23 +1,22 @@
 from __future__ import annotations
 
 import multiprocessing as mp
-import time
 import queue
 import signal
 import sys
-from typing import TYPE_CHECKING, Any, Dict, Optional
+import time
+from typing import TYPE_CHECKING, Any
 
 import matplotlib.pyplot as plt
-import pandas as pd
 import numpy as np
+import pandas as pd
 
 if TYPE_CHECKING:
-    import pathlib as pl
+    pass
 
 
-def parse_time_to_seconds(val: Any) -> Optional[float]:
-    """
-    Parse a time expression into seconds (float).
+def parse_time_to_seconds(val: Any) -> float | None:
+    """Parse a time expression into seconds (float).
     Supports Pint Quantity, string expressions (e.g. '1 year', '10 days'),
     numeric seconds (int, float), or None.
     """
@@ -37,8 +36,7 @@ def parse_time_to_seconds(val: Any) -> Optional[float]:
 
 
 class BoundedVideoQueue:
-    """
-    A process-safe bounded queue with backpressure for video encoding.
+    """A process-safe bounded queue with backpressure for video encoding.
     Capacity defaults to maxsize=20.
     When full (count >= maxsize), put() blocks until count <= resume_threshold
     (defaults to 10, i.e. half empty).
@@ -48,7 +46,7 @@ class BoundedVideoQueue:
         self,
         maxsize: int = 20,
         resume_threshold: int = 10,
-        ctx: Optional[mp.context.BaseContext] = None,
+        ctx: mp.context.BaseContext | None = None,
     ):
         if ctx is None:
             ctx = mp.get_context("spawn")
@@ -61,9 +59,8 @@ class BoundedVideoQueue:
         self._count = ctx.Value("i", 0)
         self._stop_event = ctx.Event()
 
-    def put(self, item: Any, block: bool = True, timeout: Optional[float] = None) -> bool:
-        """
-        Puts an item into the queue. If queue is full (>= maxsize), blocks
+    def put(self, item: Any, block: bool = True, timeout: float | None = None) -> bool:
+        """Puts an item into the queue. If queue is full (>= maxsize), blocks
         until occupancy drops to <= resume_threshold.
         Sentinel item None bypasses occupancy check so shutdown never deadlocks.
         """
@@ -96,9 +93,8 @@ class BoundedVideoQueue:
     def put_nowait(self, item: Any) -> bool:
         return self.put(item, block=False)
 
-    def get(self, block: bool = True, timeout: Optional[float] = None) -> Any:
-        """
-        Gets an item from the queue and decrements occupancy.
+    def get(self, block: bool = True, timeout: float | None = None) -> Any:
+        """Gets an item from the queue and decrements occupancy.
         If occupancy drops <= resume_threshold, wakes up waiting producers.
         """
         item = self._queue.get(block=block, timeout=timeout)
@@ -152,17 +148,17 @@ class LivePlotter:
         self,
         layout_path: str,
         display_length: float,
-        measured_data_path: Optional[str] = None,
-        output_path: Optional[str] = None,
-        video_path: Optional[str] = None,
+        measured_data_path: str | None = None,
+        output_path: str | None = None,
+        video_path: str | None = None,
         fps: int = 15,
-        title: Optional[str] = None,
+        title: str | None = None,
         gui: bool = False,
         report_step: int = 1,
         max_queue_size: int = 100,
         resume_threshold: int = 50,
         video_dpi: int = 120,
-        video_workers: Optional[int] = None,
+        video_workers: int | None = None,
     ):
         self.layout_path = layout_path
         self.display_length = display_length
@@ -182,7 +178,7 @@ class LivePlotter:
         if self.video_path and not self.gui:
             from mantis.parallel_video import ParallelVideoManager
 
-            self._backend: Optional[ParallelVideoManager] = ParallelVideoManager(
+            self._backend: ParallelVideoManager | None = ParallelVideoManager(
                 layout_path=self.layout_path,
                 display_length=self.display_length,
                 video_path=self.video_path,
@@ -204,7 +200,7 @@ class LivePlotter:
                 resume_threshold=resume_threshold,
                 ctx=self._ctx,
             )
-        self._process: Optional[mp.Process] = None
+        self._process: mp.Process | None = None
 
     @property
     def queue(self):
@@ -302,8 +298,9 @@ class LivePlotter:
             matplotlib.use("TkAgg")
         else:
             matplotlib.use("Agg")
-        import mantis.plot_data_new as plot_data_new
         from matplotlib.animation import FFMpegWriter
+
+        import mantis.plot_data_new as plot_data_new
 
         # Re-assert clean SIGTERM handler after imports in case libraries modified it
         if hasattr(signal, "SIGTERM"):
@@ -473,8 +470,7 @@ def capture_state(
     equilibrium_reactions: Any,
     current_dt: float,
 ) -> dict[str, np.ndarray]:
-    """
-    Capture the current state of the model as a dictionary of numpy arrays.
+    """Capture the current state of the model as a dictionary of numpy arrays.
     """
     from . import diff_lib
 
@@ -635,8 +631,7 @@ def write_to_queue_async(
     current_dt: float,
     title: str,
 ) -> None:
-    """
-    Simultaneously snaps model state and sends it to the plot_queue.
+    """Simultaneously snaps model state and sends it to the plot_queue.
     If plot_queue is a BoundedVideoQueue and full, this blocks until the queue
     drains to <= resume_threshold.
     """
@@ -659,10 +654,9 @@ def save_final_pdf(
     D_mol: Any,
     diagenetic_reactions: Any,
     equilibrium_reactions: Any,
-    outfile: Optional[str] = None,
-) -> Optional[str]:
-    """
-    Produce a static final PDF plot of the model state.
+    outfile: str | None = None,
+) -> str | None:
+    """Produce a static final PDF plot of the model state.
     """
     import mantis.plot_data_new as plot_data_new
 

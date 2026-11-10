@@ -1,19 +1,18 @@
-"""species_parser.py
+"""Parser and validator for MANTIS species definitions and isotope standards.
 
-Strict parser and validator for Mantis species definitions and isotope standards.
 Enforces the modern declarative schema without legacy backwards compatibility:
 - isotope_standards must be keyed by delta notation (e.g. 'd34S', 'd18O')
 - Boundary conditions must use 'bc_top' and canonical types ('Dirichlet', 'Neumann', 'Robin')
 - Companion isotope species are declared via 'isotopes' and automatically synthesized.
 """
 
-import sys
+import ast
 import copy
 import inspect
-import ast
-import re
+import sys
 from pathlib import Path
-from typing import Dict, Any, Tuple, Optional
+from typing import Any
+
 import numpy as np
 import pint
 
@@ -23,11 +22,11 @@ _default_ureg = pint.UnitRegistry()
 CANONICAL_BC_TYPES = {"Dirichlet", "Neumann", "Robin"}
 
 
-def _find_definition_location(var_name: str = "isotope_standards", key: Optional[str] = None) -> Optional[str]:
-    """Finds the source file name and line number where var_name (and optionally key) was defined."""
+def _find_definition_location(var_name: str = "isotope_standards", key: str | None = None) -> str | None:
+    """Find the source file name and line number where var_name (and optionally key) was defined."""
     frame = inspect.currentframe()
-    candidate_path: Optional[Path] = None
-    fallback_loc: Optional[str] = None
+    candidate_path: Path | None = None
+    fallback_loc: str | None = None
 
     while frame:
         if "self" in frame.f_locals:
@@ -74,7 +73,7 @@ def _find_definition_location(var_name: str = "isotope_standards", key: Optional
     return fallback_loc
 
 
-def validate_isotope_standards(isotope_standards: Any) -> Dict[str, Dict[str, Any]]:
+def validate_isotope_standards(isotope_standards: Any) -> dict[str, dict[str, Any]]:
     """Strictly validates the isotope_standards dictionary."""
     if not isinstance(isotope_standards, dict):
         loc = _find_definition_location("isotope_standards")
@@ -142,9 +141,9 @@ def validate_isotope_standards(isotope_standards: Any) -> Dict[str, Dict[str, An
 
 
 def resolve_isotope_standard(
-    ref: str, isotope_standards: Dict[str, Dict[str, Any]]
-) -> Tuple[str, Dict[str, Any]]:
-    """Resolves an isotope standard by its delta key (e.g. 'd34S') or element (e.g. 'S')."""
+    ref: str, isotope_standards: dict[str, dict[str, Any]]
+) -> tuple[str, dict[str, Any]]:
+    """Resolve an isotope standard by its delta key (e.g. 'd34S') or element (e.g. 'S')."""
     if ref in isotope_standards:
         return ref, isotope_standards[ref]
 
@@ -176,11 +175,12 @@ def parse_boundary_condition(
     sp_name: str,
     location: str,
     ureg: Any = None,
-) -> Tuple[str, float, Dict[str, Any]]:
-    """Parses and strictly validates a boundary condition dictionary ('bc_top' or 'bc_bot').
+) -> tuple[str, float, dict[str, Any]]:
+    """Parse and strictly validate a boundary condition dictionary ('bc_top' or 'bc_bot').
     
     Returns:
         (bc_type, parsed_value, extra_properties)
+
     """
     if not isinstance(bc_dict, dict):
         print(
@@ -249,20 +249,21 @@ def parse_boundary_condition(
 
 
 def get_l_mass(bulk: float, delta: float, standard_ratio: float) -> float:
-    """Computes light isotope mass from bulk mass, delta (mUr/permil), and standard ratio."""
+    """Compute light isotope mass from bulk mass, delta (mUr/permil), and standard ratio."""
     r_val = (delta / 1000.0 + 1.0) * standard_ratio
     return bulk / (1.0 + r_val)
 
 
 def parse_and_validate_species_dict(
-    raw_species: Dict[str, Any],
-    isotope_standards: Dict[str, Any],
+    raw_species: dict[str, Any],
+    isotope_standards: dict[str, Any],
     ureg: Any = None,
-) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Dict[str, Any]]]:
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, dict[str, Any]]]:
     """Strictly parses species definitions, validates boundary conditions, and synthesizes companion species.
     
     Returns:
         (species_defs, bc_map, validated_isotope_standards)
+
     """
     if not isinstance(raw_species, dict):
         print(
@@ -319,7 +320,7 @@ def parse_and_validate_species_dict(
 
     # 2. Build full species dictionary with synthesized companions
     species_defs = copy.deepcopy(raw_species)
-    synthesized_companions: Dict[str, Dict[str, Any]] = {}
+    synthesized_companions: dict[str, dict[str, Any]] = {}
 
     for sp_name, meta in raw_species.items():
         iso_dict = meta.get("isotopes")
@@ -338,7 +339,7 @@ def parse_and_validate_species_dict(
             std_key, std_meta = resolve_isotope_standard(iso_ref, val_stds)
 
             # Synthesize full companion species definition
-            comp_entry: Dict[str, Any] = {
+            comp_entry: dict[str, Any] = {
                 "phase": meta.get("phase", "liquid"),
                 "include": meta.get("include", True),
                 "formula": meta.get("formula", sp_name),
@@ -375,7 +376,7 @@ def parse_and_validate_species_dict(
     species_defs.update(synthesized_companions)
 
     # 3. Parse and construct boundary condition map (bc_map)
-    bc_map: Dict[str, Dict[str, Any]] = {}
+    bc_map: dict[str, dict[str, Any]] = {}
 
     for sp_name, meta in species_defs.items():
         is_transported = meta.get("include", True)
@@ -392,7 +393,7 @@ def parse_and_validate_species_dict(
                     file=sys.stderr,
                 )
                 sys.exit(1)
-            bc_entry: Dict[str, Any] = {
+            bc_entry: dict[str, Any] = {
                 "type": bc_type,
                 "top": top_val,
                 "phase": meta.get("phase", "liquid"),
@@ -478,7 +479,7 @@ def parse_and_validate_species_dict(
                     except Exception:
                         comp_entry["init"] = p_init
 
-        comp_bc_entry: Dict[str, Any] = {
+        comp_bc_entry: dict[str, Any] = {
             "type": parent_bc["type"],
             "top": top_val_comp,
             "phase": comp_entry.get("phase", "liquid"),
@@ -504,11 +505,11 @@ VALID_SPECIATION_TYPES = {
 
 
 def validate_and_normalize_speciation(
-    raw_speciation: Optional[Dict[str, Any]],
-    species_defs: Dict[str, Any],
+    raw_speciation: dict[str, Any] | None,
+    species_defs: dict[str, Any],
     ureg: Any = None,
-) -> Dict[str, Dict[str, Any]]:
-    """Validates explicit speciation blocks and normalizes legacy species speciation.
+) -> dict[str, dict[str, Any]]:
+    """Validate explicit speciation blocks and normalizes legacy species speciation.
 
     Supports unified declarative speciation blocks:
       - 'carbonate_system': thermodynamic seawater carbonate speciation (DIC + TA -> CO3, HCO3, CO2, Hplus, pH)
@@ -521,7 +522,7 @@ def validate_and_normalize_speciation(
       'equilibrium_of', 'fraction', 'include_in_TA') are automatically synthesized and
       normalized into the unified speciation dictionary.
     """
-    speciation_defs: Dict[str, Dict[str, Any]] = {}
+    speciation_defs: dict[str, dict[str, Any]] = {}
 
     # 1. Process explicit speciation dictionary if provided
     if raw_speciation is not None:

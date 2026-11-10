@@ -1,17 +1,13 @@
-"""generate_equation_system.py
+"""Declarative parser and code generator for MANTIS reaction transport models.
 
-Standalone declarative parser and code generator for MANTIS reaction transport models.
+Translates declarative reaction specifications into a fully assembled Python equation module
+with exact validation of species definitions, reaction constants, and limiters.
 
-Translates declarative reaction specifications (e.g. chemical_equations_new.py) into
-a fully assembled Python equation module (e.g. equations.py) with exact validation of:
-  - Species definitions in species.py
-  - Reaction constants in reaction_constants.py
-  - Limiters in limiters.py
+Examples
+--------
+::
 
-Usage:
-------
-    python -m mantis.generate_equation_system [OPTIONS]
-    python src/mantis/generate_equation_system.py -i chemical_equations_new.py -o equations.py
+    python -m mantis.generate_equation_system -i chemical_equations_new.py -o equations.py
 """
 
 from __future__ import annotations
@@ -19,20 +15,22 @@ from __future__ import annotations
 import argparse
 import ast
 import importlib.util
-from pathlib import Path
 import re
 import sys
-from typing import Any, Dict, List, Optional, Set, Tuple
+from pathlib import Path
+from typing import Any
 
 
 class ValidationError(Exception):
     """Raised when chemical reaction specifications fail validation checks."""
+
     pass
 
 
 def make_null_reactions():
     """Constructs a null reaction module for purely diffusive / reaction-free models."""
     import types
+
     from .diff_lib import data_container
 
     null_mod = types.ModuleType("null_reactions")
@@ -70,17 +68,17 @@ class ReactionSystemValidator:
         self,
         species_path: Path,
         constants_path: Path,
-        limiters_path: Optional[Path] = None,
-        reactions_path: Optional[Path] = None,
+        limiters_path: Path | None = None,
+        reactions_path: Path | None = None,
     ):
         self.species_path = Path(species_path)
         self.constants_path = Path(constants_path)
         self.limiters_path = Path(limiters_path) if limiters_path is not None else None
         self.reactions_path = Path(reactions_path) if reactions_path is not None else None
 
-        self.valid_species: Set[str] = set()
-        self.valid_constants: Set[str] = set()
-        self.valid_limiters: Set[str] = set()
+        self.valid_species: set[str] = set()
+        self.valid_constants: set[str] = set()
+        self.valid_limiters: set[str] = set()
 
         self._load_definitions()
 
@@ -98,7 +96,10 @@ class ReactionSystemValidator:
             raw_species = mod_species.species
             raw_stds = getattr(mod_species, "isotope_standards", {})
             raw_speciation = getattr(mod_species, "speciation", None)
-            from mantis.species_parser import parse_and_validate_species_dict, validate_and_normalize_speciation
+            from mantis.species_parser import (
+                parse_and_validate_species_dict,
+                validate_and_normalize_speciation,
+            )
             self.species_defs, self.bc_map, self.isotope_standards = parse_and_validate_species_dict(raw_species, raw_stds)
             self.speciation_defs = validate_and_normalize_speciation(raw_speciation, self.species_defs)
             self.valid_species = set(self.species_defs.keys())
@@ -152,7 +153,7 @@ class ReactionSystemValidator:
 
         # 3. Limiters (from limiters_path or reactions_path)
         self.valid_limiters = set()
-        self.limiters_defs: Dict[str, str] = {}
+        self.limiters_defs: dict[str, str] = {}
 
         def _extract_limiters_from_ast(tree: ast.AST):
             extracted = {}
@@ -180,7 +181,7 @@ class ReactionSystemValidator:
                                     extracted[k_node.value] = expr_code
             return extracted
 
-        raw_limiters: Dict[str, str] = {}
+        raw_limiters: dict[str, str] = {}
         # 1. First check if limiters are defined in reactions_path (modern declarative standard)
         if self.reactions_path is not None and self.reactions_path.exists():
             try:
@@ -220,7 +221,7 @@ class ReactionSystemValidator:
                 self.valid_limiters.add(f"{main_k}_inhib_{sub_k}")
 
     @staticmethod
-    def parse_reaction_species(reaction_str: str) -> Tuple[List[Tuple[float, str]], List[Tuple[float, str]]]:
+    def parse_reaction_species(reaction_str: str) -> tuple[list[tuple[float, str]], list[tuple[float, str]]]:
         """Parses a chemical reaction equation string into (reactants, products).
 
         Each species entry is (stoichiometric_coefficient, species_name).
@@ -232,7 +233,7 @@ class ReactionSystemValidator:
 
         left, right = reaction_str.split("->", 1)
 
-        def _parse_side(side_str: str) -> List[Tuple[float, str]]:
+        def _parse_side(side_str: str) -> list[tuple[float, str]]:
             terms = re.split(r"\s+\+\s+", side_str.strip())
             parsed = []
             for term in terms:
@@ -293,7 +294,7 @@ class ReactionSystemValidator:
                 return meta["isotope_of"]
         return sp
 
-    def get_speciation_factor_expr(self, sp: str) -> Optional[str]:
+    def get_speciation_factor_expr(self, sp: str) -> str | None:
         """Returns python code expression for the fraction of parent species, or None if 1.0.
         
         Derives the fraction expression dynamically from species_defs:
@@ -332,7 +333,7 @@ class ReactionSystemValidator:
             return bool(meta.get("include", True))
         return sp in self.valid_species
 
-    def get_isotope_standard_info(self, iso_sp: str, parent_sp: Optional[str] = None) -> Tuple[str, str, float]:
+    def get_isotope_standard_info(self, iso_sp: str, parent_sp: str | None = None) -> tuple[str, str, float]:
         """Resolves (std_key, standard_name, ratio) for an isotope companion or parent species."""
         meta = getattr(self, "species_defs", {}).get(iso_sp, {})
         std_name = meta.get("isotope_standard")
@@ -356,7 +357,7 @@ class ReactionSystemValidator:
 
         raise ValueError(f"[MANTIS ERROR] No isotope standard found for species '{iso_sp}'.")
 
-    def get_species_element(self, sp: str) -> Optional[str]:
+    def get_species_element(self, sp: str) -> str | None:
         """Resolves the element tracked by an isotope species or parent species."""
         species_defs = getattr(self, "species_defs", {})
         meta = species_defs.get(sp, {})
@@ -375,21 +376,21 @@ class ReactionSystemValidator:
             return self.get_species_element(parent)
         return None
 
-    def derive_isotope_species_maps(self, r: Dict[str, Any]) -> List[Dict[str, str]]:
+    def derive_isotope_species_maps(self, r: dict[str, Any]) -> list[dict[str, str]]:
         """Derives or retrieves isotope species mappings grouped by element for a reaction."""
         raw_map = self.derive_isotope_species_map(r)
         if not raw_map:
             return []
 
         # Group isotope species by element
-        groups: Dict[str, Dict[str, str]] = {}
+        groups: dict[str, dict[str, str]] = {}
         for p_sp, i_sp in raw_map.items():
             elem = self.get_species_element(i_sp) or self.get_species_element(p_sp) or "default"
             groups.setdefault(elem, {})[p_sp] = i_sp
 
         return list(groups.values())
 
-    def derive_isotope_species_map(self, r: Dict[str, Any]) -> Dict[str, str]:
+    def derive_isotope_species_map(self, r: dict[str, Any]) -> dict[str, str]:
         """Derives or retrieves the isotope species mapping for a reaction.
 
         If 'isotope_species' is explicitly provided in the reaction dictionary, it is used.
@@ -413,14 +414,14 @@ class ReactionSystemValidator:
         if not species_defs:
             return {}
 
-        involved_species: Set[str] = set()
+        involved_species: set[str] = set()
         for _, sp in reactants + products:
             involved_species.add(sp)
             parent = self.get_parent_species(sp)
             if parent:
                 involved_species.add(parent)
 
-        derived_map: Dict[str, str] = {}
+        derived_map: dict[str, str] = {}
         for sp in involved_species:
             meta = species_defs.get(sp, {})
             isotopes = meta.get("isotopes")
@@ -437,7 +438,7 @@ class ReactionSystemValidator:
 
         return derived_map
 
-    def validate_reaction(self, rxn_dict: Dict[str, Any]) -> List[str]:
+    def validate_reaction(self, rxn_dict: dict[str, Any]) -> list[str]:
         """Validates a single reaction dictionary. Returns a list of error messages (empty if valid)."""
         errors = []
         rxn_name = rxn_dict.get("reaction_name", "<unnamed_reaction>")
@@ -549,7 +550,7 @@ class ReactionSystemValidator:
 
         return errors
 
-    def validate_reactions(self, reactions: List[Dict[str, Any]]) -> List[str]:
+    def validate_reactions(self, reactions: list[dict[str, Any]]) -> list[str]:
         """Validates all reactions in the specification list."""
         all_errors = []
         for rxn_dict in reactions:
@@ -558,7 +559,7 @@ class ReactionSystemValidator:
         return all_errors
 
 
-def load_reactions_from_file(input_path: Path) -> List[Dict[str, Any]]:
+def load_reactions_from_file(input_path: Path) -> list[dict[str, Any]]:
     """Loads the reactions list from a chemical equations Python or JSON file."""
     input_path = Path(input_path)
     if not input_path.exists():
@@ -575,7 +576,7 @@ def load_reactions_from_file(input_path: Path) -> List[Dict[str, Any]]:
         return mod.reactions
     elif input_path.suffix == ".json":
         import json
-        with open(input_path, "r", encoding="utf-8") as f:
+        with open(input_path, encoding="utf-8") as f:
             data = json.load(f)
             if isinstance(data, list):
                 return data
@@ -591,12 +592,12 @@ class MantisArgumentParser(argparse.ArgumentParser):
 
     def parse_args(self, args=None, namespace=None):
         ns = super().parse_args(args=args, namespace=namespace)
-        if not hasattr(ns, "input") or getattr(ns, "input") is None:
-            setattr(ns, "input", getattr(ns, "reactions", None))
-        if not hasattr(ns, "output") or getattr(ns, "output") is None:
-            setattr(ns, "output", getattr(ns, "equations", None))
-        if not hasattr(ns, "constants") or getattr(ns, "constants") is None:
-            setattr(ns, "constants", getattr(ns, "kinetic_constants", None))
+        if not hasattr(ns, "input") or ns.input is None:
+            ns.input = getattr(ns, "reactions", None)
+        if not hasattr(ns, "output") or ns.output is None:
+            ns.output = getattr(ns, "equations", None)
+        if not hasattr(ns, "constants") or ns.constants is None:
+            ns.constants = getattr(ns, "kinetic_constants", None)
         return ns
 
 
@@ -696,6 +697,7 @@ def generate_equations(
     -------
     Path
         Path to the output equations module.
+
     """
     def _find_path(p_in: str | Path) -> Path:
         p = Path(p_in)
@@ -720,7 +722,7 @@ def generate_equations(
         if limiters_p and limiters_p.exists():
             print(f"[MANTIS] Using limiters definitions: {limiters_p}")
         else:
-            print(f"[MANTIS] Using limiters definitions from reactions file")
+            print("[MANTIS] Using limiters definitions from reactions file")
 
     # 1. Load validator
     validator = ReactionSystemValidator(
@@ -760,10 +762,10 @@ def generate_equations(
 
 
 def resolve_and_prepare_equations(
-    p_dict: Dict[str, Any],
-    experiment_name: Optional[str] = None,
-    base_dir: Optional[Path] = None,
-) -> Tuple[Any, Path, Path]:
+    p_dict: dict[str, Any],
+    experiment_name: str | None = None,
+    base_dir: Path | None = None,
+) -> tuple[Any, Path, Path]:
     """Resolves reaction and equation files from p_dict, regenerates equations if outdated,
     and dynamically imports the equations module.
 
@@ -786,6 +788,7 @@ def resolve_and_prepare_equations(
     -------
     Tuple[module, Path, Path]
         (loaded_equations_module, resolved_reactions_path, resolved_equations_path)
+
     """
     exp = p_dict.get("experiment") or experiment_name or "pyrite"
 
@@ -939,8 +942,8 @@ class ReactionCategory(str):
         phase_archetype: str = "liquid_to_liquid",
         has_solid_reactant: bool = False,
         has_solid_product: bool = False,
-        reactants: Optional[List[Tuple[float, str]]] = None,
-        products: Optional[List[Tuple[float, str]]] = None,
+        reactants: list[tuple[float, str]] | None = None,
+        products: list[tuple[float, str]] | None = None,
         canonical_name: str = "",
     ):
         obj = super().__new__(cls, value)
@@ -957,12 +960,12 @@ class ReactionCategory(str):
 class EquationSystemGenerator:
     """Generates an assembled equations.py module with SymPy analytical Jacobian."""
 
-    def __init__(self, reactions: List[Dict[str, Any]], validator: ReactionSystemValidator):
+    def __init__(self, reactions: list[dict[str, Any]], validator: ReactionSystemValidator):
         self.reactions = reactions
         self.validator = validator
 
     @classmethod
-    def classify_reaction(cls, r: Dict[str, Any], validator: Optional[ReactionSystemValidator] = None) -> ReactionCategory:
+    def classify_reaction(cls, r: dict[str, Any], validator: ReactionSystemValidator | None = None) -> ReactionCategory:
         """Classifies a chemical reaction based on reactant/product phases and mechanism type,
         completely independent of chemical symbols or species names.
         """
@@ -1023,7 +1026,7 @@ class EquationSystemGenerator:
             canonical_name=canonical_name,
         )
 
-    def _generate_kinetic_reaction_fn(self, r: Dict[str, Any], cat: ReactionCategory) -> List[str]:
+    def _generate_kinetic_reaction_fn(self, r: dict[str, Any], cat: ReactionCategory) -> list[str]:
         r_name = r.get("reaction_name", "rxn")
         fn_name = f"rxn_{r_name}"
         reactants = cat.reactants
@@ -1105,7 +1108,7 @@ class EquationSystemGenerator:
         # 3. Default:
         #    - 1 if single reactant
         #    - 2 if multiple reactants (preserves legacy mass-action behavior across all existing benchmark models)
-        rxn_order = r.get("reaction_order", r.get("order", None))
+        rxn_order = r.get("reaction_order", r.get("order"))
         if rxn_order is not None:
             rxn_order = int(rxn_order)
         elif "reactants_in_rate" in r:
@@ -1140,7 +1143,7 @@ class EquationSystemGenerator:
             f'        master_species={{"{master_parent}": {master_coeff}}},',
             f'        reactants={other_reactants_str},',
             f'        products={transport_products},',
-            f'        coeff_master=coeff_master, rate_master=rate_master,',
+            '        coeff_master=coeff_master, rate_master=rate_master,',
             f'        has_solid=has_solid, reaction_name="{r_name}",',
             f'        ref_species="{ref_sp}", stoich_ref={ref_coeff},',
             '    )',
@@ -1248,7 +1251,7 @@ class EquationSystemGenerator:
         lines.append('')
         return lines
 
-    def _generate_reversible_saturation_fn(self, r: Dict[str, Any], cat: ReactionCategory) -> List[str]:
+    def _generate_reversible_saturation_fn(self, r: dict[str, Any], cat: ReactionCategory) -> list[str]:
         r_name = r.get("reaction_name", "mineral_saturation")
         fn_name = f"rxn_{r_name}"
         k_name = r.get("k_value_name", {})
@@ -1427,7 +1430,7 @@ class EquationSystemGenerator:
                 lines.extend([
                     '    if getattr(mp, "isotopes", False):',
                     f'        std_ratio = getattr(mp, "{std_key}", getattr(mp, "{std_name}_ratio", {std_ratio}))',
-                    f'        f_iso_default = 1.0 / (1.0 + float(std_ratio))',
+                    '        f_iso_default = 1.0 / (1.0 + float(std_ratio))',
                 ])
                 r_spec = self.validator.get_speciation_factor_expr(r_sp)
                 if r_spec:
@@ -1519,7 +1522,7 @@ class EquationSystemGenerator:
         lines.append('')
         return lines
 
-    def _generate_reversible_saturation_jacobian(self, r: Dict[str, Any], cat: ReactionCategory) -> List[str]:
+    def _generate_reversible_saturation_jacobian(self, r: dict[str, Any], cat: ReactionCategory) -> list[str]:
         r_name = r.get("reaction_name", "mineral_saturation")
         k_name = r.get("k_value_name", {})
         if isinstance(k_name, dict):
@@ -1758,8 +1761,8 @@ class EquationSystemGenerator:
                 if has_hplus:
                     lines.extend([
                         '            if has_carb:',
-                        f'                _d_net_dTA_iso = (dR_prec_domega * diss_fac * f_iso_r - dR_diss_domega * solid_fac * f_iso_m) * _domega_dh * _dh_dta',
-                        f'                _d_net_dDIC_iso = (dR_prec_domega * diss_fac * f_iso_r - dR_diss_domega * solid_fac * f_iso_m) * _domega_dh * _dh_ddic',
+                        '                _d_net_dTA_iso = (dR_prec_domega * diss_fac * f_iso_r - dR_diss_domega * solid_fac * f_iso_m) * _domega_dh * _dh_dta',
+                        '                _d_net_dDIC_iso = (dR_prec_domega * diss_fac * f_iso_r - dR_diss_domega * solid_fac * f_iso_m) * _domega_dh * _dh_ddic',
                         f'                J[:, {m_iso_idx}, idx["TA"]] += _d_net_dTA_iso',
                         f'                J[:, {m_iso_idx}, idx["DIC"]] += _d_net_dDIC_iso',
                         f'                J[:, {r_iso_idx}, idx["TA"]] -= _d_net_dTA_iso',
@@ -1769,7 +1772,7 @@ class EquationSystemGenerator:
         lines.append('')
         return lines
 
-    def _generate_kinetic_reaction_jacobian(self, r: Dict[str, Any], cat: ReactionCategory) -> List[str]:
+    def _generate_kinetic_reaction_jacobian(self, r: dict[str, Any], cat: ReactionCategory) -> list[str]:
         r_name = r.get("reaction_name", "rxn")
         k_name = r.get("k_value_name")
         reactants = cat.reactants
@@ -1873,7 +1876,7 @@ class EquationSystemGenerator:
             lines.append('')
             return lines
 
-        rxn_order = r.get("reaction_order", r.get("order", None))
+        rxn_order = r.get("reaction_order", r.get("order"))
         if rxn_order is not None:
             rxn_order = int(rxn_order)
         elif "reactants_in_rate" in r:
@@ -2248,7 +2251,7 @@ class EquationSystemGenerator:
         return "\n".join(header_code + code)
 
 
-def main(args_list: Optional[List[str]] = None) -> int:
+def main(args_list: list[str] | None = None) -> int:
     """CLI entrypoint for generate_equation_system."""
     parser = build_arg_parser()
     args = parser.parse_args(args_list)

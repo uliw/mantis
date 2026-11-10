@@ -1,40 +1,39 @@
-"""seawater_carbonate.py
+"""Marine carbonate system thermodynamics and chemical speciation.
 
 Thermodynamic equilibrium calculations for the marine carbonate system as a function
 of temperature, salinity, and hydrostatic pressure.
 
-Formulations and Citations:
----------------------------
+Formulations and Citations
+--------------------------
 1. Carbonic Acid Dissociation Constants (K1, K2):
-   - Lueker, T. J., Dickson, A. G., and Keeling, C. D. (2000). Ocean pCO2 calculated from
-     dissolved inorganic carbon, alkalinity, and equations for K1 and K2: validation based
-     on laboratory measurements of CO2 in gas and seawater at equilibrium.
-     Marine Chemistry, 70(1-3), 105-119.
-     (Refit of Mehrbach et al. 1973 onto the Total pH scale).
+   Lueker, T. J., Dickson, A. G., and Keeling, C. D. (2000). Ocean pCO2 calculated from
+   dissolved inorganic carbon, alkalinity, and equations for K1 and K2: validation based
+   on laboratory measurements of CO2 in gas and seawater at equilibrium.
+   Marine Chemistry, 70(1-3), 105-119.
+   (Refit of Mehrbach et al. 1973 onto the Total pH scale).
 
 2. Calcite Stoichiometric Solubility Product (K'sp_calcite):
-   - Mucci, A. (1983). The solubility of calcite and aragonite in seawater at various
-     salinities and temperatures, and at one atmosphere total pressure.
-     American Journal of Science, 283(7), 780-799.
+   Mucci, A. (1983). The solubility of calcite and aragonite in seawater at various
+   salinities and temperatures, and at one atmosphere total pressure.
+   American Journal of Science, 283(7), 780-799.
 
 3. Hydrostatic Pressure Corrections (K1, K2, K'sp):
-   - Millero, F. J. (1995). Thermodynamics of the carbon dioxide system in the oceans.
-     Geochimica et Cosmochimica Acta, 59(4), 661-677.
-   - Ingle, S. E. (1975). Solubility of calcite in the ocean.
-     Marine Chemistry, 3(4), 301-319.
-   - Millero, F. J. (1979). The thermodynamics of the carbonate system in seawater.
-     Geochimica et Cosmochimica Acta, 43(10), 1651-1661.
+   Millero, F. J. (1995). Thermodynamics of the carbon dioxide system in the oceans.
+   Geochimica et Cosmochimica Acta, 59(4), 661-677.
+   Ingle, S. E. (1975). Solubility of calcite in the ocean.
+   Marine Chemistry, 3(4), 301-319.
+   Millero, F. J. (1979). The thermodynamics of the carbonate system in seawater.
+   Geochimica et Cosmochimica Acta, 43(10), 1651-1661.
 
 4. Seawater Density (rho_sw):
-   - Millero, F. J., and Poisson, A. (1981). International one-atmosphere equation of
-     state of seawater. Deep Sea Research Part A, 28(6), 625-629.
-     (UNESCO 1981 equation of state).
+   Millero, F. J., and Poisson, A. (1981). International one-atmosphere equation of
+   state of seawater. Deep Sea Research Part A, 28(6), 625-629.
+   (UNESCO 1981 equation of state).
 """
 
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, Tuple
-import numpy as np
 
+import numpy as np
 
 # Universal gas constant in cm^3 * bar / (mol * K)
 # R = 8.314462618 J / (mol * K) = 83.14462618 cm^3 * bar / (mol * K)
@@ -44,6 +43,7 @@ R_GAS_BAR = 83.1446261815324
 @dataclass
 class CarbonateConstants:
     """Stores thermodynamic carbonate equilibrium constants and seawater density."""
+
     temp_c: float
     temp_k: float
     salinity: float
@@ -62,14 +62,25 @@ class CarbonateConstants:
 
 
 def calc_total_sulfate(salinity: float) -> float:
-    """Calculates total sulfate concentration in mol/kg-SW from practical salinity.
+    """Calculate total sulfate concentration in mol/kg-SW from practical salinity.
 
-    References:
-    -----------
+    Parameters
+    ----------
+    salinity : float
+        Practical salinity in PSU.
+
+    Returns
+    -------
+    float
+        Total sulfate concentration in mol/kg-SW.
+
+    References
+    ----------
     - Morris, A. W., and Riley, J. P. (1966). The bromide/chlorinity and
       sulphate/chlorinity ratio in sea water. Deep Sea Research 13, 699-705.
     - Dickson, A. G., Sabine, C. L., and Christian, J. R. (2007). Guide to best
       practices for ocean CO2 measurements. PICES Special Publication 3, Chap. 5.
+
     """
     S = float(salinity)
     return (0.1400 / 96.062) * (S / 1.80655)
@@ -80,10 +91,24 @@ def calc_bisulfate_constant(
     salinity: float,
     pressure_bar: float = 1.0,
 ) -> float:
-    """Calculates stoichiometric dissociation constant of bisulfate (HSO4-) in seawater on the free scale.
+    """Calculate stoichiometric dissociation constant of bisulfate (HSO4-) in seawater on the free scale.
 
-    References:
-    -----------
+    Parameters
+    ----------
+    temp_c : float
+        Temperature in degrees Celsius.
+    salinity : float
+        Practical salinity in PSU.
+    pressure_bar : float, optional
+        Hydrostatic pressure in bars (default: 1.0).
+
+    Returns
+    -------
+    float
+        Stoichiometric KS in mol/kg-SW on the free scale.
+
+    References
+    ----------
     - 1 atm constant (KS0):
       Dickson, A. G. (1990). Standard potential of the reaction:
       AgCl(s) + 1/2 H2(g) = Ag(s) + HCl(aq), and the standard acidity constant of the ion
@@ -93,19 +118,6 @@ def calc_bisulfate_constant(
       Millero, F. J. (1995). Thermodynamics of the carbon dioxide system in the oceans.
       Geochimica et Cosmochimica Acta, 59(4), 661-677 (Table 9).
 
-    Parameters:
-    -----------
-    temp_c : float
-        Temperature in degrees Celsius.
-    salinity : float
-        Practical salinity in PSU.
-    pressure_bar : float, optional
-        Hydrostatic pressure in bars (default: 1.0).
-
-    Returns:
-    --------
-    float
-        Stoichiometric KS in mol/kg-SW on the free scale.
     """
     T_c = float(temp_c)
     T_k = T_c + 273.15
@@ -137,24 +149,25 @@ def calc_bisulfate_constant(
 
 
 def calc_seawater_density(temp_c: float, salinity: float = 34.0) -> float:
-    """Calculates seawater density at 1 atm pressure using the UNESCO 1981 equation of state.
+    """Calculate seawater density at 1 atm pressure using the UNESCO 1981 equation of state.
 
-    Reference:
+    Parameters
     ----------
-    Millero, F. J., and Poisson, A. (1981). International one-atmosphere equation
-    of state of seawater. Deep Sea Research Part A, 28(6), 625-629.
-
-    Parameters:
-    -----------
     temp_c : float
         Temperature in degrees Celsius.
     salinity : float, optional
         Practical salinity in PSU (default: 34.0).
 
-    Returns:
-    --------
+    Returns
+    -------
     float
         Density in kg/m^3 (divide by 1000 for kg/L or g/cm^3).
+
+    References
+    ----------
+    Millero, F. J., and Poisson, A. (1981). International one-atmosphere equation
+    of state of seawater. Deep Sea Research Part A, 28(6), 625-629.
+
     """
     T = float(temp_c)
     S = float(salinity)
@@ -190,19 +203,10 @@ def calc_carbonate_constants(
     pressure_bar: float = 1.0,
     ph_scale: str = "free",
 ) -> CarbonateConstants:
-    """Calculates K1, K2, and K'sp(calcite) corrected for temperature, salinity, pressure, and pH scale.
+    """Calculate K1, K2, and K'sp(calcite) corrected for temperature, salinity, pressure, and pH scale.
 
-    References:
-    -----------
-    - K1, K2 (Total scale): Lueker, Dickson, & Keeling (2000), Marine Chemistry 70: 105-119.
-    - Ksp: Mucci (1983), American Journal of Science 283: 780-799.
-    - Pressure corrections: Millero (1995), GCA 59: 661-677; Ingle (1975), Marine Chemistry 3: 301-319.
-    - Density: Millero & Poisson (1981), Deep Sea Research 28A: 625-629.
-    - Free vs Total pH scale conversion: Dickson (1990), J. Chem. Thermodyn. 22: 113-127;
-      Dickson et al. (2007), Guide to best practices for ocean CO2 measurements, PICES Spec. Publ. 3.
-
-    Parameters:
-    -----------
+    Parameters
+    ----------
     temp_c : float
         Temperature in degrees Celsius.
     salinity : float, optional
@@ -214,10 +218,20 @@ def calc_carbonate_constants(
         - 'free': [H+] considers only free hydronium ions ([H+]_F).
         - 'total': [H+] includes bisulfate ion pairs ([H+]_T = [H+]_F * (1 + St / Ks)).
 
-    Returns:
-    --------
+    Returns
+    -------
     CarbonateConstants
         Dataclass containing constants on both mol/m^3 (mmol/L) and mol/kg-SW scales.
+
+    References
+    ----------
+    - K1, K2 (Total scale): Lueker, Dickson, & Keeling (2000), Marine Chemistry 70: 105-119.
+    - Ksp: Mucci (1983), American Journal of Science 283: 780-799.
+    - Pressure corrections: Millero (1995), GCA 59: 661-677; Ingle (1975), Marine Chemistry 3: 301-319.
+    - Density: Millero & Poisson (1981), Deep Sea Research 28A: 625-629.
+    - Free vs Total pH scale conversion: Dickson (1990), J. Chem. Thermodyn. 22: 113-127;
+      Dickson et al. (2007), Guide to best practices for ocean CO2 measurements, PICES Spec. Publ. 3.
+
     """
     T_c = float(temp_c)
     T_k = T_c + 273.15
@@ -319,8 +333,8 @@ def calc_carbonate_constants(
 
 def solve_carbonate_speciation_from_dic_ph(
     dic: float, ph: float, const: CarbonateConstants
-) -> Dict[str, float]:
-    """Calculates full carbonate speciation given DIC and pH."""
+) -> dict[str, float]:
+    """Calculate full carbonate speciation given DIC and pH."""
     h_plus = 10.0 ** (-float(ph))
     K1 = const.K1
     K2 = const.K2
@@ -345,8 +359,8 @@ def solve_carbonate_speciation_from_dic_ph(
 
 def solve_carbonate_speciation_from_ta_dic(
     ta: float, dic: float, const: CarbonateConstants
-) -> Dict[str, float]:
-    """Calculates full carbonate speciation given TA and DIC by solving the exact quadratic."""
+) -> dict[str, float]:
+    """Calculate full carbonate speciation given TA and DIC by solving the exact quadratic."""
     ta_val = float(ta)
     dic_val = float(dic)
     K1 = const.K1
@@ -379,8 +393,8 @@ def solve_carbonate_speciation_from_ta_dic(
 
 def solve_carbonate_speciation_from_ta_ph(
     ta: float, ph: float, const: CarbonateConstants
-) -> Dict[str, float]:
-    """Calculates full carbonate speciation given TA and pH."""
+) -> dict[str, float]:
+    """Calculate full carbonate speciation given TA and pH."""
     ta_val = float(ta)
     h_plus = 10.0 ** (-float(ph))
     K1 = const.K1
@@ -409,12 +423,12 @@ def solve_carbonate_speciation_from_ta_ph(
 
 def adjust_for_calcite_equilibrium(
     ca2_top: float,
-    dic: Optional[float] = None,
-    ta: Optional[float] = None,
-    ph: Optional[float] = None,
-    const: Optional[CarbonateConstants] = None,
-) -> Tuple[Dict[str, float], str]:
-    """Adjusts carbonate boundary conditions to achieve exact calcite equilibrium (Omega = 1.0).
+    dic: float | None = None,
+    ta: float | None = None,
+    ph: float | None = None,
+    const: CarbonateConstants | None = None,
+) -> tuple[dict[str, float], str]:
+    """Adjust carbonate boundary conditions to achieve exact calcite equilibrium (Omega = 1.0).
 
     Thermodynamic Principle:
     -------------------------
@@ -427,10 +441,11 @@ def adjust_for_calcite_equilibrium(
     2. pH & TA given   -> adjust DIC
     3. DIC & TA given  -> adjust pH (and align TA/DIC to exact equilibrium)
 
-    Returns:
-    --------
-    Tuple[Dict[str, float], str]:
+    Returns
+    -------
+    Tuple[Dict[str, float], str]
         (speciation_dict, human_readable_adjustment_description)
+
     """
     if ca2_top is None or float(ca2_top) <= 0.0:
         raise ValueError(

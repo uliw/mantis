@@ -10,29 +10,24 @@ solving all chemical species simultaneously with a fully coupled chemical Jacobi
 
 from __future__ import annotations
 
-import gc
 import math
-import os
 import sys
 import time
 import traceback
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
+from typing import Any
 
 import numpy as np
 
 from .diff_lib import (
     ArrayProxy,
-    VariableArray,
     data_container,
     get_time_units,
-    save_data,
-    save_data_async,
     save_state,
 )
 from .live_plot_lib import parse_time_to_seconds, save_final_pdf, write_to_queue_async
 from .solvers_numba import (
-    compute_fractional_trust_region_alpha,
     compute_species_residual_linf,
     compute_species_residual_wrms,
     compute_weighted_residual_norm_wrms,
@@ -141,7 +136,7 @@ class AdaptiveDT:
         dif_limit = math.inf if D == 0 else dx * dx / (2 * D)
         return self.dt_cfl_factor * min(adv_limit, dif_limit)
 
-    def get_effective_max(self, _log: Optional[Callable[[str], None]] = None) -> float:
+    def get_effective_max(self, _log: Callable[[str], None] | None = None) -> float:
         """Return effective maximum dt considering the dynamic failure ceiling and hold period."""
         if self.enable_failure_ceiling and self._dt_ceiling is not None:
             if self._dt >= self._dt_ceiling * 0.98:
@@ -215,22 +210,23 @@ def build_native_1d_transport_stencil(
     phi: Any,
     D_cell: np.ndarray,
     w: float,
-    bc_props: Dict[str, Any],
-    D_irr: Optional[np.ndarray] = None,
+    bc_props: dict[str, Any],
+    D_irr: np.ndarray | None = None,
     solid_scheme: str = "powerlaw",
-    mp: Optional[Any] = None,
-    f_dis: Optional[Any] = None,
-) -> Tuple[np.ndarray, np.ndarray]:
+    mp: Any | None = None,
+    f_dis: Any | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
     """Constructs the exact 1D tridiagonal finite-volume transport stencil in pure NumPy.
 
     Returns:
         ab: shape (3, N) banded matrix (row 0: upper, row 1: diag, row 2: lower)
         b_transport: shape (N,) boundary flux vector
+
     """
     N = len(z)
     bc_type = bc_props.get("type", "Dirichlet")
     sp_phase = bc_props.get("phase", "liquid")
-    basis = bc_props.get("basis", None)
+    basis = bc_props.get("basis")
     if basis in ("liquid", "porewater"):
         is_dissolved = True
     elif basis == "solid":
@@ -377,15 +373,15 @@ class GovernorStats:
         self.porewater_capped_sweeps = 0
         self.isotope_capped_sweeps = 0
         self.rejected_sweeps = 0
-        self.porewater_details: Dict[str, int] = {}
-        self.rejected_reasons: Dict[str, int] = {}
+        self.porewater_details: dict[str, int] = {}
+        self.rejected_reasons: dict[str, int] = {}
 
     def record_step(
         self,
         sweeps: int,
         outcome: str,
         porewater_capped: bool = False,
-        limiting_species: Optional[str] = None,
+        limiting_species: str | None = None,
         isotope_capped: bool = False,
     ) -> None:
         self.total_steps += 1
@@ -462,12 +458,12 @@ class MonolithicNewtonSystem:
 
     def __init__(
         self,
-        species_struct: List[Dict[str, Any]],
+        species_struct: list[dict[str, Any]],
         mesh: Any,
         mp: Any,
-        bc_map: Optional[Dict[str, Any]] = None,
-        D_mol: Optional[Any] = None,
-        z: Optional[np.ndarray] = None,
+        bc_map: dict[str, Any] | None = None,
+        D_mol: Any | None = None,
+        z: np.ndarray | None = None,
     ):
         self.species_struct = species_struct
         self.species_names = [s["name"] for s in species_struct]
@@ -639,19 +635,18 @@ class MonolithicNewtonSystem:
 def run_non_steady_state_solver_monolithic(
     mp: Any,
     c: Any,
-    species_list_full: List[str],
-    species_list_partial: List[str],
+    species_list_full: list[str],
+    species_list_partial: list[str],
     k: Any,
     diagenetic_reactions: Any,
     equilibrium_reactions: Any,
     mesh: Any,
     D_mol: Any,
-    bc_map: Dict[str, Any],
+    bc_map: dict[str, Any],
     z: np.ndarray,
-    plot_queue: Optional[Any] = None,
-) -> Tuple[int, float]:
-    """
-    Solves the non-steady state ADR reactive transport system using a Monolithic
+    plot_queue: Any | None = None,
+) -> tuple[int, float]:
+    """Solves the non-steady state ADR reactive transport system using a Monolithic
     Block Newton-Raphson backend with Numba Block TDMA.
     """
     log_file = (
@@ -728,7 +723,7 @@ def run_non_steady_state_solver_monolithic(
         _log("Monolithic solver: Finite-difference chemical Jacobian enabled.")
         print("Monolithic solver: Finite-difference chemical Jacobian enabled.")
 
-    def _eval_rates(u_eval: np.ndarray, dt_step: float) -> Dict[str, np.ndarray]:
+    def _eval_rates(u_eval: np.ndarray, dt_step: float) -> dict[str, np.ndarray]:
         """Evaluates bulk reaction rates for a given concentration state."""
         for s_idx, s_name in enumerate(mono_system.species_names):
             c_numpy[s_name].value[:] = u_eval[:, s_idx]

@@ -169,17 +169,17 @@ def rxn_sulfate_reduction_fast(c, k_val, lim, LHS, RHS, RATES, CROSS, mp):
         ref_species="POC_fast", stoich_ref=2.0,
     )
     if getattr(mp, "isotopes", False):
-        _coeff_base_iso = k_num * getattr(c, "POC_fast") * _lim_SO4 * _inh_O2 * _inh_Fe3_diss_red
-        _alpha = 1.0 + (getattr(mp, "msr_alpha", 1.0) - 1.0) * lim.get("SO4_alpha_explicit", 1.0)
-        coeff_master_iso = calculate_fractionated_rate_coeff(
-            _coeff_base_iso, getattr(c, "SO4"), getattr(c, "SO4_S32"), _alpha, eps=1e-30
+        _coeff_base_iso_0 = k_num * getattr(c, "POC_fast") * _lim_SO4 * _inh_O2 * _inh_Fe3_diss_red
+        _alpha_0 = 1.0 + (getattr(mp, "msr_alpha", 1.0) - 1.0) * lim.get("SO4_alpha_explicit", 1.0)
+        coeff_master_iso_0 = calculate_fractionated_rate_coeff(
+            _coeff_base_iso_0, getattr(c, "SO4"), getattr(c, "SO4_S32"), _alpha_0, eps=1e-30
         )
         add_coupled_reaction(
             CROSS=CROSS, LHS=LHS, RATES=RATES, mp=mp,
             master_species={"SO4_S32": 1.0},
             reactants={},
             products={'TS2_S32': 1.0},
-            coeff_master=coeff_master_iso, rate_master=coeff_master_iso * getattr(c, "SO4_S32"),
+            coeff_master=coeff_master_iso_0, rate_master=coeff_master_iso_0 * getattr(c, "SO4_S32"),
             has_solid=has_solid, reaction_name="sulfate_reduction_fast_iso",
             ref_species="POC_fast", stoich_ref=2.0,
         )
@@ -204,17 +204,17 @@ def rxn_sulfate_reduction_slow(c, k_val, lim, LHS, RHS, RATES, CROSS, mp):
         ref_species="POC_slow", stoich_ref=2.0,
     )
     if getattr(mp, "isotopes", False):
-        _coeff_base_iso = k_num * getattr(c, "POC_slow") * _lim_SO4 * _inh_O2 * _inh_Fe3_diss_red
-        _alpha = 1.0 + (getattr(mp, "msr_alpha", 1.0) - 1.0) * lim.get("SO4_alpha_explicit", 1.0)
-        coeff_master_iso = calculate_fractionated_rate_coeff(
-            _coeff_base_iso, getattr(c, "SO4"), getattr(c, "SO4_S32"), _alpha, eps=1e-30
+        _coeff_base_iso_0 = k_num * getattr(c, "POC_slow") * _lim_SO4 * _inh_O2 * _inh_Fe3_diss_red
+        _alpha_0 = 1.0 + (getattr(mp, "msr_alpha", 1.0) - 1.0) * lim.get("SO4_alpha_explicit", 1.0)
+        coeff_master_iso_0 = calculate_fractionated_rate_coeff(
+            _coeff_base_iso_0, getattr(c, "SO4"), getattr(c, "SO4_S32"), _alpha_0, eps=1e-30
         )
         add_coupled_reaction(
             CROSS=CROSS, LHS=LHS, RATES=RATES, mp=mp,
             master_species={"SO4_S32": 1.0},
             reactants={},
             products={'TS2_S32': 1.0},
-            coeff_master=coeff_master_iso, rate_master=coeff_master_iso * getattr(c, "SO4_S32"),
+            coeff_master=coeff_master_iso_0, rate_master=coeff_master_iso_0 * getattr(c, "SO4_S32"),
             has_solid=has_solid, reaction_name="sulfate_reduction_slow_iso",
             ref_species="POC_slow", stoich_ref=2.0,
         )
@@ -237,17 +237,17 @@ def rxn_hs_oxidation(c, k_val, lim, LHS, RHS, RATES, CROSS, mp):
         ref_species="TS2", stoich_ref=1.0,
     )
     if getattr(mp, "isotopes", False):
-        _coeff_base_iso = k_num * mp.hs_frac * getattr(c, "O2") * _lim_O2_TS2
-        _alpha = 1.0 + (getattr(mp, "TS2_O2_alpha", 1.0) - 1.0) * lim.get("TS2_alpha_explicit", 1.0)
-        coeff_master_iso = calculate_fractionated_rate_coeff(
-            _coeff_base_iso, getattr(c, "TS2"), getattr(c, "TS2_S32"), _alpha, eps=1e-30
+        _coeff_base_iso_0 = k_num * mp.hs_frac * getattr(c, "O2") * _lim_O2_TS2
+        _alpha_0 = 1.0 + (getattr(mp, "TS2_O2_alpha", 1.0) - 1.0) * lim.get("TS2_alpha_explicit", 1.0)
+        coeff_master_iso_0 = calculate_fractionated_rate_coeff(
+            _coeff_base_iso_0, getattr(c, "TS2"), getattr(c, "TS2_S32"), _alpha_0, eps=1e-30
         )
         add_coupled_reaction(
             CROSS=CROSS, LHS=LHS, RATES=RATES, mp=mp,
             master_species={"TS2_S32": 1.0},
             reactants={},
             products={'SO4_S32': 1.0},
-            coeff_master=coeff_master_iso, rate_master=coeff_master_iso * getattr(c, "TS2_S32"),
+            coeff_master=coeff_master_iso_0, rate_master=coeff_master_iso_0 * getattr(c, "TS2_S32"),
             has_solid=has_solid, reaction_name="hs_oxidation_iso",
             ref_species="TS2", stoich_ref=1.0,
         )
@@ -271,13 +271,13 @@ def rxn_sulfide_mediated_iron_reduction_velde(c, k_val, lim, LHS, RHS, RATES, CR
         ref_species="Fe3", stoich_ref=8.0,
     )
     if getattr(mp, "isotopes", False):
-        coeff_master_iso = k_num * mp.hs_frac * getattr(c, "Fe3") * _lim_Fe3 * _inh_O2
+        coeff_master_iso_0 = k_num * mp.hs_frac * getattr(c, "Fe3") * _lim_Fe3 * _inh_O2
         add_coupled_reaction(
             CROSS=CROSS, LHS=LHS, RATES=RATES, mp=mp,
             master_species={"TS2_S32": 1.0},
             reactants={},
             products={'SO4_S32': 1.0},
-            coeff_master=coeff_master_iso, rate_master=coeff_master_iso * getattr(c, "TS2_S32"),
+            coeff_master=coeff_master_iso_0, rate_master=coeff_master_iso_0 * getattr(c, "TS2_S32"),
             has_solid=has_solid, reaction_name="sulfide_mediated_iron_reduction_velde_iso",
             ref_species="Fe3", stoich_ref=8.0,
         )
@@ -316,13 +316,13 @@ def rxn_FeS_oxidation(c, k_val, lim, LHS, RHS, RATES, CROSS, mp):
         ref_species="FeS", stoich_ref=4.0,
     )
     if getattr(mp, "isotopes", False):
-        coeff_master_iso = k_num * getattr(c, "O2")
+        coeff_master_iso_0 = k_num * getattr(c, "O2")
         add_coupled_reaction(
             CROSS=CROSS, LHS=LHS, RATES=RATES, mp=mp,
             master_species={"FeS_S32": 4.0},
             reactants={},
             products={'SO4_S32': 4.0},
-            coeff_master=coeff_master_iso, rate_master=coeff_master_iso * getattr(c, "FeS_S32"),
+            coeff_master=coeff_master_iso_0, rate_master=coeff_master_iso_0 * getattr(c, "FeS_S32"),
             has_solid=has_solid, reaction_name="FeS_oxidation_iso",
             ref_species="FeS", stoich_ref=4.0,
         )
