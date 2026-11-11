@@ -466,7 +466,7 @@ def adjust_for_calcite_equilibrium(
     has_ta = ta is not None
 
     # Case 1: pH & DIC given -> adjust TA
-    if has_ph and has_dic and not has_ta:
+    if ph is not None and dic is not None and ta is None:
         dic_val = float(dic)
         # alpha2 required to produce co3_eq
         alpha2_target = co3_eq / max(dic_val, 1e-12)
@@ -504,7 +504,7 @@ def adjust_for_calcite_equilibrium(
         return spec, msg
 
     # Case 2: pH & TA given -> adjust DIC
-    elif has_ph and has_ta and not has_dic:
+    elif ph is not None and ta is not None and dic is None:
         ta_val = float(ta)
         # From TA = [HCO3-] + 2[CO32-]eq  ==> [HCO3-]eq = TA - 2[CO32-]eq
         hco3_eq = ta_val - 2.0 * co3_eq
@@ -537,7 +537,7 @@ def adjust_for_calcite_equilibrium(
         return spec, msg
 
     # Case 3: DIC & TA given -> adjust pH
-    elif has_dic and has_ta and not has_ph:
+    elif dic is not None and ta is not None and ph is None:
         dic_val = float(dic)
         ta_orig = float(ta)
         # alpha2 required to produce co3_eq

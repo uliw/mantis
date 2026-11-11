@@ -161,7 +161,7 @@ class DiageneticModelResult:
 
         """
         import mantis.plot_data_new as pdn
-        layout = layout_file or getattr(self.mp, "layout_file", "plot_layout.py")
+        layout = layout_file or getattr(self.mp, "layout_file", "plot_layout.py") or "plot_layout.py"
         p_layout = Path(layout)
         if not p_layout.is_absolute():
             if (Path.cwd() / p_layout).exists():
@@ -1127,7 +1127,7 @@ class DiageneticModel:
             if isinstance(h_bc, dict) and "Dirichlet" in h_bc and h_bc["Dirichlet"] is not None:
                 ph_val = float(h_bc["Dirichlet"])
 
-        if is_carbonate:
+        if is_carbonate and isinstance(carb_cfg, dict):
             from mantis.seawater_carbonate import (
                 adjust_for_calcite_equilibrium,
                 calc_carbonate_constants,
@@ -1284,12 +1284,14 @@ class DiageneticModel:
                     f"           {adjust_msg}\n"
                 )
             else:
-                if has_ta and has_dic:
-                    carb_spec = solve_carbonate_speciation_from_ta_dic(ta_top, dic_top, carb_constants)
-                elif has_ph and has_dic:
-                    carb_spec = solve_carbonate_speciation_from_dic_ph(dic_top, ph_top, carb_constants)
-                else:  # has_ph and has_ta
-                    carb_spec = solve_carbonate_speciation_from_ta_ph(ta_top, ph_top, carb_constants)
+                if has_ta and has_dic and ta_top is not None and dic_top is not None:
+                    carb_spec = solve_carbonate_speciation_from_ta_dic(float(ta_top), float(dic_top), carb_constants)
+                elif has_ph and has_dic and dic_top is not None and ph_top is not None:
+                    carb_spec = solve_carbonate_speciation_from_dic_ph(float(dic_top), float(ph_top), carb_constants)
+                elif ta_top is not None and ph_top is not None:  # has_ph and has_ta
+                    carb_spec = solve_carbonate_speciation_from_ta_ph(float(ta_top), float(ph_top), carb_constants)
+                else:
+                    raise ValueError("Insufficient carbonate boundary conditions specified.")
 
                 omega = (ca2_top * carb_spec["CO3"]) / carb_constants.Ksp_calcite
                 self.mp.pH = carb_spec["pH"]
@@ -1326,7 +1328,7 @@ class DiageneticModel:
             from mantis.generate_equation_system import make_null_reactions
             eq_mod = make_null_reactions()
             self.mp.reactions_module = eq_mod
-            self._raw_reactions = []
+            self._raw_reactions: list[dict[str, Any]] = []
             get_rc_fn = None
             self.p_dict["use_numerical_jacobian"] = False
             self.mp.use_numerical_jacobian = False
@@ -1402,7 +1404,8 @@ class DiageneticModel:
         if isinstance(self.mp.phi, dict):
             from mantis.diff_lib import compute_porosity_profile
             phi_top = float(self.mp.phi.get("top", 0.9))
-            phi_bottom = float(self.mp.phi.get("bottom", self.mp.phi.get("inf", 0.8)))
+            phi_bottom_val = self.mp.phi.get("bottom", self.mp.phi.get("inf", 0.8))
+            phi_bottom = float(phi_bottom_val) if phi_bottom_val is not None else 0.8
             z_half = self.mp.phi.get("half_depth", self.mp.phi.get("z_half", None))
             z_decay = self.mp.phi.get("decay", self.mp.phi.get("z_decay", None))
             phi_arr = compute_porosity_profile(
@@ -1641,7 +1644,7 @@ class DiageneticModel:
         # Lumped mixed-phase diffusion scaling (porewater retardation)
         for sp_name, meta in species_defs.items():
             if meta.get("phase") == "mixed" and hasattr(D_mol, sp_name):
-                diss_frac = 1.0
+                diss_frac: float | np.ndarray = 1.0
                 part = meta.get("partition", {})
                 if "dissolved" in part:
                     try:

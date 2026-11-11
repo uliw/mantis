@@ -158,6 +158,8 @@ class ReactionSystemValidator:
         def _extract_limiters_from_ast(tree: ast.AST):
             extracted = {}
             for node in ast.walk(tree):
+                val_node: ast.expr | None = None
+                targets: list[ast.expr] = []
                 if isinstance(node, ast.Assign):
                     targets = node.targets
                     val_node = node.value
@@ -669,7 +671,7 @@ def generate_equations(
     reactions_path: str | Path,
     equations_path: str | Path,
     kinetic_constants_path: str | Path = Path("nbk/experiments/reaction_constants.py"),
-    limiters_path: str | Path = Path("nbk/experiments/limiters.py"),
+    limiters_path: str | Path | None = Path("nbk/experiments/limiters.py"),
     species_path: str | Path = Path("nbk/experiments/species.py"),
     verbose: bool = False,
     validate_only: bool = False,
@@ -765,7 +767,7 @@ def resolve_and_prepare_equations(
     p_dict: dict[str, Any],
     experiment_name: str | None = None,
     base_dir: Path | None = None,
-) -> tuple[Any, Path, Path]:
+) -> tuple[Any, Path | None, Path | None]:
     """Resolves reaction and equation files from p_dict, regenerates equations if outdated,
     and dynamically imports the equations module.
 
@@ -933,6 +935,14 @@ def resolve_and_prepare_equations(
 
 class ReactionCategory(str):
     """Encapsulates classification metadata for a reaction while acting as a string for backward compatibility."""
+
+    mechanism: str
+    phase_archetype: str
+    has_solid_reactant: bool
+    has_solid_product: bool
+    reactants: list[tuple[float, str]]
+    products: list[tuple[float, str]]
+    canonical_name: str
 
     def __new__(
         cls,

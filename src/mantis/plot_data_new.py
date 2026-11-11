@@ -2372,9 +2372,9 @@ def broken_axis(ax, *args, **kwargs):
 broken_y = broken_axis
 
 # Attach as methods to matplotlib.axes.Axes
-plt.Axes.exclude_y = exclude_y
-plt.Axes.broken_axis = broken_axis
-plt.Axes.broken_y = broken_axis
+setattr(plt.Axes, "exclude_y", exclude_y)
+setattr(plt.Axes, "broken_axis", broken_axis)
+setattr(plt.Axes, "broken_y", broken_axis)
 
 
 def _apply_matplotlib_options(ax, options):

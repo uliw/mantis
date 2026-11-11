@@ -7,7 +7,7 @@ name = "mantis-rtm"
 dynamic = ["version"]
 description = "MANTIS: A Monolithic Assembly of Nonlinear Transport Interactions Solver"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.13"
 license = "AGPL-3.0-or-later"
 license-files = ["LICENSE"]
 authors = [
@@ -29,7 +29,6 @@ classifiers = [
   "Topic :: Scientific/Engineering :: Chemistry",
   "Topic :: Scientific/Engineering :: Physics",
   "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
   "Programming Language :: Python :: 3.14",
   "Programming Language :: Python :: 3.15",
@@ -152,6 +151,14 @@ typeCheckingMode = 'basic'
 
 pythonVersion = "3.14"
 pythonPlatform = "Linux"
+
+[tool.mypy]
+python_version = "3.13"
+files = ["src"]
+ignore_missing_imports = true
+follow_imports = "silent"
+warn_redundant_casts = true
+warn_unused_ignores = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -60,12 +60,13 @@ def _find_definition_location(var_name: str = "isotope_standards", key: str | No
                 elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
                     target_name = node.target.id
 
-                if target_name == var_name and isinstance(node.value, ast.Dict):
+                node_val = getattr(node, "value", None)
+                if target_name == var_name and isinstance(node_val, ast.Dict):
                     if key is not None:
-                        for k in node.value.keys:
+                        for k in node_val.keys:
                             if isinstance(k, ast.Constant) and k.value == key:
                                 return f"{candidate_path}:{k.lineno}"
-                    return f"{candidate_path}:{node.lineno}"
+                    return f"{candidate_path}:{getattr(node, 'lineno', 1)}"
         except Exception:
             pass
         return str(candidate_path)
@@ -175,7 +176,7 @@ def parse_boundary_condition(
     sp_name: str,
     location: str,
     ureg: Any = None,
-) -> tuple[str, float, dict[str, Any]]:
+) -> tuple[str, float | None, dict[str, Any]]:
     """Parse and strictly validate a boundary condition dictionary ('bc_top' or 'bc_bot').
     
     Returns:

@@ -6,6 +6,7 @@ import signal
 import sys
 import time
 from typing import TYPE_CHECKING, Any
+from multiprocessing.process import BaseProcess
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -200,10 +201,10 @@ class LivePlotter:
                 resume_threshold=resume_threshold,
                 ctx=self._ctx,
             )
-        self._process: mp.Process | None = None
+        self._process: BaseProcess | None = None
 
     @property
-    def queue(self):
+    def queue(self) -> Any:
         if self._backend is not None:
             return self._backend.queue
         return self._queue
@@ -212,7 +213,7 @@ class LivePlotter:
         """Launch the background plotting process / parallel video pipeline."""
         if self._backend is not None:
             self._backend.start()
-        else:
+        elif self._ctx is not None:
             self._process = self._ctx.Process(target=self._run_plot_loop, daemon=False)
             self._process.start()
 
@@ -249,10 +250,11 @@ class LivePlotter:
             return
 
         if self._process and self._process.is_alive():
-            try:
-                self._queue.put(None, timeout=2)  # Sentinel for exit
-            except Exception:
-                pass
+            if self._queue is not None:
+                try:
+                    self._queue.put(None, timeout=2)  # Sentinel for exit
+                except Exception:
+                    pass
             self._process.join(timeout=15)
             if self._process.is_alive():
                 self._process.terminate()
@@ -404,14 +406,14 @@ class LivePlotter:
                             )
                             writer = None
 
-                    if writer:
+                    if writer and self.video_path:
                         if not hasattr(writer, "_saving"):
                             print(
                                 f"[LivePlotter] Setting up writer for {self.video_path}...",
                                 flush=True,
                             )
-                            writer.setup(fig, self.video_path, dpi=300)
-                            writer._saving = True
+                            writer.setup(fig, str(self.video_path), dpi=300)
+                            setattr(writer, "_saving", True)
                         try:
                             writer.grab_frame()
                         except Exception as ge:
@@ -430,6 +432,8 @@ class LivePlotter:
                 return False
 
             while True:
+                if self._queue is None:
+                    break
                 try:
                     data_item = self._queue.get(timeout=0.1)
                     if process_data_item(data_item):

@@ -7,6 +7,7 @@ import signal
 import subprocess
 import sys
 from typing import TYPE_CHECKING, Any
+from multiprocessing.process import BaseProcess
 
 import numpy as np
 import pandas as pd
@@ -334,7 +335,7 @@ def _video_sequencer(
                 except (BrokenPipeError, OSError) as e:
                     print(f"[ParallelVideoSequencer] BrokenPipeError writing frame {next_frame_idx}: {e}", flush=True)
                     break
-            elif last_valid_buf is not None and ffmpeg_proc is not None:
+            elif last_valid_buf is not None and ffmpeg_proc is not None and ffmpeg_proc.stdin is not None:
                 # Fallback: duplicate last valid frame on worker render error
                 try:
                     ffmpeg_proc.stdin.write(last_valid_buf)
@@ -357,7 +358,8 @@ def _video_sequencer(
 
     if ffmpeg_proc is not None:
         try:
-            ffmpeg_proc.stdin.close()
+            if ffmpeg_proc.stdin is not None:
+                ffmpeg_proc.stdin.close()
             ffmpeg_proc.wait(timeout=30)
             if ffmpeg_proc.returncode != 0:
                 err_msg = ffmpeg_proc.stderr.read().decode("utf-8", errors="replace") if ffmpeg_proc.stderr else ""
@@ -416,8 +418,8 @@ class ParallelVideoManager:
         self._result_queue = self._ctx.Queue()
         self._stop_event = self._ctx.Event()
 
-        self._workers: list[mp.Process] = []
-        self._sequencer: mp.Process | None = None
+        self._workers: list[BaseProcess] = []
+        self._sequencer: BaseProcess | None = None
         self._started = False
 
     @property

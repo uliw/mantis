@@ -1630,8 +1630,6 @@ def save_data_async(
         f_snap,
     )
 
-    return None, None
-
 
 _ureg = None
 
@@ -1766,7 +1764,7 @@ def make_grid_from_sections(
             "sections must be a non-empty list, tuple, or array of [start, stop, initial_dz, final_dz]."
         )
 
-    cleaned = []
+    cleaned: list[list[float]] = []
     for i, sec in enumerate(sections):
         if not isinstance(sec, (list, tuple, np.ndarray)) or len(sec) != 4:
             raise ValueError(
@@ -1843,20 +1841,20 @@ def make_grid_from_sections(
                 knots_z.append(z1)
                 knots_log_dz.append(np.log(dz1))
 
-        knots_z = np.array(knots_z, dtype=np.float64)
-        knots_log_dz = np.array(knots_log_dz, dtype=np.float64)
-        uidx = np.concatenate(([True], np.diff(knots_z) > 1e-10))
-        knots_z = knots_z[uidx]
-        knots_log_dz = knots_log_dz[uidx]
+        knots_z_arr = np.array(knots_z, dtype=np.float64)
+        knots_log_dz_arr = np.array(knots_log_dz, dtype=np.float64)
+        uidx = np.concatenate(([True], np.diff(knots_z_arr) > 1e-10))
+        knots_z_arr = knots_z_arr[uidx]
+        knots_log_dz_arr = knots_log_dz_arr[uidx]
 
-        if len(knots_z) == 1:
-            log_interp = lambda z: np.full_like(z, knots_log_dz[0])
-        elif len(knots_z) == 2:
-            log_interp = lambda z: knots_log_dz[0] + (z - knots_z[0]) / (
-                knots_z[1] - knots_z[0]
-            ) * (knots_log_dz[1] - knots_log_dz[0])
+        if len(knots_z_arr) == 1:
+            log_interp = lambda z: np.full_like(z, knots_log_dz_arr[0])
+        elif len(knots_z_arr) == 2:
+            log_interp = lambda z: knots_log_dz_arr[0] + (z - knots_z_arr[0]) / (
+                knots_z_arr[1] - knots_z_arr[0]
+            ) * (knots_log_dz_arr[1] - knots_log_dz_arr[0])
         else:
-            pchip = PchipInterpolator(knots_z, knots_log_dz)
+            pchip = PchipInterpolator(knots_z_arr, knots_log_dz_arr)
             log_interp = lambda z: pchip(z)
 
         all_faces = [cleaned[0][0]]
@@ -1880,7 +1878,7 @@ def make_grid_from_sections(
         dx = np.diff(faces)
     else:
         # Exact geometric progression per section with boundary smoothing
-        secs_to_generate = []
+        secs_to_generate: list[list[float]] = []
         for i, (z0, z1, dz0, dz1) in enumerate(cleaned):
             if i > 0 and smooth_discontinuities:
                 prev_z0, prev_z1, prev_dz0, prev_dz1 = secs_to_generate[-1]
@@ -1955,7 +1953,7 @@ def make_grid2(
     """
     rz_start, rz_end = reaction_zone
     dx_list = []
-    current_z = 0
+    current_z: float = 0.0
 
     # 1. Refinement / expansion phase: from surface to reaction zone
     current_dx = initial_spacing
@@ -2440,8 +2438,8 @@ def add_coupled_reaction(
     rate_master,
     has_solid: bool,
     reaction_name: str,
-    ref_species: str = None,
-    stoich_ref: float = None,
+    ref_species: str | None = None,
+    stoich_ref: float | None = None,
 ):
     """Couple multiple reactants and products to a single master reactant."""
     phi = mp.phi
@@ -2787,7 +2785,8 @@ def compute_carbonate_speciation(c: Any, mp: Any) -> None:
                         parent_val = _get_val_arr(getattr(c, parent_name))
                         pKa = 7.0
                         if "constants" in meta and isinstance(meta["constants"], dict):
-                            pKa = float(meta["constants"].get("pKa1", meta["constants"].get("pKa", 7.0)))
+                            pKa_val = meta["constants"].get("pKa1", meta["constants"].get("pKa", 7.0))
+                            pKa = float(pKa_val) if pKa_val is not None else 7.0
                         Ka = 10.0 ** (-pKa)
                         d_non_carb -= factor * parent_val * (Ka * H_cur) / ((H_cur + Ka)**2)
 
@@ -2865,17 +2864,17 @@ def compute_carbonate_speciation(c: Any, mp: Any) -> None:
             KFe_ads = float(getattr(mp, "KFe_ads", 0.001))
 
             ts2_raw = getattr(c, "TS2", 0.0)
-            ts2_val = np.asarray(ts2_raw.value if hasattr(ts2_raw, "value") else ts2_raw, dtype=np.float64)
+            ts2_val = np.asarray(getattr(ts2_raw, "value", ts2_raw) if ts2_raw is not None else 0.0, dtype=np.float64)
             hs_pw = ts2_val * c.hs_frac
 
             so4_raw = getattr(c, "SO4", 0.0)
-            so4_val = np.asarray(so4_raw.value if hasattr(so4_raw, "value") else so4_raw, dtype=np.float64)
+            so4_val = np.asarray(getattr(so4_raw, "value", so4_raw) if so4_raw is not None else 0.0, dtype=np.float64)
 
             poc_raw = getattr(c, "POC", 0.0)
-            poc_val = np.asarray(poc_raw.value if hasattr(poc_raw, "value") else poc_raw, dtype=np.float64)
+            poc_val = np.asarray(getattr(poc_raw, "value", poc_raw) if poc_raw is not None else 0.0, dtype=np.float64)
 
             phi_raw = getattr(mp, "phi", 0.8)
-            phi_val = np.asarray(phi_raw.value if hasattr(phi_raw, "value") else phi_raw, dtype=np.float64)
+            phi_val = np.asarray(getattr(phi_raw, "value", phi_raw) if phi_raw is not None else 0.8, dtype=np.float64)
             dstopw = (1.0 - phi_val) / np.maximum(phi_val, 1e-6)
 
             ads_factor = 1.0 + KFe_ads * poc_val * dstopw
@@ -2926,10 +2925,11 @@ def update_all_species(c: Any, mp: Any) -> None:
     for s_name in dir(c):
         if not s_name.startswith("_") and s_name not in eval_ctx:
             v = getattr(c, s_name, None)
-            if hasattr(v, "value"):
-                eval_ctx[s_name] = np.asarray(v.value, dtype=np.float64)
-            elif isinstance(v, (np.ndarray, float, int)):
-                eval_ctx[s_name] = np.asarray(v, dtype=np.float64)
+            if v is not None:
+                if hasattr(v, "value"):
+                    eval_ctx[s_name] = np.asarray(v.value, dtype=np.float64)
+                elif isinstance(v, (np.ndarray, float, int)):
+                    eval_ctx[s_name] = np.asarray(v, dtype=np.float64)
     # Expose numeric constants and parameters from mp
     for attr in dir(mp):
         if not attr.startswith("_") and attr not in eval_ctx:
@@ -3004,9 +3004,9 @@ def update_all_species(c: Any, mp: Any) -> None:
 
                 if child_val is not None:
                     target = getattr(c, sp_name, None)
-                    if hasattr(target, "setValue"):
+                    if target is not None and hasattr(target, "setValue"):
                         target.setValue(child_val)
-                    elif hasattr(target, "__setitem__"):
+                    elif target is not None and hasattr(target, "__setitem__"):
                         target[:] = child_val
                     else:
                         setattr(c, sp_name, child_val)
@@ -3072,30 +3072,30 @@ def update_all_species(c: Any, mp: Any) -> None:
                     continue
                 prim_iso_val = get_v(getattr(c, prim_iso))
 
-                iso1_name = None
-                iso2_name = None
+                iso1_name: str | None = None
+                iso2_name: str | None = None
                 meta1 = sub_sp_map.get(sp1, {})
                 meta2 = sub_sp_map.get(sp2, {})
                 if isinstance(meta1, dict) and "isotopes" in meta1:
                     for k_i, ref_i in meta1["isotopes"].items():
                         if ref_i == iso_ref:
-                            iso1_name = k_i
+                            iso1_name = str(k_i)
                             break
                 if isinstance(meta2, dict) and "isotopes" in meta2:
                     for k_i, ref_i in meta2["isotopes"].items():
                         if ref_i == iso_ref:
-                            iso2_name = k_i
+                            iso2_name = str(k_i)
                             break
 
                 if not iso1_name:
                     for s_k, s_m in species_defs.items():
                         if isinstance(s_m, dict) and s_m.get("isotope_of") == sp1:
-                            iso1_name = s_k
+                            iso1_name = str(s_k)
                             break
                 if not iso2_name:
                     for s_k, s_m in species_defs.items():
                         if isinstance(s_m, dict) and s_m.get("isotope_of") == sp2:
-                            iso2_name = s_k
+                            iso2_name = str(s_k)
                             break
 
                 # Resolve alpha for this specific pair
@@ -3135,20 +3135,20 @@ def update_all_species(c: Any, mp: Any) -> None:
                 iso2_val = np.maximum(prim_iso_val - iso1_val, 0.0)
 
                 if iso1_name:
-                    t1 = getattr(c, iso1_name, None)
-                    if hasattr(t1, "setValue"):
-                        t1.setValue(iso1_val)
-                    elif hasattr(t1, "__setitem__"):
-                        t1[:] = iso1_val
+                    target1 = getattr(c, iso1_name, None)
+                    if target1 is not None and hasattr(target1, "setValue"):
+                        target1.setValue(iso1_val)
+                    elif target1 is not None and hasattr(target1, "__setitem__"):
+                        target1[:] = iso1_val
                     else:
                         setattr(c, iso1_name, iso1_val)
 
                 if iso2_name:
-                    t2 = getattr(c, iso2_name, None)
-                    if hasattr(t2, "setValue"):
-                        t2.setValue(iso2_val)
-                    elif hasattr(t2, "__setitem__"):
-                        t2[:] = iso2_val
+                    target2 = getattr(c, iso2_name, None)
+                    if target2 is not None and hasattr(target2, "setValue"):
+                        target2.setValue(iso2_val)
+                    elif target2 is not None and hasattr(target2, "__setitem__"):
+                        target2[:] = iso2_val
                     else:
                         setattr(c, iso2_name, iso2_val)
 
@@ -3263,7 +3263,7 @@ def compute_sediment_age(
     else:
         Db_raw = Db.value if hasattr(Db, "value") else Db
         Db_arr = np.asarray(Db_raw, dtype=np.float64) if np.ndim(Db_raw) > 0 else np.full(N, float(Db_raw), dtype=np.float64)
-        has_db = np.any(Db_arr > 1e-20)
+        has_db = bool(np.any(Db_arr > 1e-20))
 
     if not has_db:
         age = np.zeros(N, dtype=np.float64)
@@ -3611,7 +3611,7 @@ def convert_reaction_constants(
         calling_frame = calling_frame.f_back
 
     # Helper to resolve mp context for age profiles
-    def _eval_age_profile(ap: AgeProfile, factor_mag: float = 1.0) -> np.ndarray:
+    def _eval_age_profile(ap: AgeProfile, factor_mag: float = 1.0) -> np.ndarray | AgeScaledExpression:
         z = getattr(mp, "z", None) if mp is not None else ap.z
         w = getattr(mp, "w", None) if mp is not None else ap.w
         phi = getattr(mp, "phi", None) if mp is not None else ap.phi
