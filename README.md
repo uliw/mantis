@@ -1,4 +1,4 @@
-# <img src="mantis.svg" alt="MANTIS Logo" width="15%" style="vertical-align: middle; max-width: 100px; display: inline-block; margin-right: 10px;" align="left" /> MANTIS: A Python framework to solve extremely stiff isotope enabled reaction-transport equations using a *M*onolithic *A*ssembly of *N*onlinear *T*ransport *I*nteractions *S*olver (MANTIS)
+# <img src="mantis.svg" alt="MANTIS Logo" width="20%" style="vertical-align: middle; max-width: 200px; display: inline-block; margin-right: 10px;" align="left" /> MANTIS: A Python framework to solve extremely stiff isotope enabled reaction-transport equations using a *M*onolithic *A*ssembly of *N*onlinear *T*ransport *I*nteractions *S*olver (MANTIS)
 
 [![Build Status](https://github.com/uliw/mantis/actions/workflows/tests.yml/badge.svg)](https://github.com/uliw/mantis/actions/workflows/tests.yml)
 [![Documentation Status](https://readthedocs.org/projects/mantis-rtm/badge/?version=latest)](https://mantis-rtm.readthedocs.io/en/latest/?badge=latest)
@@ -6,7 +6,7 @@
 [![Python Versions](https://img.shields.io/badge/python-3.13%20%7C%203.14%20%7C%203.15-blue.svg)](https://pypi.org/project/mantis-rtm/)
 [![License: AGPL-3.0-or-later](https://img.shields.io/badge/License-AGPL_3.0--or--later-blue.svg)](https://github.com/uliw/mantis/blob/main/LICENSE)
 
-**MANTIS** is a high-performance 1D reactive-transport modeling (RTM) framework written in Python. Unlike most reaction-transport codes, Mantis uses a fully coupled monolithic equation system. This approach allows to solve  stiff, tightly coupled, non-linear advection-diffusion-reaction networks efficiently with minimal computational overhead. Mantis supports non-uniform grids, speciation, and adsorption as well as kinetic and equilibrium isotope effects.
+ is a high-performance 1D reactive-transport modeling (RTM) framework written in Python. Unlike most reaction-transport codes, Mantis uses a fully coupled monolithic equation system. This approach allows to solve  stiff, tightly coupled, non-linear advection-diffusion-reaction networks efficiently with minimal computational overhead. Mantis supports non-uniform grids, speciation, and adsorption as well as kinetic and equilibrium isotope effects.
 
 MANTIS models are defined through a declarative interface that is easy to read, and has an  integrated plotting system that supports asynchronous time-lapse video generation.
 
