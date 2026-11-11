@@ -1,4 +1,4 @@
-# MANTIS: A Python framework to solve extremely stiff isotope enabled reaction-transport equations using a *M*onolithic *A*ssembly of *N*onlinear *T*ransport *I*nteractions *S*olver (MANTIS)
+# <img src="mantis.svg" alt="MANTIS Logo" width="10%" style="vertical-align: middle; max-width: 100px; display: inline-block; margin-right: 10px;" align="left" /> MANTIS: A Python framework to solve extremely stiff isotope enabled reaction-transport equations using a *M*onolithic *A*ssembly of *N*onlinear *T*ransport *I*nteractions *S*olver (MANTIS)
 
 [![Build Status](https://github.com/uliw/mantis/actions/workflows/tests.yml/badge.svg)](https://github.com/uliw/mantis/actions/workflows/tests.yml)
 [![Documentation Status](https://readthedocs.org/projects/mantis-rtm/badge/?version=latest)](https://mantis-rtm.readthedocs.io/en/latest/?badge=latest)

@@ -1,0 +1,9 @@
+/* Ensure the logo spans the full width of the RTD sidebar navigation pane minus padding */
+.wy-side-nav-search .wy-dropdown>a img.logo,
+.wy-side-nav-search>a img.logo {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    height: auto;
+    margin: 0 auto 0.8em auto;
+}
