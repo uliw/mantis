@@ -60,8 +60,8 @@ mantis-create-examples = "mantis.mantis_create_examples:main"
 
 # Optional extras (e.g. for development, testing, docs)
 [project.optional-dependencies]
-dev = ["ruff", "twine", "build"]
-test = ["pytest", "pytest-cov", "scipy"]
+dev = ["ruff", "twine", "build", "mypy"]
+test = ["pytest", "pytest-cov", "scipy", "mypy"]
 doc = [
     "sphinx>=7.0",
     "sphinx-rtd-theme>=3.0",

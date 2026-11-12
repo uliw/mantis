@@ -1,14 +1,14 @@
-# <img src="mantis.svg" alt="MANTIS Logo" width="20%" style="vertical-align: middle; max-width: 200px; display: inline-block; margin-right: 10px;" align="left" />  A Python framework to solve extremely stiff isotope enabled reaction-transport equations using a *M*onolithic *A*ssembly of *N*onlinear *T*ransport *I*nteractions *S*olver (MANTIS)
+# <img src="mantis.svg" alt="MANTIS Logo" width="20%" style="vertical-align: middle; max-width: 200px; display: inline-block; margin-right: 10px;" align="left" />  A Python framework to solve stiff reaction-transport systems in seconds using a *M*onolithic *A*ssembly of *N*onlinear *T*ransport *I*nteractions *S*olver (MANTIS)
 
 [![Build Status](https://github.com/uliw/mantis/actions/workflows/tests.yml/badge.svg)](https://github.com/uliw/mantis/actions/workflows/tests.yml)
+[![Type Checking](https://github.com/uliw/mantis/actions/workflows/typecheck.yml/badge.svg)](https://github.com/uliw/mantis/actions/workflows/typecheck.yml)
 [![Documentation Status](https://readthedocs.org/projects/mantis-rtm/badge/?version=latest)](https://mantis-rtm.readthedocs.io/en/latest/?badge=latest)
 [![PyPI Version](https://img.shields.io/pypi/v/mantis-rtm.svg)](https://pypi.org/project/mantis-rtm/)
 [![Python Versions](https://img.shields.io/badge/python-3.13%20%7C%203.14%20%7C%203.15-blue.svg)](https://pypi.org/project/mantis-rtm/)
 [![License: AGPL-3.0-or-later](https://img.shields.io/badge/License-AGPL_3.0--or--later-blue.svg)](https://github.com/uliw/mantis/blob/main/LICENSE)
 
- Mantis is a high-performance 1D reactive-transport modeling (RTM) framework written in Python. Unlike most reaction-transport codes, Mantis uses a fully coupled monolithic equation system. This approach allows to solve  stiff, tightly coupled, non-linear advection-diffusion-reaction networks efficiently with minimal computational overhead. Mantis supports non-uniform grids, speciation, and adsorption as well as kinetic and equilibrium isotope effects.
-
-MANTIS models are defined through a declarative interface that is easy to read, and has an  integrated plotting system that supports asynchronous time-lapse video generation.
+ Reaction-transport systems involving fast precipitation/dissolution reactions are often extremely stiff. This poses a particular challenge in the geosciences, where the spatial extent of the reaction zone often requires centuries to kiloyears to reach equilibrium, whereas the reaction time scales are often on timescales of seconds. Operator splitting schemes that solve the fast reactions independently of transport are still time-step limited, as larger time steps result in mass imbalances. Here I present a Python framework that uses  a fully coupled monolithic equation system that uses the Newton-Raphson scheme with a Block Thomas Algorithm that can be solved at almost arbitrary large time steps and often within a single iteration.  This allows Mantis to solve stiff non-linear reaction networks within seconds, and in cases where a single iteration is sufficient, milliseconds. Mantis uses 
+ an easy-to-read template scheme to define species properties, kinetic constants and reactions including native support for kinetic and equilibrium isotope effects. 
 
 
 ## How is MANTIS Different from Other RTM Packages?
