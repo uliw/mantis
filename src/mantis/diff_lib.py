@@ -19,6 +19,9 @@ The module contains:
     - :func:=get_l_mass= – derives the concentration of the light isotope from a
       measured total concentration, a delta value and the reference ratio.
 
+    - :func:=get_flux= – calculates the vertical flux of a species at the lower boundary
+      (default) or at a specified depth.
+
     - :func:=relax_solution= – blends a current solution vector with a previous one,
       limiting the change to a specified fraction and enforcing non‑negative values.
 
@@ -466,6 +469,253 @@ def relax_solution(curr_sol, last_sol, fraction):
     """
     sol = last_sol * (1 - fraction) + curr_sol * fraction
     return sol * (sol >= 0)  # exclude negative solutions
+
+
+def get_flux(
+    species: str,
+    depth: float | str | None = None,
+    result: Any | None = None,
+    c: Any | None = None,
+    mp: Any | None = None,
+    z: Any | None = None,
+    D_mol: Any | None = None,
+    df: Any | None = None,
+    units: str | None = None,
+) -> float:
+    """Calculate the 1D vertical flux of a chemical species at a given depth or lower boundary.
+
+    The total flux J(z) is defined following standard diagenetic transport theory
+    (positive downwards into the sediment column):
+        J(z) = J_adv(z) + J_diff(z)
+             = eff_phi(z) * w(z) * C(z) - eff_phi(z) * D_eff(z) * (dC / dz)
+
+    where:
+    - eff_phi is porosity phi for dissolved/liquid species and (1 - phi) for particulate/solid species.
+    - w is the advection / sedimentation velocity at depth z (m/s).
+    - C is the species concentration (mol/m^3_phase: mol/m^3_porewater or mol/m^3_solid).
+    - D_eff is the effective diffusion/dispersion/biomixing coefficient (m^2/s).
+    - dC/dz is the vertical concentration gradient (mol/m^4).
+
+    Parameters
+    ----------
+    species : str
+        Name of the species (e.g. 'SO4', 'Fe2', 'FeS', 'POC').
+    depth : float, str, or None, optional
+        Depth at which to calculate the flux. Can be a numeric value in meters or a string
+        with units (e.g. '10 cm', '0.5 m'). If None (default), the flux is calculated at
+        the lower boundary of the domain.
+    result : Any, optional
+        DiageneticModelResult object or object containing (mp, c, z, D_mol, df).
+    c : Any, optional
+        Concentration container or dictionary holding species concentration profiles.
+    mp : Any, optional
+        Model parameters object containing porosity (phi), sedimentation velocity (w),
+        species metadata, etc.
+    z : Any, optional
+        Depth coordinate array (cell centers or profile depths in meters).
+    D_mol : Any, optional
+        Container holding diffusion coefficients (molecular diffusion and bioturbation D_bio).
+    df : Any, optional
+        DataFrame of simulation results (e.g. from result.save_csv() or result.df).
+    units : str or None, optional
+        Desired return unit (e.g. 'mol/(m^2*s)', 'mmol/(m^2*yr)', 'umol/(cm^2*yr)').
+        If None (default), returns internal MANTIS flux units: mol/(m^2 * s).
+
+    Returns
+    -------
+    float
+        Calculated flux (in internal mol/(m^2*s) or converted to specified units).
+    """
+    # 1. Unpack context from result if provided
+    if result is not None:
+        if mp is None and hasattr(result, "mp"):
+            mp = result.mp
+        if c is None and hasattr(result, "c"):
+            c = result.c
+        if z is None and hasattr(result, "z"):
+            z = result.z
+        if D_mol is None and hasattr(result, "D_mol"):
+            D_mol = result.D_mol
+        if df is None and hasattr(result, "df") and result.df is not None:
+            df = result.df
+
+    def _get_val(obj: Any) -> Any:
+        if hasattr(obj, "value"):
+            return obj.value
+        return obj
+
+    # 2. Extract z coordinates
+    z_arr = None
+    if z is not None:
+        z_arr = np.asarray(_get_val(z), dtype=np.float64)
+    elif df is not None and "z" in df:
+        z_arr = np.asarray(df["z"], dtype=np.float64)
+    elif mp is not None and hasattr(mp, "z") and mp.z is not None:
+        z_arr = np.asarray(_get_val(mp.z), dtype=np.float64)
+    elif mp is not None and hasattr(mp, "mesh") and mp.mesh is not None:
+        z_arr = np.asarray(mp.mesh.cellCenters[0], dtype=np.float64)
+
+    # 3. Extract concentration profile for the species
+    c_arr = None
+    if c is not None:
+        if hasattr(c, species):
+            c_arr = np.asarray(_get_val(getattr(c, species)), dtype=np.float64)
+        elif isinstance(c, dict) and species in c:
+            c_arr = np.asarray(_get_val(c[species]), dtype=np.float64)
+        elif hasattr(c, f"c_{species}"):
+            c_arr = np.asarray(_get_val(getattr(c, f"c_{species}")), dtype=np.float64)
+        elif isinstance(c, dict) and f"c_{species}" in c:
+            c_arr = np.asarray(_get_val(c[f"c_{species}"]), dtype=np.float64)
+
+    if c_arr is None and df is not None:
+        for col_cand in (f"c_{species}", species):
+            if col_cand in df:
+                c_arr = np.asarray(df[col_cand], dtype=np.float64)
+                break
+
+    if c_arr is None:
+        raise ValueError(f"[MANTIS ERROR] Species '{species}' concentration profile could not be found.")
+
+    N = len(c_arr)
+    if z_arr is None:
+        # Default uniform 1-meter column if no coordinates provided
+        z_arr = np.linspace(0.0, 1.0, N)
+
+    # 4. Determine species phase and basis
+    is_solid = is_solid_species(species, mp=mp)
+    species_defs = getattr(mp, "species_defs", None) or getattr(mp, "species", None)
+    sp_meta = species_defs.get(species, {}) if isinstance(species_defs, dict) else {}
+    sp_phase = sp_meta.get("phase", "solid" if is_solid else "liquid")
+    sp_basis = sp_meta.get("basis", None)
+
+    if sp_basis in ("liquid", "porewater"):
+        is_dissolved = True
+    elif sp_basis == "solid":
+        is_dissolved = False
+    else:
+        is_dissolved = (sp_phase == "liquid")
+
+    # 5. Extract porosity phi
+    phi_raw = None
+    if df is not None and "phi" in df:
+        phi_raw = np.asarray(df["phi"], dtype=np.float64)
+    elif mp is not None and hasattr(mp, "phi") and mp.phi is not None:
+        phi_raw = _get_val(mp.phi)
+    elif c is not None and hasattr(c, "phi"):
+        phi_raw = _get_val(c.phi)
+
+    if phi_raw is None:
+        phi_arr = np.full(N, 0.8, dtype=np.float64)
+    else:
+        phi_arr = np.asarray(phi_raw, dtype=np.float64)
+        if phi_arr.ndim == 0:
+            phi_arr = np.full(N, float(phi_arr), dtype=np.float64)
+
+    eff_phi_arr = phi_arr if is_dissolved else (1.0 - phi_arr)
+
+    # 6. Extract advective velocity w
+    w_raw = None
+    if df is not None and "w" in df:
+        w_raw = np.asarray(df["w"], dtype=np.float64)
+    elif mp is not None and hasattr(mp, "w") and mp.w is not None:
+        w_raw = _get_val(mp.w)
+
+    if w_raw is None:
+        w_arr = np.zeros(N, dtype=np.float64)
+    else:
+        w_arr = np.asarray(w_raw, dtype=np.float64)
+        if w_arr.ndim == 0:
+            w_arr = np.full(N, float(w_arr), dtype=np.float64)
+
+    # Accounting for compaction or porewater advection
+    if is_dissolved:
+        adv_sub = getattr(mp, "advection", 0.0) if mp is not None else 0.0
+        w_eff = w_arr - float(_get_val(adv_sub))
+    else:
+        if len(phi_arr) > 1 and np.all(w_arr == w_arr[0]):
+            phi_inf = float(phi_arr[-1])
+            w_eff = w_arr * (1.0 - phi_inf) / np.maximum(1.0 - phi_arr, 1e-6)
+        else:
+            w_eff = w_arr
+
+    # 7. Extract diffusion/bioturbation coefficients D_eff
+    D_mol_val = 0.0
+    if D_mol is not None:
+        if hasattr(D_mol, species):
+            D_mol_val = _get_val(getattr(D_mol, species))
+        elif isinstance(D_mol, dict) and species in D_mol:
+            D_mol_val = _get_val(D_mol[species])
+    elif df is not None:
+        for d_cand in (f"D_{species}", species):
+            if d_cand in df:
+                D_mol_val = np.asarray(df[d_cand], dtype=np.float64)
+                break
+
+    D_bio_val = 0.0
+    if D_mol is not None:
+        if hasattr(D_mol, "D_bio"):
+            D_bio_val = _get_val(getattr(D_mol, "D_bio"))
+        elif isinstance(D_mol, dict) and "D_bio" in D_mol:
+            D_bio_val = _get_val(D_mol["D_bio"])
+    elif df is not None and "D_bio" in df:
+        D_bio_val = np.asarray(df["D_bio"], dtype=np.float64)
+    elif mp is not None and hasattr(mp, "D_bio"):
+        D_bio_val = _get_val(mp.D_bio)
+
+    D_mol_arr = np.asarray(D_mol_val, dtype=np.float64)
+    if D_mol_arr.ndim == 0:
+        D_mol_arr = np.full(N, float(D_mol_arr), dtype=np.float64)
+
+    D_bio_arr = np.asarray(D_bio_val, dtype=np.float64)
+    if D_bio_arr.ndim == 0:
+        D_bio_arr = np.full(N, float(D_bio_arr), dtype=np.float64)
+
+    if sp_phase == "mixed":
+        f_dis = getattr(mp, f"{species}_dis_frac", getattr(mp, f"{species.lower()}_dis_frac", None)) if mp is not None else None
+        if f_dis is None and mp is not None:
+            f_dis = getattr(mp, "fe2_dis_frac", getattr(mp, f"{species}_dissolved", getattr(mp, "Fe2_diss", 1.0)))
+        if f_dis is None:
+            f_dis = 1.0
+        f_dis_arr = np.asarray(_get_val(f_dis), dtype=np.float64)
+        D_eff_arr = np.maximum(f_dis_arr * D_mol_arr + (1.0 - f_dis_arr) * D_bio_arr, 0.0)
+    elif is_solid:
+        D_eff_arr = np.maximum(D_bio_arr, 0.0)
+    else:
+        D_eff_arr = np.maximum(D_mol_arr + D_bio_arr, 0.0)
+
+    # 8. Compute concentration gradient dC/dz
+    if N == 1:
+        dC_dz = np.zeros(1, dtype=np.float64)
+    else:
+        dC_dz = np.gradient(c_arr, z_arr)
+        # Check boundary condition specifications for exact boundary derivatives if at edges
+        bc_map = getattr(mp, "bc_map", None)
+        sp_bc = bc_map.get(species, {}) if isinstance(bc_map, dict) else {}
+        if sp_bc.get("bot_type") == "Neumann":
+            dC_dz[-1] = float(sp_bc.get("bot", 0.0))
+        if sp_bc.get("type") == "Neumann":
+            dC_dz[0] = float(sp_bc.get("top", 0.0))
+
+    # 9. Compute total flux profile: J = eff_phi * w * C - eff_phi * D * (dC/dz)
+    flux_profile = eff_phi_arr * w_eff * c_arr - eff_phi_arr * D_eff_arr * dC_dz
+
+    # 10. Evaluate flux at target depth or lower boundary
+    if depth is None:
+        flux_val = float(flux_profile[-1])
+    else:
+        target_z = _to_meters(depth)
+        flux_val = float(np.interp(target_z, z_arr, flux_profile))
+
+    # 11. Convert units if requested
+    if units is not None:
+        import pint
+
+        ureg = pint.UnitRegistry()
+        q = flux_val * ureg("mol / (meter^2 * second)")
+        return float(q.to(units).magnitude)
+
+    return flux_val
+
 
 
 def bioturbation_profile(z, D_max, cutoff_depth, threshold=1e-12):

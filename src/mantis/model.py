@@ -91,6 +91,8 @@ class DiageneticModelResult:
         total_time: float,
         df: Any = None,
         fqfn: str | None = None,
+        cpu_time: float = 0.0,
+        wall_time: float = 0.0,
     ):
         """Initialize simulation result container."""
         self.mp = mp
@@ -105,6 +107,8 @@ class DiageneticModelResult:
         self.total_time = total_time
         self.df = df
         self.fqfn = fqfn
+        self.cpu_time = cpu_time
+        self.wall_time = wall_time
 
     def save_csv(self) -> tuple[Any, str]:
         """Save tabular concentration and rate data to a CSV file.
@@ -121,6 +125,44 @@ class DiageneticModelResult:
         self.df = df
         self.fqfn = fqfn
         return df, fqfn
+
+    def save_report(
+        self,
+        output_dir: str | Path | None = None,
+        save_csv_tables: bool = True,
+        save_org_file: bool = True,
+        save_txt_summary: bool = True,
+    ) -> dict[str, Any]:
+        """Generate simulation documentation reports and publication-ready tables.
+
+        Creates machine-readable CSV tables, an Org-mode file formatted with LaTeX equations
+        (analogous to Tables 1–5 in Van de Velde et al., 2016), and a plaintext summary.
+
+        Parameters
+        ----------
+        output_dir : str, Path, or None, optional
+            Output folder (defaults to '<model_dir>/logs/').
+        save_csv_tables : bool, optional
+            Export individual CSV tables (default True).
+        save_org_file : bool, optional
+            Export formatted Org-mode document (default True).
+        save_txt_summary : bool, optional
+            Export plaintext summary (default True).
+
+        Returns
+        -------
+        dict
+            Paths and DataFrames of generated tables.
+        """
+        from mantis.report_generator import generate_simulation_report
+
+        return generate_simulation_report(
+            result=self,
+            output_dir=output_dir,
+            save_csv_tables=save_csv_tables,
+            save_org_file=save_org_file,
+            save_txt_summary=save_txt_summary,
+        )
 
     def save_state(self, filepath: str | Path | None = None) -> str:
         """Save complete state variable arrays to a compressed .npz archive.
@@ -144,6 +186,33 @@ class DiageneticModelResult:
         save_state(self.c, filepath_str, mp=self.mp)
         return filepath_str
 
+    def get_flux(
+        self,
+        species: str,
+        depth: float | str | None = None,
+        units: str | None = None,
+    ) -> float:
+        """Calculate the vertical flux of a species at the lower boundary or specified depth.
+
+        Parameters
+        ----------
+        species : str
+            Species name (e.g. 'SO4', 'Fe2', 'FeS').
+        depth : float, str, or None, optional
+            Depth in meters or unit string (e.g. '10 cm'). Default is None (lower boundary).
+        units : str or None, optional
+            Output unit (e.g. 'mol/(m^2*s)', 'mmol/(m^2*yr)', 'umol/(cm^2*yr)').
+            Default is None (internal MANTIS unit: mol/(m^2 * s)).
+
+        Returns
+        -------
+        float
+            Species flux.
+        """
+        from mantis.diff_lib import get_flux
+
+        return get_flux(species=species, depth=depth, result=self, units=units)
+
     def plot_summary(self, layout_file: str | Path | None = None, outfile: str | None = None) -> str | None:
         """Render the final summary plot PDF.
 
@@ -152,7 +221,7 @@ class DiageneticModelResult:
         layout_file : str, Path, or None, optional
             Path to layout definition file (default: model's layout_file or 'plot_layout.py').
         outfile : str or None, optional
-            Destination PDF filename. If None, defaults to '<plot_name>.pdf'.
+            Destination filename. If None, defaults to '<plot_name>.pdf'.
 
         Returns
         -------
@@ -1357,12 +1426,17 @@ class DiageneticModel:
                     mod_rxn = importlib.util.module_from_spec(spec_rxn)
                     spec_rxn.loader.exec_module(mod_rxn)
                     self._raw_reactions = getattr(mod_rxn, "reactions", [])
+                    self.mp.reactions = self._raw_reactions
+                    self.mp.limiters = getattr(mod_rxn, "limiters", {})
                     if rxn_params is None:
                         rxn_params = getattr(mod_rxn, "reaction_parameters", None) or getattr(mod_rxn, "fractionation_factors", None)
             else:
                 self._raw_reactions = []
+                self.mp.reactions = []
+                self.mp.limiters = {}
 
             if isinstance(rxn_params, dict):
+                self.mp.reaction_parameters = rxn_params
                 for rp_k, rp_v in rxn_params.items():
                     if not hasattr(self.mp, rp_k):
                         setattr(self.mp, rp_k, rp_v)
@@ -1428,12 +1502,14 @@ class DiageneticModel:
             if isinstance(res, tuple) and len(res) == 2:
                 # User returned (raw_constants, converted_k)
                 k_raw, k_vals = res
+                self.mp.raw_reaction_constants = k_raw
                 if isinstance(k_vals, dict) and k_vals:
                     k.update(k_vals)
                 elif isinstance(k_raw, dict):
                     from mantis.diff_lib import convert_reaction_constants
                     convert_reaction_constants(k_raw, k_values=k, filename=self.constants_file, mp=self.mp)
             elif isinstance(res, dict):
+                self.mp.raw_reaction_constants = res
                 from mantis.diff_lib import convert_reaction_constants
                 convert_reaction_constants(res, k_values=k, filename=self.constants_file, mp=self.mp)
             elif res is not None:
@@ -1669,6 +1745,7 @@ class DiageneticModel:
             D_mol.D_bio = compute_sigmoidal_db(z, self.mp.BT0, self.mp.BT_depth, self.mp.BT_attenuation)
 
         # 9. Register boundary values on mp
+        self.mp.bc_map = bc_map
         for sp_k, b_entry in bc_map.items():
             setattr(self.mp, f"bc_{sp_k}", b_entry.get("top", 0.0))
 
@@ -1812,6 +1889,15 @@ class DiageneticModel:
 
         self.setup(plot_queue=plot_queue)
 
+        # Record simulation start metrics
+        from datetime import datetime
+        import time
+
+        run_start_datetime = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self.mp.run_start_time = run_start_datetime
+        cpu_start = time.process_time()
+        wall_start = time.perf_counter()
+
         plotter = None
         video_dt = getattr(self.mp, "video_dt", None)
         if plot_queue is None and video_dt is not None:
@@ -1882,6 +1968,11 @@ class DiageneticModel:
         converged = "Yes" if (max_steps is None or step < max_steps) else "No"
         total_time = getattr(self.mp, "current_time", getattr(self.mp, "t_end", 0.0))
 
+        cpu_elapsed = time.process_time() - cpu_start
+        wall_elapsed = time.perf_counter() - wall_start
+        self.mp.cpu_time = cpu_elapsed
+        self.mp.wall_time = wall_elapsed
+
         result = DiageneticModelResult(
             mp=self.mp,
             c=self._c,
@@ -1893,5 +1984,7 @@ class DiageneticModel:
             converged=converged,
             step=step,
             total_time=total_time,
+            cpu_time=cpu_elapsed,
+            wall_time=wall_elapsed,
         )
         return result
