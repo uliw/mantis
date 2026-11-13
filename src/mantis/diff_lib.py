@@ -639,7 +639,7 @@ def get_flux(
             w_eff = w_arr
 
     # 7. Extract diffusion/bioturbation coefficients D_eff
-    D_mol_val = 0.0
+    D_mol_val: float | np.ndarray = 0.0
     if D_mol is not None:
         if hasattr(D_mol, species):
             D_mol_val = _get_val(getattr(D_mol, species))
@@ -651,7 +651,7 @@ def get_flux(
                 D_mol_val = np.asarray(df[d_cand], dtype=np.float64)
                 break
 
-    D_bio_val = 0.0
+    D_bio_val: float | np.ndarray = 0.0
     if D_mol is not None:
         if hasattr(D_mol, "D_bio"):
             D_bio_val = _get_val(getattr(D_mol, "D_bio"))
@@ -711,7 +711,7 @@ def get_flux(
         import pint
 
         ureg = pint.UnitRegistry()
-        q = flux_val * ureg("mol / (meter^2 * second)")
+        q: Any = flux_val * ureg("mol / (meter^2 * second)")
         return float(q.to(units).magnitude)
 
     return flux_val

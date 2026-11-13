@@ -48,7 +48,7 @@ def stoichiometry_to_mhchem(rxn_str: str) -> str:
                 "Fe3": "FeOOH",
                 "Fe2_total": "Fe^{2+}_{tot}",
                 "Fe2_liq": "Fe^{2+}",
-                "Fe2_sorbed": "X:Fe^{2+}",
+                "Fe2_sorbed": r"X\equiv{}Fe^{2+}",
                 "Fe2": "Fe^{2+}",
                 "SO4": "SO4^{2-}",
                 "TS2": "H2S",
@@ -326,7 +326,7 @@ def generate_simulation_report(
         "Fe3": r"$\ce{[FeOOH]}$",
         "Fe2_total": r"$\ce{[Fe^{2+}_{tot}]}$",
         "Fe2_liq": r"$\ce{[Fe^{2+}]}$",
-        "Fe2_sorbed": r"$\ce{[X:Fe^{2+}]}$",
+        "Fe2_sorbed": r"$\ce{[X\equiv{}Fe^{2+}]}$",
         "Fe2": r"$\ce{[Fe^{2+}]}$",
         "SO4": r"$\ce{[SO4^{2-}]}$",
         "TS2": r"$\ce{[H2S]}$",
@@ -343,8 +343,9 @@ def generate_simulation_report(
     def _clean_rate_expr(expr_str: str) -> str:
         s = re.sub(r"\bnp\.maximum\b", "max", str(expr_str))
         for var, ch in chem_vars.items():
-            s = re.sub(r"\bc\." + var + r"\b", lambda m, c=ch: c, s)
-            s = re.sub(r"\bmp\." + var + r"\b", lambda m, c=ch: c, s)
+            repl_val = ch.replace("\\", "\\\\")
+            s = re.sub(r"\bc\." + var + r"\b", repl_val, s)
+            s = re.sub(r"\bmp\." + var + r"\b", repl_val, s)
         s = re.sub(r"\bc\.", "", s)
         s = re.sub(r"\bmp\.", "", s)
         return s
