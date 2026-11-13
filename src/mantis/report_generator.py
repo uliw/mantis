@@ -660,7 +660,32 @@ def generate_simulation_report(
             f.write("======================================================================\n")
             f.write(f"  Reactions modeled ({len(table2_rows)}):\n")
             for r in table2_rows:
-                f.write(f"  {r['Reaction Name']:<35} : {r['Chemical Equation']}\n")
+                clean_name = r['Reaction Name'].strip("~")
+                clean_eq = re.sub(r"\$\s*\\ce\{(.*?)\}\s*\$", r"\1", str(r['Chemical Equation']))
+                clean_eq = clean_eq.replace("^{2-}", "(2-)").replace("^{+}", "(+)").replace("^{-}", "(-)")
+                f.write(f"  {clean_name:<35} : {clean_eq}\n")
+            f.write("\n")
+
+            f.write("======================================================================\n")
+            f.write("                  KINETIC RATE LAWS & LIMITERS\n")
+            f.write("======================================================================\n")
+            f.write(f"  {'Type':<12} | {'Target / Reaction':<35} | {'Expression / Formulation':<45}\n")
+            f.write("  " + "-" * 98 + "\n")
+            for r in table3_rows:
+                clean_target = r['Target / Reaction'].strip("~")
+                clean_expr = re.sub(r"\$\s*\\ce\{(.*?)\}\s*\$", r"\1", str(r['Expression']))
+                clean_expr = clean_expr.replace("^{2-}", "(2-)").replace("^{+}", "(+)").replace("^{-}", "(-)")
+                f.write(f"  {r['Type']:<12} | {clean_target:<35} | {clean_expr:<45}\n")
+            f.write("\n")
+
+            f.write("======================================================================\n")
+            f.write("                 KINETIC CONSTANTS & PARAMETERS\n")
+            f.write("======================================================================\n")
+            f.write(f"  {'Constant':<25} | {'Original Value / Unit':<30} | {'SI Value (m-s-mol)':<20}\n")
+            f.write("  " + "-" * 79 + "\n")
+            for r in table5_rows:
+                clean_kname = r['Constant'].strip("~")
+                f.write(f"  {clean_kname:<25} | {r['Original Value / Unit']:<30} | {r['SI Value (m-s-mol)']:<20}\n")
             f.write("\n")
 
     # -------------------------------------------------------------------------
