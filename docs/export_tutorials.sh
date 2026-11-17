@@ -13,7 +13,7 @@ fi
 
 echo "Exporting Tutorial org files to Markdown..."
 
-for org_file in Tutorial_1.org Tutorial_2.org; do
+for org_file in Tutorial_1.org Tutorial_2.org Tutorial_3.org Tutorial_4.org; do
     if [ -f "$org_file" ]; then
         echo "Exporting $org_file ..."
         emacsclient -e "(progn (switch-to-buffer (find-file-noselect \"$org_file\")) (end-of-buffer) (org-gfm-export-to-markdown) (kill-buffer))"
