@@ -1,0 +1,114 @@
+======================================================================
+              MANTIS SIMULATION REPORT: run_velde_fast
+======================================================================
+  Run Date        : 2026-11-17 14:52:10
+  CPU Time        : 9.506 s
+  Wall Time       : 9.536 s
+  Grid Points (N) : 1037
+  Domain Depth    : 0.4950 m
+  Convergence     : Yes
+
+======================================================================
+             ISOTOPE FRACTIONATION & EQUILIBRIUM EFFECTS
+======================================================================
+  Process                        | Enrichment factor    | Type        
+  ------------------------------------------------------------------
+  sulfate reduction              | -70 mUr              | kinetic     
+  sulfide speciation             | +2 mUr               | equilibrium 
+
+======================================================================
+                       ELEMENTAL MASS BALANCE
+======================================================================
+  Element C    | Up Flux: 542.2      | Down Flux: 4.173e-07  | Imbalance: 5.4219e+02 umol/(cm^2*yr) (100.00%)
+  Element S    | Up Flux: 16.2       | Down Flux: 16.33      | Imbalance: -1.3250e-01 umol/(cm^2*yr) (-0.82%)
+  Element Fe   | Up Flux: 12         | Down Flux: 12.12      | Imbalance: -1.1616e-01 umol/(cm^2*yr) (-0.97%)
+
+======================================================================
+                SPECIES BOUNDARY CONDITIONS & FLUXES
+======================================================================
+  SO4          (liquid) | C.up: 28.2      mol/m^3 | C.down: 24.69     mol/m^3 | Flux.up: 16.2       umol/(cm^2*yr) | Flux.down: 3.9510e+00 umol/(cm^2*yr)
+  TS2          (liquid) | C.up: 2.384e-08 mol/m^3 | C.down: 0.8288    mol/m^3 | Flux.up: 3.814e-09  umol/(cm^2*yr) | Flux.down: 1.3261e-01 umol/(cm^2*yr)
+  O2           (liquid) | C.up: 0.2724    mol/m^3 | C.down: 0         mol/m^3 | Flux.up: 542.8      umol/(cm^2*yr) | Flux.down: 0.0000e+00 umol/(cm^2*yr)
+  Hplus        (liquid) | C.up: 7.5       mol/m^3 | C.down: 7.5       mol/m^3 | Flux.up: 1.2        umol/(cm^2*yr) | Flux.down: 1.2000e+00 umol/(cm^2*yr)
+  Fe2_total    (mixed ) | C.up: 3.802e-06 mol/m^3 | C.down: 0.01107   mol/m^3 | Flux.up: -3.345e-05 umol/(cm^2*yr) | Flux.down: 4.4278e-04 umol/(cm^2*yr)
+  POC_fast     (solid ) | C.up: 282.2     mol/m^3 | C.down: 1.738e-135 mol/m^3 | Flux.up: 359.4      umol/(cm^2*yr) | Flux.down: 6.9513e-137 umol/(cm^2*yr)
+  POC_slow     (solid ) | C.up: 1410      mol/m^3 | C.down: 1.043e-05 mol/m^3 | Flux.up: 182.7      umol/(cm^2*yr) | Flux.down: 4.1734e-07 umol/(cm^2*yr)
+  Fe3          (solid ) | C.up: 303.3     mol/m^3 | C.down: 0         mol/m^3 | Flux.up: 12         umol/(cm^2*yr) | Flux.down: 0.0000e+00 umol/(cm^2*yr)
+  FeS          (solid ) | C.up: 0         mol/m^3 | C.down: 302.9     mol/m^3 | Flux.up: 0          umol/(cm^2*yr) | Flux.down: 1.2115e+01 umol/(cm^2*yr)
+  CO2          (liquid) | C.up: 0         mol/m^3 | C.down: 0         mol/m^3 | Flux.up: 0          umol/(cm^2*yr) | Flux.down: 0.0000e+00 umol/(cm^2*yr)
+  H2O          (liquid) | C.up: 0         mol/m^3 | C.down: 0         mol/m^3 | Flux.up: 0          umol/(cm^2*yr) | Flux.down: 0.0000e+00 umol/(cm^2*yr)
+  SO4_S32      (liquid) | C.up: 26.98     mol/m^3 | C.down: 23.62     mol/m^3 | Flux.up: 15.53      umol/(cm^2*yr) | Flux.down: 3.7791e+00 umol/(cm^2*yr)
+  TS2_S32      (liquid) | C.up: 2.287e-08 mol/m^3 | C.down: 0.795     mol/m^3 | Flux.up: 3.66e-09   umol/(cm^2*yr) | Flux.down: 1.2720e-01 umol/(cm^2*yr)
+  FeS_S32      (solid ) | C.up: 0         mol/m^3 | C.down: 290.6     mol/m^3 | Flux.up: 0          umol/(cm^2*yr) | Flux.down: 1.1622e+01 umol/(cm^2*yr)
+  HS           (liquid) | C.up: 1.811e-08 mol/m^3 | C.down: 0.6297    mol/m^3 | Flux.up: -4.845e-07 umol/(cm^2*yr) | Flux.down: 1.0075e-01 umol/(cm^2*yr)
+  HS_S32       (liquid) | C.up: 1.738e-08 mol/m^3 | C.down: 0.604     mol/m^3 | Flux.up: -4.649e-07 umol/(cm^2*yr) | Flux.down: 9.6645e-02 umol/(cm^2*yr)
+  H2S          (liquid) | C.up: 5.727e-09 mol/m^3 | C.down: 0.1991    mol/m^3 | Flux.up: -1.532e-07 umol/(cm^2*yr) | Flux.down: 3.1859e-02 umol/(cm^2*yr)
+  H2S_S32      (liquid) | C.up: 5.495e-09 mol/m^3 | C.down: 0.191     mol/m^3 | Flux.up: -1.47e-07  umol/(cm^2*yr) | Flux.down: 3.0559e-02 umol/(cm^2*yr)
+  Fe2_liq      (liquid) | C.up: 5.455e-09 mol/m^3 | C.down: 1.588e-05 mol/m^3 | Flux.up: -1.922e-07 umol/(cm^2*yr) | Flux.down: 2.5410e-06 umol/(cm^2*yr)
+  Fe2_sorbed   (solid ) | C.up: 3.797e-06 mol/m^3 | C.down: 0.01105   mol/m^3 | Flux.up: -3.345e-05 umol/(cm^2*yr) | Flux.down: 4.4214e-04 umol/(cm^2*yr)
+
+======================================================================
+                          REACTION NETWORK
+======================================================================
+  Reactions modeled (12):
+  aerobic_respiration_fast            : (CH2O)_f + O2 -> CO2
+  aerobic_respiration_slow            : (CH2O)_s + O2 -> CO2
+  dissimilatory_iron_reduction_fast   : (CH2O)_f + 4 FeOOH -> 4 Fe^{2+}_{tot}
+  dissimilatory_iron_reduction_slow   : (CH2O)_s + 4 FeOOH -> 4 Fe^{2+}_{tot}
+  sulfate_reduction_fast              : 2 (CH2O)_f + SO4(2-) -> H2S
+  sulfate_reduction_slow              : 2 (CH2O)_s + SO4(2-) -> H2S
+  hs_oxidation                        : HS^- + 2 O2 -> SO4(2-)
+  sulfide_mediated_iron_reduction_velde : HS^- + 8 FeOOH -> SO4(2-) + 8 Fe^{2+}_{tot}
+  Fe2_liq_oxidation                   : 4 Fe^{2+} + O2 -> 4 FeOOH
+  Fe2_sorbed_oxidation                : 4 X\equiv{}Fe^{2+} + O2 -> 4 FeOOH
+  FeS_oxidation                       : 4 FeS + 9 O2 -> 4 FeOOH + 4 SO4(2-)
+  FeS_precipitation_dissolution       : Fe^{2+} + HS^- -> FeS
+
+======================================================================
+                  KINETIC RATE LAWS & LIMITERS
+======================================================================
+  Type         | Target / Reaction                   | Expression / Formulation                     
+  --------------------------------------------------------------------------------------------------
+  Limiter      | O2                                  | 1.0 / ([O2] + K_O2)                          
+  Limiter      | O2_TS2                              | 1.0 / ([O2] + K_O2_TS2)                      
+  Limiter      | SO4                                 | 1.0 / ([SO4(2-)] + K_SO4)                    
+  Limiter      | Fe3                                 | 1.0 / (max([FeOOH], 0.0) + K_Fe3)            
+  Limiter      | Fe3_diss_red                        | 1.0 / (max([FeOOH], 0.0) + K_Fe3_diss_red)   
+  Limiter      | SO4_alpha_explicit                  | [SO4(2-)] / ([SO4(2-)] + 1e-3)               
+  Limiter      | TS2_alpha_explicit                  | [H2S] / ([H2S] + 1e-3)                       
+  Rate Law     | aerobic_respiration_fast            | k * [Substrates] * L(~O2~) * I(None)         
+  Rate Law     | aerobic_respiration_slow            | k * [Substrates] * L(~O2~) * I(None)         
+  Rate Law     | dissimilatory_iron_reduction_fast   | k * [Substrates] * L(~Fe3_diss_red~) * I(~O2~)
+  Rate Law     | dissimilatory_iron_reduction_slow   | k * [Substrates] * L(~Fe3_diss_red~) * I(~O2~)
+  Rate Law     | sulfate_reduction_fast              | k * [Substrates] * L(~SO4~) * I(~O2~, ~Fe3_diss_red~)
+  Rate Law     | sulfate_reduction_slow              | k * [Substrates] * L(~SO4~) * I(~O2~, ~Fe3_diss_red~)
+  Rate Law     | hs_oxidation                        | k * [Substrates] * L(None) * I(None)         
+  Rate Law     | sulfide_mediated_iron_reduction_velde | k * [Substrates] * L(None) * I(~O2~)         
+  Rate Law     | Fe2_liq_oxidation                   | k * [Substrates] * L(None) * I(None)         
+  Rate Law     | Fe2_sorbed_oxidation                | k * [Substrates] * L(None) * I(None)         
+  Rate Law     | FeS_oxidation                       | k * [Substrates] * L(None) * I(None)         
+  Rate Law     | FeS_precipitation_dissolution       | k * [Substrates] * L(None) * I(None)         
+
+======================================================================
+                 KINETIC CONSTANTS & PARAMETERS
+======================================================================
+  Constant                  | Original Value / Unit          | SI Value (m-s-mol)  
+  -------------------------------------------------------------------------------
+  POC_fast                  | 10 1/year                      | 3.1688e-07          
+  POC_slow                  | 0.1 1/year                     | 3.1688e-09          
+  Fe2_p_eq                  | 696 dimensionless              | 6.9600e+02          
+  FeS_TS2                   | 5e-8 m^3/(mol*second)          | 5.0000e-08          
+  Hplus                     | 3.162277660168379e-08 mol/l    | 3.1623e-05          
+  TS2_O2                    | 1e7 cm^3/(umol*year)           | 3.1688e-01          
+  Fe3_hs                    | 494 cm^3/(umol*year)           | 1.5654e-05          
+  FeS_O2                    | 1e7 cm^3/(umol*year)           | 3.1688e-01          
+  Fe2_O2                    | 1e7 cm^3/(umol*year)           | 3.1688e-01          
+  FeS_isp                   | 1e4 umol/((cm^3*year))         | 3.1688e-04          
+  FeS_isd                   | 3 1/year                       | 9.5064e-08          
+  FeS_sp                    | 10**-3.5 mol/l                 | 3.1623e-01          
+  K_O2                      | 0.001 umol/cm^3                | 1.0000e-03          
+  K_O2_TS2                  | 0.001 umol/cm^3                | 1.0000e-03          
+  K_SO4                     | 0.9 umol/cm^3                  | 9.0000e-01          
+  K_Fe3_diss_red            | 10.4 umol/cm^3                 | 1.0400e+01          
+  K_Fe3                     | 1e-3 dimensionless             | 1.0000e-03          
+

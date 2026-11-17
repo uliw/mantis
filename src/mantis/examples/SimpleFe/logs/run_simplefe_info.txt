@@ -1,9 +1,9 @@
 ======================================================================
               MANTIS SIMULATION REPORT: run_simplefe
 ======================================================================
-  Run Date        : 2026-11-17 12:00:30
-  CPU Time        : 9.486 s
-  Wall Time       : 9.499 s
+  Run Date        : 2026-11-17 14:51:39
+  CPU Time        : 9.532 s
+  Wall Time       : 9.564 s
   Grid Points (N) : 144
   Domain Depth    : 0.4879 m
   Convergence     : Yes

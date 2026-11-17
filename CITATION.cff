@@ -1,0 +1,20 @@
+cff-version: 1.2.0
+title: "Solving stiff reaction-transport systems in seconds using a Monolithic Assembly of Nonlinear Transport InteractionS: Mantis"
+message: "If you use this software, please cite it using the metadata from this file."
+type: software
+authors:
+  - given-names: Uli
+    family-names: Wortmann
+    email: uli.wortmann@utoronto.ca
+    orcid: "https://orcid.org/0000-0001-7854-9173"
+repository-code: "https://github.com/uliw/mantis"
+url: "https://github.com/uliw/mantis"
+license: AGPL-3.0-or-later
+keywords:
+  - reactive transport modeling
+  - reaction transport modeling
+  - geochemistry
+  - monolithic solver
+  - diagenesis
+  - block newton
+  - advection diffusion reaction

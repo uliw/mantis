@@ -19,7 +19,7 @@ def test_luff_and_wallmann_2003_simulation_benchmark():
     4. Asserts normalized mean error across grid spacing is <= 1% for every active species.
     """
     repo_root = Path(__file__).resolve().parent.parent
-    sim_dir = repo_root / "examples" / "Luff_and_Wallmann_2003"
+    sim_dir = repo_root / "src" / "mantis" / "examples" / "Luff_and_Wallmann_2003"
     sim_script = sim_dir / "run_luff_model.py"
     output_csv = sim_dir / "run_luff_model.csv"
     reference_csv = sim_dir / "run_luff_model_reference.csv"

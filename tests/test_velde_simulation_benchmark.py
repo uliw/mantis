@@ -20,7 +20,7 @@ def _run_and_verify_simulation_benchmark(scenario_dir_name: str, check_isotopes:
     4. Asserts normalized mean error across grid spacing is <= 1% for every active species/isotope.
     """
     repo_root = Path(__file__).resolve().parent.parent
-    sim_dir = repo_root / "examples" / "velde_et_al_2016" / scenario_dir_name
+    sim_dir = repo_root / "src" / "mantis" / "examples" / "velde_et_al_2016" / scenario_dir_name
     sim_script = sim_dir / "run_velde_fast.py"
     output_csv = sim_dir / "run_velde_fast.csv"
     reference_csv = sim_dir / "run_velde_fast_reference.csv"

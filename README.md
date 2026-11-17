@@ -4,6 +4,7 @@
 [![Type Checking](https://github.com/uliw/mantis/actions/workflows/typecheck.yml/badge.svg)](https://github.com/uliw/mantis/actions/workflows/typecheck.yml)
 [![Documentation Status](https://readthedocs.org/projects/mantis-rtm/badge/?version=latest)](https://mantis-rtm.readthedocs.io/en/latest/?badge=latest)
 [![PyPI Version](https://img.shields.io/pypi/v/mantis-rtm.svg)](https://pypi.org/project/mantis-rtm/)
+[![Conda Version](https://img.shields.io/conda/vn/conda-forge/mantis-rtm.svg)](https://anaconda.org/conda-forge/mantis-rtm)
 [![Python Versions](https://img.shields.io/badge/python-3.13%20%7C%203.14%20%7C%203.15-blue.svg)](https://pypi.org/project/mantis-rtm/)
 [![License: AGPL-3.0-or-later](https://img.shields.io/badge/License-AGPL_3.0--or--later-blue.svg)](https://github.com/uliw/mantis/blob/main/LICENSE)
 

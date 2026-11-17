@@ -1,0 +1,81 @@
+#+TITLE: MANTIS Diagenetic Simulation Report: run_luff_model
+#+DATE: 2026-11-17 14:51:32
+#+OPTIONS: toc:nil num:nil ^:nil
+#+LATEX_HEADER: \usepackage{amsmath,amssymb,booktabs}
+#+LATEX_HEADER: \usepackage[version=4]{mhchem}
+#+LATEX_HEADER: \usepackage{array,ragged2e}
+#+LATEX_HEADER: \newcolumntype{L}[1]{>{\RaggedRight\arraybackslash}p{#1}}
+#+LATEX_HEADER: \newcolumntype{C}[1]{>{\Centering\arraybackslash}p{#1}}
+#+LATEX_HEADER: \newcolumntype{R}[1]{>{\RaggedLeft\arraybackslash}p{#1}}
+
+#+NAME: meta
+#+BEGIN_SRC python :results value :colnames no :exports results
+import csv
+with open('01_simulation_metadata.csv', 'r', newline='') as f:
+    rows = list(csv.reader(f))
+return [rows[0], None] + rows[1:] if len(rows) > 1 else rows
+#+END_SRC
+#+attr_latex: :font \footnotesize :placement [t]
+#+caption: Simulation metadata and runtime performance.
+#+RESULTS: meta
+
+#+NAME: parameters
+#+BEGIN_SRC python :results value :colnames no :exports results
+import csv
+with open('02_parameters.csv', 'r', newline='') as f:
+    rows = list(csv.reader(f))
+return [rows[0], None] + rows[1:] if len(rows) > 1 else rows
+#+END_SRC
+#+attr_latex: :font \footnotesize :placement [t]
+#+caption: Model and environmental parameters (cf. Van de Velde et al. 2016 Table 1).
+#+RESULTS: parameters
+
+#+NAME: reactions
+#+BEGIN_SRC python :results value :colnames no :exports results
+import csv
+with open('03_reactions.csv', 'r', newline='') as f:
+    rows = list(csv.reader(f))
+return [rows[0], None] + rows[1:] if len(rows) > 1 else rows
+#+END_SRC
+#+attr_latex: :font \footnotesize :placement [t] :align L{40mm}L{60mm}L{40mm}
+#+caption: Biogeochemical reaction network and stoichiometry (cf. Van de Velde et al. 2016 Table 2).
+#+RESULTS: reactions
+
+#+NAME: rate_laws
+#+BEGIN_SRC python :results value :colnames no :exports results
+import csv
+with open('04_kinetic_rate_laws.csv', 'r', newline='') as f:
+    rows = list(csv.reader(f))
+# Drop Notes column (column index 3)
+cleaned = [[r[0], r[1], r[2]] for r in rows]
+return [cleaned[0], None] + cleaned[1:] if len(cleaned) > 1 else cleaned
+#+END_SRC
+#+attr_latex: :font \footnotesize :placement [t] :align L{25mm}L{35mm}L{80mm}
+#+caption: Kinetic rate formulations and substrate limiters (cf. Van de Velde et al. 2016 Table 3).
+#+RESULTS: rate_laws
+
+#+NAME: boundary_fluxes
+#+BEGIN_SRC python :results value :colnames no :exports results
+import csv
+with open('05_boundary_conditions_and_fluxes.csv', 'r', newline='') as f:
+    rows = list(csv.reader(f))
+# Keep only the first 5 columns and drop 'Top BC ' from headers
+h_clean = [h.replace('Top BC ', '') for h in rows[0][:5]]
+cleaned = [h_clean, None] + [r[:5] for r in rows[1:]]
+return cleaned if len(rows) > 1 else rows
+#+END_SRC
+#+attr_latex: :font \footnotesize :placement [t]
+#+caption: Boundary conditions and concentrations (cf. Van de Velde et al. 2016 Table 4).
+#+RESULTS: boundary_fluxes
+
+#+NAME: constants
+#+BEGIN_SRC python :results value :colnames no :exports results
+import csv
+with open('06_kinetic_constants.csv', 'r', newline='') as f:
+    rows = list(csv.reader(f))
+return [rows[0], None] + rows[1:] if len(rows) > 1 else rows
+#+END_SRC
+#+attr_latex: :font \footnotesize :placement [t]
+#+caption: Kinetic constants and parameter values (cf. Van de Velde et al. 2016 Table 5).
+#+RESULTS: constants
+

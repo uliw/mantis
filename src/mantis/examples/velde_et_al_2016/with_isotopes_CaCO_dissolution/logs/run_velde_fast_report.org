@@ -1,5 +1,5 @@
-#+TITLE: MANTIS Diagenetic Simulation Report: run_simplefe
-#+DATE: 2026-11-17 12:00:30
+#+TITLE: MANTIS Diagenetic Simulation Report: run_velde_fast
+#+DATE: 2026-11-17 14:52:23
 #+OPTIONS: toc:nil num:nil ^:nil
 #+LATEX_HEADER: \usepackage{amsmath,amssymb,booktabs}
 #+LATEX_HEADER: \usepackage[version=4]{mhchem}
@@ -78,4 +78,15 @@ return [rows[0], None] + rows[1:] if len(rows) > 1 else rows
 #+attr_latex: :font \footnotesize :placement [t]
 #+caption: Kinetic constants and parameter values (cf. Van de Velde et al. 2016 Table 5).
 #+RESULTS: constants
+
+#+NAME: isotopes
+#+BEGIN_SRC python :results value :colnames no :exports results
+import csv
+with open('08_isotope_fractionation.csv', 'r', newline='') as f:
+    rows = list(csv.reader(f))
+return [rows[0], None] + rows[1:] if len(rows) > 1 else rows
+#+END_SRC
+#+attr_latex: :font \footnotesize :placement [t]
+#+caption: Isotope fractionation and equilibrium effects.
+#+RESULTS: isotopes
 

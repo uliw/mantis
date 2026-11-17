@@ -10,7 +10,7 @@ from mantis.generate_equation_system import (
 )
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-EXP_DIR = BASE_DIR / "examples" / "velde_et_al_2016" / "with_isotopes"
+EXP_DIR = BASE_DIR / "src" / "mantis" / "examples" / "velde_et_al_2016" / "with_isotopes"
 SPECIES_FILE = EXP_DIR / "species.py"
 CONSTANTS_FILE = EXP_DIR / "kinetic_constants_fast.py"
 LIMITERS_FILE = EXP_DIR / "reactions.py"

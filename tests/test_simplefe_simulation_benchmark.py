@@ -19,7 +19,7 @@ def test_simplefe_simulation_benchmark():
     4. Asserts normalized mean error across grid spacing is <= 1% for every active species.
     """
     repo_root = Path(__file__).resolve().parent.parent
-    sim_dir = repo_root / "examples" / "SimpleFe"
+    sim_dir = repo_root / "src" / "mantis" / "examples" / "SimpleFe"
     sim_script = sim_dir / "run_simplefe.py"
     output_csv = sim_dir / "run_simplefe.csv"
     reference_csv = sim_dir / "run_simplefe_reference.csv"
