@@ -6,10 +6,46 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [Unreleased]
+
+### Added
+
+- **Automated Simulation Report Generation (`report_generator.py`)**:
+  - Implemented comprehensive simulation reporting generating both human-readable Org-mode documents (`.org`) and machine-readable summary files (`_info.txt` and `.csv`).
+  - Reports fully document physical setup, geometry, sediment age, boundary conditions, chemical reactions with LaTeX/mhchem formatting, kinetic rate laws, Monod limiters, rate constants with SI conversions, and isotope fractionation factors.
+  - Added `save_report` configuration option and `DiageneticModelResult.save_report()` method with automatic post-run generation.
+- **Vertical Flux Calculation (`diff_lib.get_flux`)**:
+  - Added `get_flux()` function (and `DiageneticModelResult.get_flux()` method) calculating 1D total, advective, and diffusive fluxes at arbitrary sediment depths or lower boundaries.
+  - Accounts for phase porosity ($\phi$ vs. $1 - \phi$), dynamic mixed-phase sorption partitioning ($f_{\text{dis}}$), biomixing ($D_{\text{bio}}$), molecular diffusion ($D_{\text{mol}}$), and automatic unit conversions via `pint`.
+- **Plotting & Documentation Additions**:
+  - Added SVG export support to summary plots in example models (`run_simplefe.svg`, `velde_et_2016.svg`).
+  - Added new tutorials `Tutorial_3` (Examples)  and `Tutorial_4` (user facing functions)
+  - Added unit test suites in `tests/test_get_flux.py` and `tests/test_report_generator.py`.
+
+## [0.7.6] - 2026-11-12
+
+### Changed
+
+- Documentation improvements across README and tutorial guides for clarity and flow.
+
+## [0.7.5] - 2026-11-11
+
+### Added
+
+- GitHub Actions workflow for automated `mypy` static type checking (`.github/workflows/typecheck.yml`).
+- Added Mantis project icon assets and README badge updates.
+
+## [0.7.4] - 2026-11-11
+
+### Added
+
+- Expanded type hints and mypy verification across the codebase.
+
 ## [0.7.3] - 2026-11-11
 
 ### Added
- - type hinting and mypy verification
+
+- Initial type hinting additions and mypy verification.
 
 ## [0.7.1] - 2026-11-10
 
