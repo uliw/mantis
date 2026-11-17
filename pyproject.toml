@@ -161,6 +161,7 @@ pythonPlatform = "Linux"
 [tool.mypy]
 python_version = "3.13"
 files = ["src"]
+exclude = ["src/mantis/examples"]
 ignore_missing_imports = true
 follow_imports = "silent"
 warn_redundant_casts = true
