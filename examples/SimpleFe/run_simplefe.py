@@ -117,6 +117,7 @@ def main():
     # 4. Save results & render summary plot
     df, fqfn = result.save_csv()
     result.save_state()
+    result.plot_summary(outfile="run_simplefe.svg")
     return result
 
 

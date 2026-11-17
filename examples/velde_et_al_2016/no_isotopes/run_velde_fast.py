@@ -65,4 +65,4 @@ if __name__ == "__main__":
     print(f"max TS2 = {df.c_TS2.max():.4e} mmol/L")
     print(f"max Fe2 = {df.c_Fe2_total.max():.4e} mmol/L")
 
-    result.plot_summary()
+    result.plot_summary(outfile="velde_et_2016.svg")
