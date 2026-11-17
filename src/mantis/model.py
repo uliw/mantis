@@ -1987,4 +1987,13 @@ class DiageneticModel:
             cpu_time=cpu_elapsed,
             wall_time=wall_elapsed,
         )
+
+        # Automatically generate simulation report upon completion
+        if getattr(self.mp, "save_report", True):
+            try:
+                report_dir = getattr(self.mp, "report_dir", None)
+                result.save_report(output_dir=report_dir)
+            except Exception as e:
+                print(f"[Warning] Automatic report generation failed: {e}")
+
         return result
