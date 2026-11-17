@@ -1,0 +1,73 @@
+======================================================================
+              MANTIS SIMULATION REPORT: run_simplefe
+======================================================================
+  Run Date        : 2026-11-17 12:00:30
+  CPU Time        : 9.486 s
+  Wall Time       : 9.499 s
+  Grid Points (N) : 144
+  Domain Depth    : 0.4879 m
+  Convergence     : Yes
+
+======================================================================
+                       ELEMENTAL MASS BALANCE
+======================================================================
+  Element C    | Up Flux: -287.4     | Down Flux: 28.97      | Imbalance: -3.1638e+02 umol/(cm^2*yr) (-110.08%)
+  Element S    | Up Flux: 30.43      | Down Flux: 23.95      | Imbalance: 6.4794e+00 umol/(cm^2*yr) (21.29%)
+  Element Fe   | Up Flux: 19.81      | Down Flux: 20.74      | Imbalance: -9.2503e-01 umol/(cm^2*yr) (-4.67%)
+
+======================================================================
+                SPECIES BOUNDARY CONDITIONS & FLUXES
+======================================================================
+  POC          (solid ) | C.up: 7649      mol/m^3 | C.down: 572.2     mol/m^3 | Flux.up: 309.9      umol/(cm^2*yr) | Flux.down: 1.6067e+01 umol/(cm^2*yr)
+  FeOOH        (solid ) | C.up: 39.22     mol/m^3 | C.down: 2.87e-26  mol/m^3 | Flux.up: 22.99      umol/(cm^2*yr) | Flux.down: 8.0601e-28 umol/(cm^2*yr)
+  FeS          (solid ) | C.up: 700.6     mol/m^3 | C.down: 738.3     mol/m^3 | Flux.up: 0.003339   umol/(cm^2*yr) | Flux.down: 2.0732e+01 umol/(cm^2*yr)
+  SO4          (liquid) | C.up: 27.96     mol/m^3 | C.down: 8.246     mol/m^3 | Flux.up: 147.9      umol/(cm^2*yr) | Flux.down: 9.2623e-01 umol/(cm^2*yr)
+  TS2          (liquid) | C.up: 0.0009988 mol/m^3 | C.down: 10.19     mol/m^3 | Flux.up: -113.8     umol/(cm^2*yr) | Flux.down: 1.1450e+00 umol/(cm^2*yr)
+  Fe2_total    (mixed ) | C.up: 0.0001734 mol/m^3 | C.down: 0.02306   mol/m^3 | Flux.up: -2.636     umol/(cm^2*yr) | Flux.down: 2.5903e-03 umol/(cm^2*yr)
+  DIC          (liquid) | C.up: 2.35      mol/m^3 | C.down: 40.06     mol/m^3 | Flux.up: -289.5     umol/(cm^2*yr) | Flux.down: 4.4992e+00 umol/(cm^2*yr)
+  TA           (liquid) | C.up: 2.321     mol/m^3 | C.down: 40.04     mol/m^3 | Flux.up: -293.9     umol/(cm^2*yr) | Flux.down: 4.4975e+00 umol/(cm^2*yr)
+  Hplus        (liquid) | C.up: 2.587e-05 mol/m^3 | C.down: 0.0001271 mol/m^3 | Flux.up: -0.0005984 umol/(cm^2*yr) | Flux.down: 1.4275e-05 umol/(cm^2*yr)
+  Ca2          (liquid) | C.up: 10.3      mol/m^3 | C.down: 10.3      mol/m^3 | Flux.up: 1.301      umol/(cm^2*yr) | Flux.down: 1.1569e+00 umol/(cm^2*yr)
+  CO3          (liquid) | C.up: 0.04012   mol/m^3 | C.down: 0.1264    mol/m^3 | Flux.up: 0.6629     umol/(cm^2*yr) | Flux.down: 1.4195e-02 umol/(cm^2*yr)
+  HCO3         (liquid) | C.up: 2.24      mol/m^3 | C.down: 34.66     mol/m^3 | Flux.up: -14.59     umol/(cm^2*yr) | Flux.down: 3.8935e+00 umol/(cm^2*yr)
+  Fe2_dis      (liquid) | C.up: 9.365e-05 mol/m^3 | C.down: 0.02018   mol/m^3 | Flux.up: -0.2299    umol/(cm^2*yr) | Flux.down: 2.2662e-03 umol/(cm^2*yr)
+  Fe2_liq      (liquid) | C.up: 4.947e-05 mol/m^3 | C.down: 1.566e-05 mol/m^3 | Flux.up: -0.08323   umol/(cm^2*yr) | Flux.down: 1.7585e-06 umol/(cm^2*yr)
+  HS           (liquid) | C.up: 0.0008314 mol/m^3 | C.down: 5.125     mol/m^3 | Flux.up: -2.981     umol/(cm^2*yr) | Flux.down: 5.7559e-01 umol/(cm^2*yr)
+  H2S          (liquid) | C.up: 0.0001674 mol/m^3 | C.down: 5.07      mol/m^3 | Flux.up: -0.6121    umol/(cm^2*yr) | Flux.down: 5.6941e-01 umol/(cm^2*yr)
+
+======================================================================
+                          REACTION NETWORK
+======================================================================
+  Reactions modeled (4):
+  iron_reduction_poc                  : CH2O + 4 FeOOH -> DIC + 4 Fe^{2+}_{tot} + 8 TA
+  sulfate_reduction_poc               : 2 CH2O + SO4(2-) -> 2 DIC + H2S + 2 TA
+  iron_oxide_sulfide_oxidation        : 2 FeOOH + H2S -> 2 Fe^{2+}_{tot} + 4 TA
+  FeS_precipitation_dissolution       : Fe^{2+} + HS^- -> FeS
+
+======================================================================
+                  KINETIC RATE LAWS & LIMITERS
+======================================================================
+  Type         | Target / Reaction                   | Expression / Formulation                     
+  --------------------------------------------------------------------------------------------------
+  Limiter      | FeOOH                               | 1.0 / (max(FeOOH, 0.0) + K_FeOOH)            
+  Limiter      | SO4                                 | 1.0 / ([SO4(2-)] + K_SO4)                    
+  Rate Law     | iron_reduction_poc                  | k * [Substrates] * L(~FeOOH~) * I(None)      
+  Rate Law     | sulfate_reduction_poc               | k * [Substrates] * L(~SO4~) * I(~FeOOH~)     
+  Rate Law     | iron_oxide_sulfide_oxidation        | k * [Substrates] * L(None) * I(None)         
+  Rate Law     | FeS_precipitation_dissolution       | k * [Substrates] * L(None) * I(None)         
+
+======================================================================
+                 KINETIC CONSTANTS & PARAMETERS
+======================================================================
+  Constant                  | Original Value / Unit          | SI Value (m-s-mol)  
+  -------------------------------------------------------------------------------
+  k_POC                     | 0.01 1/year                    | 3.1688e-10          
+  K_FeOOH                   | 3000.0 mol/m^3                 | 3.0000e+03          
+  K_SO4                     | 1.0 mol/m^3                    | 1.0000e+00          
+  k_FeOOHH2S                | 4.0 m^3/(mol*year)             | 1.2675e-07          
+  FeS_sp                    | 0.630957344480193 mol/m^3      | 6.3096e-01          
+  FeS_isp                   | 520.0 mol/(m^3*year)           | 1.6478e-05          
+  FeS_isd                   | 0.01 1/year                    | 3.1688e-10          
+  Hplus                     | 2.5703957827688645e-05 mol/m^3 | 2.5704e-05          
+  Fe2_p_eq                  | 0.8444 dimensionless           | 8.4440e-01          
+
