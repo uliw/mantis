@@ -1,4 +1,4 @@
-# <img src="mantis.svg" alt="MANTIS Logo" width="20%" style="vertical-align: middle; max-width: 200px; display: inline-block; margin-right: 10px;" align="left" />  A Python framework to solve stiff reaction-transport systems in seconds using a *M*onolithic *A*ssembly of *N*onlinear *T*ransport *I*nteractions *S*olver (MANTIS)
+# <img src="https://raw.githubusercontent.com/uliw/mantis/main/mantis.svg" alt="MANTIS Logo" width="20%" style="vertical-align: middle; max-width: 200px; display: inline-block; margin-right: 10px;" align="left" />  A Python framework to solve stiff reaction-transport systems in seconds using a *M*onolithic *A*ssembly of *N*onlinear *T*ransport *I*nteractions *S*olver (MANTIS)
 
 [![Build Status](https://github.com/uliw/mantis/actions/workflows/tests.yml/badge.svg)](https://github.com/uliw/mantis/actions/workflows/tests.yml)
 [![Type Checking](https://github.com/uliw/mantis/actions/workflows/typecheck.yml/badge.svg)](https://github.com/uliw/mantis/actions/workflows/typecheck.yml)
