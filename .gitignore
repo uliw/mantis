@@ -6,6 +6,7 @@ _build/
 ltximg/
 notes/
 dist/
+logs/
 nbk/
 old_tutorial
 _minted
