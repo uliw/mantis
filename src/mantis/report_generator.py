@@ -1,3 +1,20 @@
+"""Mantis-RTM: A Python library for reaction-transport modeling
+
+Copyright (C), 2026 - Ulrich G. Wortmann
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or (at
+your option) any later version.
+
+This program is distributed in the hope that it will be useful, but
+WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
 """MANTIS simulation report and metadata generator.
 
 Generates human-readable Org-mode documents and machine-readable CSV files
@@ -440,11 +457,14 @@ def generate_simulation_report(
     table5_rows = []
     # If kinetic_constants file provided raw dict
     raw_k_dict = getattr(mp, "raw_reaction_constants", {})
-    if not raw_k_dict and hasattr(mp, "constants_module") and hasattr(mp.constants_module, "get_reaction_constants"):
-        try:
-            raw_k_dict = mp.constants_module.get_reaction_constants(getattr(mp, "pH", 7.5), getattr(mp, "phi", 0.8))
-        except Exception:
-            raw_k_dict = {}
+    if not raw_k_dict and hasattr(mp, "constants_module"):
+        if hasattr(mp.constants_module, "kinetic_constants") and isinstance(mp.constants_module.kinetic_constants, dict):
+            raw_k_dict = mp.constants_module.kinetic_constants
+        elif hasattr(mp.constants_module, "get_reaction_constants"):
+            try:
+                raw_k_dict = mp.constants_module.get_reaction_constants(getattr(mp, "pH", 7.5), getattr(mp, "phi", 0.8))
+            except Exception:
+                raw_k_dict = {}
 
     if hasattr(k, "items"):
         k_items = list(k.items())

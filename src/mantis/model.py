@@ -1,3 +1,20 @@
+"""Mantis-RTM: A Python library for reaction-transport modeling
+
+Copyright (C), 2026 - Ulrich G. Wortmann
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or (at
+your option) any later version.
+
+This program is distributed in the hope that it will be useful, but
+WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
 """Unified, declarative DiageneticModel interface for MANTIS reaction-transport simulations.
 
 Provides a clean object-oriented entry point that:
@@ -988,6 +1005,15 @@ class DiageneticModel:
                 with open(self.constants_file) as f:
                     const_tree = ast.parse(f.read())
                 for node in const_tree.body:
+                    if isinstance(node, ast.Assign):
+                        for target in node.targets:
+                            if isinstance(target, ast.Name) and target.id == "kinetic_constants":
+                                for sub in ast.walk(node.value):
+                                    if isinstance(sub, ast.Name) and isinstance(sub.ctx, ast.Load) and sub.id in ("pH", "Hplus"):
+                                        return True, f"kinetic_constants uses variable '{sub.id}'"
+                                    if isinstance(sub, ast.Constant) and isinstance(sub.value, str):
+                                        if ph_re.search(sub.value):
+                                            return True, f"kinetic_constants references '{sub.value}'"
                     if isinstance(node, ast.FunctionDef) and node.name == "get_reaction_constants":
                         for stmt in node.body:
                             for sub in ast.walk(stmt):
@@ -1398,6 +1424,7 @@ class DiageneticModel:
             eq_mod = make_null_reactions()
             self.mp.reactions_module = eq_mod
             self._raw_reactions: list[dict[str, Any]] = []
+            raw_rc_dict = None
             get_rc_fn = None
             self.p_dict["use_numerical_jacobian"] = False
             self.mp.use_numerical_jacobian = False
@@ -1442,16 +1469,25 @@ class DiageneticModel:
                         setattr(self.mp, rp_k, rp_v)
 
             # 4. Load reaction constants
+            raw_rc_dict = None
+            raw_rc_dict = None
+            get_rc_fn = None
             spec_rc = importlib.util.spec_from_file_location("rc_mod", self.constants_file)
             if spec_rc is None or spec_rc.loader is None:
                 raise ImportError(f"Cannot load reaction constants file: {self.constants_file}")
             mod_rc = importlib.util.module_from_spec(spec_rc)
             spec_rc.loader.exec_module(mod_rc)
 
-            if hasattr(mod_rc, "get_reaction_constants"):
+            if hasattr(mod_rc, "kinetic_constants"):
+                raw_rc_dict = mod_rc.kinetic_constants
+                if not isinstance(raw_rc_dict, dict):
+                    raise TypeError(f"kinetic_constants in {self.constants_file} must be a dict.")
+            elif hasattr(mod_rc, "get_reaction_constants"):
                 get_rc_fn = mod_rc.get_reaction_constants
             else:
-                raise AttributeError(f"{self.constants_file} must define get_reaction_constants(pH, phi).")
+                raise AttributeError(
+                    f"{self.constants_file} must define a 'kinetic_constants' dict (or get_reaction_constants)."
+                )
 
             # 5. Chemical Jacobian strategy selection (heuristic switching between analytical and numerical)
             if "use_numerical_jacobian" not in getattr(self, "_user_configured_keys", set()):
@@ -1497,7 +1533,11 @@ class DiageneticModel:
 
         # 6. Evaluate k values
         k = data_container()
-        if get_rc_fn is not None:
+        if raw_rc_dict is not None:
+            self.mp.raw_reaction_constants = raw_rc_dict
+            from mantis.diff_lib import convert_reaction_constants
+            convert_reaction_constants(raw_rc_dict, k_values=k, filename=self.constants_file, mp=self.mp)
+        elif get_rc_fn is not None:
             res = get_rc_fn(self.mp.pH, self.mp.phi)
             if isinstance(res, tuple) and len(res) == 2:
                 # User returned (raw_constants, converted_k)

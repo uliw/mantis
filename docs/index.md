@@ -35,6 +35,7 @@ api/index
 changelog
 license
 GitHub Repository <https://github.com/uliw/mantis>
+getting_help
 ```
 
 ## Indices and Tables

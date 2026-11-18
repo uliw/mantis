@@ -1,3 +1,20 @@
+"""Mantis-RTM: A Python library for reaction-transport modeling
+
+Copyright (C), 2026 - Ulrich G. Wortmann
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or (at
+your option) any later version.
+
+This program is distributed in the hope that it will be useful, but
+WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
 """Declarative parser and code generator for MANTIS reaction transport models.
 
 Translates declarative reaction specifications into a fully assembled Python equation module
@@ -120,9 +137,11 @@ class ReactionSystemValidator:
         mod_constants = importlib.util.module_from_spec(spec_constants)
         spec_constants.loader.exec_module(mod_constants)
 
-        # Attempt dynamic extraction via get_reaction_constants
+        # Attempt extraction from kinetic_constants dict or get_reaction_constants
         self.valid_constants = set()
-        if hasattr(mod_constants, "get_reaction_constants"):
+        if hasattr(mod_constants, "kinetic_constants") and isinstance(mod_constants.kinetic_constants, dict):
+            self.valid_constants.update(mod_constants.kinetic_constants.keys())
+        elif hasattr(mod_constants, "get_reaction_constants"):
             try:
                 res = mod_constants.get_reaction_constants(7.5, 0.8)
                 if isinstance(res, tuple) and len(res) == 2:
@@ -922,7 +941,9 @@ def resolve_and_prepare_equations(
         if c_spec and c_spec.loader:
             c_mod = importlib.util.module_from_spec(c_spec)
             c_spec.loader.exec_module(c_mod)
-            if hasattr(c_mod, "get_reaction_constants"):
+            if hasattr(c_mod, "kinetic_constants") and isinstance(c_mod.kinetic_constants, dict):
+                p_dict["reaction_constants"] = c_mod.kinetic_constants
+            elif hasattr(c_mod, "get_reaction_constants"):
                 p_dict["reaction_constants"] = c_mod.get_reaction_constants
 
     # Record loaded module and paths in p_dict
