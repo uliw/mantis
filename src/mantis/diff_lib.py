@@ -15,6 +15,8 @@ General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
+from __future__ import annotations
+
 """Utility library for the mantis package.
 
 This package provides a small collection of functions and a lightweight container class
@@ -45,7 +47,6 @@ The module contains:
 These helpers are primarily intended for modelling isotope diffusion and fractionation
 processes in geological simulations.
 """
-from __future__ import annotations
 
 from collections.abc import Sequence
 from typing import Any

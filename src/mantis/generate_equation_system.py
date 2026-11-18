@@ -15,6 +15,8 @@ General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
+from __future__ import annotations
+
 """Declarative parser and code generator for MANTIS reaction transport models.
 
 Translates declarative reaction specifications into a fully assembled Python equation module
@@ -26,8 +28,6 @@ Examples
 
     python -m mantis.generate_equation_system -i chemical_equations_new.py -o equations.py
 """
-
-from __future__ import annotations
 
 import argparse
 import ast

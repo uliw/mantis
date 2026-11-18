@@ -15,9 +15,9 @@ General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
-"""Numba-accelerated numerical kernels for direct assembled reactive transport solvers."""
-
 from __future__ import annotations
+
+"""Numba-accelerated numerical kernels for direct assembled reactive transport solvers."""
 
 import numba as nb
 import numpy as np

@@ -15,9 +15,9 @@ General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
-"""Copy bundled MANTIS examples into the current working directory."""
-
 from __future__ import annotations
+
+"""Copy bundled MANTIS examples into the current working directory."""
 
 import argparse
 import importlib.resources as pkg_resources

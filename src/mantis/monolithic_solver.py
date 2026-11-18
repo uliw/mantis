@@ -15,6 +15,8 @@ General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
+from __future__ import annotations
+
 """Monolithic Block Newton-Raphson Solver for MANTIS.
 
 Solves the coupled non-steady-state reactive-transport system as a monolithic
@@ -24,8 +26,6 @@ accelerated with Numba.
 Eliminates decoupled Picard/Gauss-Seidel cross-species lag oscillations by
 solving all chemical species simultaneously with a fully coupled chemical Jacobian.
 """
-
-from __future__ import annotations
 
 import math
 import sys

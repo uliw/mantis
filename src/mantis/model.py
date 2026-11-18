@@ -15,6 +15,8 @@ General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
+from __future__ import annotations
+
 """Unified, declarative DiageneticModel interface for MANTIS reaction-transport simulations.
 
 Provides a clean object-oriented entry point that:
@@ -24,8 +26,6 @@ Provides a clean object-oriented entry point that:
 - Sets bioirrigation explicitly to zero by default.
 - Provides built-in CLI argument parsing (--help, --solver, --video).
 """
-
-from __future__ import annotations
 
 import argparse
 import ast
