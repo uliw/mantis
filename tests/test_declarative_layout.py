@@ -304,7 +304,7 @@ def test_isotope_resolution_flexible_naming(sample_df):
         # Layout uses d34S_SO4, dataframe only has d_SO4
         df_d = sample_df.copy()
         df_d["d_SO4"] = df_d["d34S_SO4"]
-        df_d.drop(columns=["d34S_SO4"], inplace=True)
+        df_d = df_d.drop(columns=["d34S_SO4"])
 
         layout_content = """
 isotopes = {

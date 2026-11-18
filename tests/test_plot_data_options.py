@@ -190,6 +190,10 @@ def test_broken_axis_method():
     assert ax.get_ylim() == (-45.0, 30.0)
     assert ax._broken_y_info["y1"] == -35.0
     assert ax._broken_y_info["y2"] == 20.0
+    transform = ax.yaxis.get_transform()
+    assert transform.axis is ax.yaxis
+    ymin, ymax, *_ = transform._get_params()
+    assert (ymin, ymax) == (-45.0, 30.0)
     plt.close(fig)
 
 
