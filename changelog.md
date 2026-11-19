@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-19
+
 ### Added
 
 - **Automated Simulation Report Generation (`report_generator.py`)**:
@@ -21,6 +23,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added SVG export support to summary plots in example models (`run_simplefe.svg`, `velde_et_2016.svg`).
   - Added new tutorials `Tutorial_3` (Examples)  and `Tutorial_4` (user facing functions)
   - Added unit test suites in `tests/test_get_flux.py` and `tests/test_report_generator.py`.
+- **Warranty & Citation Display (`DiageneticModel`)**:
+  - Added warranty and citation display to `DiageneticModel`.
+- **Packaging, Licensing & Distribution**:
+  - Added Zenodo archive support and badge, plus `conda-forge` distribution support.
+  - Added license disclaimers to all source files.
+
+### Changed
+
+- Moved the `examples` directory to the repository root and updated `.gitignore` (including `logs/`).
+- Simplified kinetic constants documentation in tutorials and updated the README logo URL.
+
+### Fixed
+
+- Fixed broken y-axis scale initialization and transform in plotting.
+- Excluded `examples` from `mypy` static type checking.
 
 ## [0.7.6] - 2026-11-12
 
