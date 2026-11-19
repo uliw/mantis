@@ -2036,4 +2036,30 @@ class DiageneticModel:
             except Exception as e:
                 print(f"[Warning] Automatic report generation failed: {e}")
 
+        from importlib.metadata import PackageNotFoundError, version
+
+        def _get_version(pkg_name: str) -> str:
+            try:
+                return version(pkg_name)
+            except PackageNotFoundError:
+                return "dev"
+
+        self._display_warranty(_get_version)
+
         return result
+
+    def _display_warranty(self, version_func):
+        """Display warranty and citation information."""
+        import datetime
+
+        warranty_text = (
+            f"\n"
+            f"Mantis {version_func('mantis_rtm')}  \n Copyright (C) 2026 - "
+            f"{datetime.date.today().year}  Ulrich G.Wortmann\n"
+            f"This program comes with ABSOLUTELY NO WARRANTY\n"
+            f"This is free software, and you are welcome to redistribute it\n"
+            f"under certain conditions; See the LICENSE file for details.\n\n"
+            f"If you use ESBMTK for your research, please cite:\n\n"
+            f"Wortmann, UG (2026). https://doi.org/10.5281/zenodo.24324141\n"
+        )
+        print(warranty_text)
