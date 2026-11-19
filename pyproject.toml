@@ -70,6 +70,29 @@ doc = [
     "numpydoc",
 ]
 
+[dependency-groups]
+test = [
+    "pytest>=7.0",
+    "pytest-cov",
+]
+lint = [
+    "ruff",
+    "mypy",
+]
+doc = [
+    "sphinx>=7.0",
+    "sphinx-rtd-theme>=3.0",
+    "myst-parser>=3.0",
+    "sphinx-autodoc-typehints",
+    "numpydoc",
+]
+dev = [
+    {include-group = "test"},
+    {include-group = "lint"},
+    "twine",
+    "build",
+]
+
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["mantis*"]
@@ -94,9 +117,6 @@ output-format = "pylint"
 # Same as Black.
 line-length = 88
 indent-width = 4
-
-# Assume Python 3.14
-target-version = "py314"
 
 [tool.ruff.lint]
 select = [
@@ -127,11 +147,11 @@ ignore = ["E501"]
 # unfixable = ["B"]
 
 # 4. Ignore `E402` (import violations) in all `__init__.py` files, and in selected subdirectories.
-[lint.per-file-ignores]
+[tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["E402"]
 "**/{tests,docs,tools}/*" = ["E402"]
 
-[lint.pydocstyle]
+[tool.ruff.lint.pydocstyle]
 convention = "numpy"
 
 [tool.ruff.format]
@@ -162,11 +182,19 @@ pythonPlatform = "Linux"
 python_version = "3.13"
 files = ["src"]
 exclude = ["src/mantis/examples"]
+strict = false
+warn_unreachable = true
+enable_error_code = ["ignore-without-code", "redundant-expr", "truthy-bool"]
 ignore_missing_imports = true
 follow_imports = "silent"
 warn_redundant_casts = true
 warn_unused_ignores = true
 
 [tool.pytest.ini_options]
+minversion = "7.0"
 testpaths = ["tests"]
 pythonpath = ["src"]
+addopts = ["-ra", "--strict-config", "--strict-markers"]
+xfail_strict = true
+log_level = "INFO"
+filterwarnings = ["error"]

@@ -951,7 +951,7 @@ class DiageneticModel:
             return True
         if hasattr(self, "_raw_reactions") and len(self._raw_reactions) == 0:
             return True
-        if hasattr(self, "reactions_file") and self.reactions_file and self.reactions_file.exists():
+        if self.reactions_file.exists():
             try:
                 with open(self.reactions_file) as f:
                     rxn_tree = ast.parse(f.read())
@@ -1995,7 +1995,7 @@ class DiageneticModel:
             try:
                 from .diff_lib import check_reactant_coexistence
                 check_reactant_coexistence(
-                    mesh_or_z=self._mesh if self._mesh is not None else self.mp.z,
+                    mesh_or_z=self._mesh,
                     c=self._c,
                     k=self._k,
                     D_mol=self._D_mol,

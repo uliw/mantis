@@ -5,6 +5,8 @@ on:
     types: [published]
   workflow_dispatch:
 
+permissions: {}
+
 jobs:
   build-and-publish:
     name: Build distribution and publish to PyPI
@@ -21,6 +23,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           fetch-depth: 0  # Required for setuptools_scm to extract version from tags
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@v6

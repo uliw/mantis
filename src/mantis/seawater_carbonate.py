@@ -439,7 +439,7 @@ def solve_carbonate_speciation_from_ta_ph(
 
 
 def adjust_for_calcite_equilibrium(
-    ca2_top: float,
+    ca2_top: float | None,
     dic: float | None = None,
     ta: float | None = None,
     ph: float | None = None,

@@ -2004,7 +2004,7 @@ def _geometric_progression_section(z0: float, z1: float, dz0: float, dz1: float)
 
 
 def make_grid_from_sections(
-    sections: list | tuple | np.ndarray,
+    sections: Sequence[Any] | np.ndarray,
     smoothing: str = "geometric",
     smooth_discontinuities: bool = True,
     verbose: bool = True,
@@ -2176,16 +2176,6 @@ def make_grid_from_sections(
     z_centers = mesh.cellCenters[0]
     return mesh, z_centers
 
-    faces = np.array(all_faces, dtype=np.float64)
-    dx = np.diff(faces)
-    N = len(dx)
-    if verbose:
-        print(f"Grid generated with {N} points.")
-
-    mesh = Mesh1D(dx=dx)
-    z_centers = mesh.cellCenters[0]
-    return mesh, z_centers
-
 
 def make_grid2(
     L: float,
@@ -2274,7 +2264,7 @@ def make_grid2(
 def get_total_delta(
     c: Any,
     mp: Any,
-    species: str | Sequence[str] | None = "SO4, TS2, FeS",
+    species: str | Sequence[str] | int | np.integer | None = "SO4, TS2, FeS",
     isotope_standard: str | float | None = None,
     index: int | None = -1,
     isotope_standart: str | float | None = None,
@@ -2568,7 +2558,7 @@ def add_monod_sink(
     R_max: Any,
     mp: Any,
     has_solid: bool,
-    scheme: str = "hybrid",
+    scheme: str | None = "hybrid",
     c: Any = None,
     reaction: str | None = None,
     multiplier: float = 1.0,

@@ -330,18 +330,12 @@ class LivePlotter:
             flush=True,
         )
 
-        fig = None
-        ax_objects = None
-        last_df = None
-        plt_desc = None
-        writer = None
-        last_title = None
-
-        print(
-            f"[LivePlotter] Background process started (Animation: {self.video_path is not None})."
-        )
-
-        writer = None
+        fig: Any = None
+        ax_objects: Any = None
+        last_df: Any = None
+        plt_desc: Any = None
+        writer: Any = None
+        last_title: str | None = None
 
         print(
             f"[LivePlotter] Background process started (Animation: {self.video_path is not None})."

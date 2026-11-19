@@ -273,7 +273,7 @@ def get_l_mass(bulk: float, delta: float, standard_ratio: float) -> float:
 
 
 def parse_and_validate_species_dict(
-    raw_species: dict[str, Any],
+    raw_species: object,
     isotope_standards: dict[str, Any],
     ureg: Any = None,
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, dict[str, Any]]]:
@@ -523,7 +523,7 @@ VALID_SPECIATION_TYPES = {
 
 
 def validate_and_normalize_speciation(
-    raw_speciation: dict[str, Any] | None,
+    raw_speciation: object,
     species_defs: dict[str, Any],
     ureg: Any = None,
 ) -> dict[str, dict[str, Any]]:
