@@ -8,6 +8,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Development Tooling & Workflow Configuration**:
+  - Added pre-commit hooks configuration (`.pre-commit-config.yaml`) including Ruff (lint and format), mypy, standard hygiene hooks, and commit message checking.
+  - Added `noxfile.py` with sessions for tests, linting, type-checking, formatting, docs building, and packaging verification.
+  - Configured standard `[dependency-groups]` in `pyproject.toml` (`test`, `lint`, `doc`, `dev`).
+  - Added GitHub Actions Dependabot configuration for automated GitHub Actions dependency updates (`.github/dependabot.yml`).
+  - Added dedicated `docs/getting_help.md` troubleshooting guide with environment diagnosis commands.
+
+### Changed
+
+- **Tutorial & Documentation Modernization**:
+  - Updated `Tutorial_1` with split installation instructions for `pip` and `conda` alongside example setup.
+  - Updated tutorial kinetic constants documentation to demonstrate the simplified string-based unit format (e.g. `"0.001 1/year"`) instead of manual `pint` conversions.
+- **Workflow Security Hardening & Concurrency**:
+  - Added least-privilege `permissions` blocks and `persist-credentials: false` across CI workflows (`tests.yml`, `typecheck.yml`, `publish-pypi.yml`).
+  - Added workflow concurrency controls (`cancel-in-progress: true`) to `tests.yml` and `typecheck.yml`.
+- **Packaging & Tooling Configuration**:
+  - Updated `pyproject.toml` configuration for `ruff`, `mypy`, and `pytest` (`addopts`, strict flags, warning handling).
+
+### Fixed
+
+- **Type Annotations & Logic Cleanup**:
+  - Refined type annotations across `diff_lib.py`, `live_plot_lib.py`, `species_parser.py`, and `seawater_carbonate.py`.
+  - Streamlined `reactions_file` path check and reactant coexistence grid validation in `model.py`.
+  - Cleaned up redundant unreachable code in `diff_lib.make_grid_from_sections` and dead variables in `live_plot_lib.py`.
+
 ## [0.8.0] - 2026-11-19
 
 ### Added
