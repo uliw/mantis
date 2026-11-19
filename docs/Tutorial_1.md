@@ -1,7 +1,27 @@
 # Installation
 
--   `pip install mantis-rtm`
--   Optional: In an empty directory run `mantis_create_examples.py`
+
+## pip
+
+```sh
+pip install mantis-rtm
+```
+
+
+## conda
+
+Currently waiting on coda-forge
+
+```sh
+
+```
+
+
+## Installing the examples
+
+```sh
+mantis_create_examples.py
+```
 
 
 # Running your first model
@@ -116,33 +136,24 @@ species = {
 
 ### Defining kinetic constants
 
-Kinetic constants are defined in a dictionary. In the below example, I use the `pint` library to map units into the model units, and return both dictionaries.
+Kinetic constants are defined in a `kinetic_constants` dictionary, where each value is a string specifying the magnitude and unit (e.g., `"0.001 1/year"`). MANTIS automatically converts these into internal SI units (meters, moles, seconds).
 
 In diagenesis, we typically distinguish:
 
-1.  **Rate Constants ($k$)**: The maximum rate of a reaction under substrate-saturated conditions (e.g., $k_{\text{POC}}$ in $\text{yr}^{-1}$ or $\text{s}^{-1}$, or mineral precipitation rates $k_{\text{prec}}$). While the names are arbitrary they must match the names in the reaction file. It also a good idea that parameters that describe first order values start with the name of the species the rate constant refers too.
-2.  **Half-Saturation Constants ($K_m$)**: The concentration of an electron acceptor at which the microbial degradation rate reaches $50\%$ of its maximum. Lower $K_m$ means the microbe is efficient at scavenging low concentrations, e.g., $\frac{1}{C+K_m}$ (see notes in the reaction section) .
-3.  **Inhibition Constants**: The threshold concentration of a more energetically favorable oxidant that shuts down a less favorable pathway (e.g., $O_2$ inhibiting iron reduction or sulfate reduction), e.g., $1 - \frac{1}{C + K_m}$ (see notes in the reaction section) .
+1.  **Rate Constants ($k$)**: The maximum rate of a reaction under substrate-saturated conditions (e.g., $k_{\text{POC}}$ in $\text{yr}^{-1}$ or $\text{s}^{-1}$, or mineral precipitation rates $k_{\text{prec}}$).
+2.  **Half-Saturation Constants ($K_m$)**: The concentration of an electron acceptor at which the microbial degradation rate reaches $50\%$ of its maximum. Lower $K_m$ means the microbe is efficient at scavenging low concentrations, e.g., $\frac{1}{C+K_m}$ (see notes in the reaction section).
+3.  **Inhibition Constants**: The threshold concentration of a more energetically favorable oxidant that shuts down a less favorable pathway (e.g., $O_2$ inhibiting iron reduction or sulfate reduction), e.g., $1 - \frac{1}{C + K_m}$ (see notes in the reaction section).
 
-```jupyter-python
-import pint
+**Naming convention:** Kinetic parameter names are \*arbitrary\*—the equation parser does not infer which species a constant belongs to from its name (species are determined from the reaction stoichiometry in `reactions.py`). However, every key in `kinetic_constants` must match the `k_value_name` (or limiter constant) referenced in `reactions.py`. As a best practice for readability, name rate constants after the primary species or reaction (e.g., `k_POC` or `POC`) and half-saturation or inhibition constants as `K_<species>` (e.g., `K_SO4`).
 
-   ureg = pint.UnitRegistry()
-   Q_ = ureg.Quantity
+```python
+kinetic_constants: dict = {
+    # Rate constant for organic matter degradation
+    "POC": "0.001 1/year",
 
-   constants: dict = {
-       # kinetic constants
-       "POC": [0.001, "1/year", "1/second"],  # key, [value, unit, target unit]
-
-       # Monod half-saturation for microbial sulfate reduction
-       "K_SO4": [0.9, "umol/cm^3", "mol/m^3"],
-   }
-
-   # convert into model units (meter, mol, seconds)
-   for k, v in constants.items():
-       k_values[k] = Q_(f"{v[0]} {v[1]}").to(f"{v[2]}").magnitude
-
-   return constants, k_values
+    # Monod half-saturation for microbial sulfate reduction
+    "K_SO4": "0.9 umol/cm^3",
+}
 ```
 
 
@@ -153,18 +164,16 @@ Organic matter reactivity decreases with depth as sediment ages and labile compo
 ```python
 from mantis.diff_lib import sed_age
 
-def get_reaction_constants(pH, phi):
-    # Configure sediment aging profile (Middelburg power law: a0=1.0 yr, a=0.21 yr^-1, b=1.22)
-    age = sed_age(mode="relative", a0=1.0, a=0.21, b=1.22)
+# Configure sediment aging profile (Middelburg power law: a0=1.0 yr, a=0.21 yr^-1, b=1.22)
+age = sed_age(mode="relative", a0=1.0, a=0.21, b=1.22)
 
-    constants = {
-        # 'relative' mode scales the initial rate constant by ((age + a0) / a0)^(-b):
-        "k_POC": "age * 0.01 1/year",
+kinetic_constants: dict = {
+    # 'relative' mode scales the initial rate constant by ((age + a0) / a0)^(-b):
+    "k_POC": "age * 0.01 1/year",
 
-        # Monod half-saturation for microbial sulfate reduction
-        "K_SO4": "0.9 umol/cm^3",
-    }
-    return constants
+    # Monod half-saturation for microbial sulfate reduction
+    "K_SO4": "0.9 umol/cm^3",
+}
 ```
 
 Two scaling modes are supported:

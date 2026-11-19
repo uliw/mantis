@@ -11,8 +11,23 @@
 
 
 * Installation 
-- ~pip install mantis-rtm~
-- Optional: In an empty directory run ~mantis_create_examples.py~ 
+** pip 
+#+BEGIN_SRC sh
+pip install mantis-rtm
+#+END_SRC
+
+** conda
+Currently waiting on coda-forge
+#+BEGIN_SRC sh
+
+#+END_SRC
+
+** Installing the examples 
+
+#+BEGIN_SRC sh  
+mantis_create_examples.py
+#+END_SRC
+
 
 * Running your first model 
 After creating the example directory, go to ~./examples/start_here/basic_transport_and_reaction~
