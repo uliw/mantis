@@ -11,6 +11,7 @@
 
 
 * Installation 
+Note: The video backend requires a working ffmpeg installation but ffmpeg will not be installed by the installation scripts. Further, the ffmpeg integration has only been tested under Linux. Using this with Windows or MacOS may, or may not work.  However, Mantis works just fine if ffmpeg is not installed. 
 ** pip 
 #+BEGIN_SRC sh
 pip install mantis-rtm
@@ -23,7 +24,6 @@ Currently waiting on coda-forge
 #+END_SRC
 
 ** Installing the examples 
-
 #+BEGIN_SRC sh  
 mantis_create_examples.py
 #+END_SRC
