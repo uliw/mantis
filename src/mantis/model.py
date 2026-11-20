@@ -1445,8 +1445,7 @@ class DiageneticModel:
             if hasattr(eq_mod, "get_limiters"):
                 self.mp.get_limiters = eq_mod.get_limiters
 
-            # Extract reaction_parameters, fractionation_factors, and raw reaction definitions
-            rxn_params = getattr(eq_mod, "reaction_parameters", None) or getattr(eq_mod, "fractionation_factors", None)
+            # Extract raw reaction and limiter definitions
             if hasattr(self, "reactions_file") and self.reactions_file and self.reactions_file.exists():
                 spec_rxn = importlib.util.spec_from_file_location("rxn_param_mod", self.reactions_file)
                 if spec_rxn and spec_rxn.loader:
@@ -1455,18 +1454,10 @@ class DiageneticModel:
                     self._raw_reactions = getattr(mod_rxn, "reactions", [])
                     self.mp.reactions = self._raw_reactions
                     self.mp.limiters = getattr(mod_rxn, "limiters", {})
-                    if rxn_params is None:
-                        rxn_params = getattr(mod_rxn, "reaction_parameters", None) or getattr(mod_rxn, "fractionation_factors", None)
             else:
                 self._raw_reactions = []
                 self.mp.reactions = []
                 self.mp.limiters = {}
-
-            if isinstance(rxn_params, dict):
-                self.mp.reaction_parameters = rxn_params
-                for rp_k, rp_v in rxn_params.items():
-                    if not hasattr(self.mp, rp_k):
-                        setattr(self.mp, rp_k, rp_v)
 
             # 4. Load reaction constants
             raw_rc_dict = None

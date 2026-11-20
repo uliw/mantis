@@ -535,9 +535,9 @@ def generate_simulation_report(
     table7_rows: list[dict[str, Any]] = []
     has_isotopes = bool(getattr(mp, "isotopes", False))
     if has_isotopes:
-        rxn_params = getattr(mp, "reaction_parameters", {})
-        if not isinstance(rxn_params, dict):
-            rxn_params = {}
+        k_params = getattr(mp, "k", {})
+        if not isinstance(k_params, dict):
+            k_params = getattr(k_params, "__dict__", {})
 
         R_std = getattr(mp, "VCDT", getattr(mp, "d34S_ratio", 0.044162589))
 
@@ -565,7 +565,7 @@ def generate_simulation_report(
                         if hasattr(mp, alpha_ref):
                             alpha_val = float(getattr(mp, alpha_ref))
                         else:
-                            alpha_val = float(rxn_params.get(alpha_ref, 1.0))
+                            alpha_val = float(k_params.get(alpha_ref, 1.0))
                 elif isinstance(f_val, (int, float)):
                     alpha_val = float(f_val)
 

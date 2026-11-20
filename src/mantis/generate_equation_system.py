@@ -73,8 +73,6 @@ def make_null_reactions():
     null_mod.compute_chemical_jacobian = compute_chemical_jacobian
     null_mod.get_limiters = get_limiters
     null_mod.reactions = []
-    null_mod.reaction_parameters = {}
-    null_mod.fractionation_factors = {}
     return null_mod
 
 
@@ -544,6 +542,19 @@ class ReactionSystemValidator:
         _check_lim_entry("Limiter", limiters)
         inhibitors = rxn_dict.get("inhibitors")
         _check_lim_entry("Inhibitor", inhibitors)
+
+        iso_frac = rxn_dict.get("isotope_fractionation")
+        if isinstance(iso_frac, dict):
+            for _frac_key, frac_val in iso_frac.items():
+                if isinstance(frac_val, (list, tuple)) and len(frac_val) >= 2 and isinstance(frac_val[1], str):
+                    lim_name = frac_val[1]
+                    if not any(
+                        cand in self.valid_limiters
+                        for cand in (lim_name, f"{lim_name}_explicit")
+                    ):
+                        errors.append(
+                            f"[{rxn_name}] Fatal Error: Isotope fractionation limiter '{lim_name}' is not defined in the limiters specification or reactions file."
+                        )
 
         # 4. Validate isotope mapping
         if iso_map:
@@ -1241,7 +1252,7 @@ class EquationSystemGenerator:
                     src_iso_sp = iso_sp_map.get(src_sp)
                     lines.extend([
                         f'        _coeff_base_iso_{iso_idx} = {iso_coeff_expr}',
-                        f'        _alpha_{iso_idx} = 1.0 + (getattr(mp, "{alpha_name}", 1.0) - 1.0) * lim.get("{lim_name}", 1.0)',
+                        f'        _alpha_{iso_idx} = 1.0 + (getattr(mp, "{alpha_name}", 1.0) - 1.0) * lim.get("{lim_name}_explicit", lim.get("{lim_name}", 1.0))',
                         f'        coeff_master_iso_{iso_idx} = calculate_fractionated_rate_coeff(',
                         f'            _coeff_base_iso_{iso_idx}, getattr(c, "{src_sp}"), getattr(c, "{src_iso_sp}"), _alpha_{iso_idx}, eps=1e-30',
                         '        )',
@@ -2135,19 +2146,6 @@ class EquationSystemGenerator:
             '',
             'diagenetic_reactions.compute_chemical_jacobian = compute_chemical_jacobian',
         ])
-
-        # Extract reaction_parameters or fractionation_factors from reactions file if defined
-        if self.validator.reactions_path and self.validator.reactions_path.exists():
-            try:
-                rxn_tree = ast.parse(self.validator.reactions_path.read_text(encoding="utf-8"))
-                for node in ast.walk(rxn_tree):
-                    if isinstance(node, ast.Assign):
-                        for target in node.targets:
-                            if isinstance(target, ast.Name) and target.id in ("reaction_parameters", "fractionation_factors"):
-                                code.append("")
-                                code.append(f"{target.id} = {ast.unparse(node.value)}")
-            except Exception:
-                pass
 
         # Collect all referenced limiters across reactions and Jacobian
         full_body = "\n".join(code)
