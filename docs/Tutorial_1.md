@@ -1,37 +1,7 @@
-# Installation
-
-Note: The video backend requires a working ffmpeg installation but ffmpeg will not be installed by the installation scripts. Further, the ffmpeg integration has only been tested under Linux. Using this with Windows or MacOS may, or may not work. However, Mantis works just fine if ffmpeg is not installed.
+./examples/start<sub>here</sub>/basic<sub>transport</sub><sub>and</sub><sub>reaction</sub>~
 
 
-## pip
-
-```sh
-pip install mantis-rtm
-```
-
-
-## conda
-
-Currently waiting on coda-forge
-
-```sh
-
-```
-
-
-## Installing the examples
-
-```sh
-mantis_create_examples.py
-```
-
-
-# Running your first model
-
-After creating the example directory, go to `./examples/start_here/basic_transport_and_reaction`
-
-
-## Model structure
+# Model structure
 
 A typical MANTIS project directory contains five primary configuration files, alongside the master run script:
 
@@ -52,7 +22,7 @@ When you execute `python run_model.py`, MANTIS automatically detects these files
 -   `<model_name>.mp4` (optional): An animated video showing the transient evolution
 
 
-### The main model file
+## The main model file
 
 The model definition is straightforward, importing the libraries an wrapping an `if __name__ == "__main__":` block, and then defining some basic parameters:
 
@@ -94,7 +64,7 @@ if __name__ == "__main__":
 ```
 
 
-### Defining the species that participate in the model
+## Defining the species that participate in the model
 
 The species file contains all the information we need to know about a species. This includes the type (solid or liquid), diffusion coefficients, boundary conditions, the chemical formula, as well as a field that decides whether a species is part of the transport reactions. Most species are covered by the `diff_coeff` function with the `m0, m1` parameter listed in Table 4.8 in Boudreau 1996. Note that diffusion coefficients are only needed for species that are part of the reaction-transport matrix (i.e., where include = True). As before, all properties are defined in a dictionary. Unless a lower boundary condition is specified, it defaults to a zero gradient Neumann condition. The `prefill` parameter determines of the initial species concentration across the modeling domains is set to the upper boundary condition or to zero. Note that &ldquo;CO2&rdquo; and &ldquo;H2O&rdquo; need to be present, even so they do not appear in the model directly.
 
@@ -136,7 +106,7 @@ species = {
 ```
 
 
-### Defining kinetic constants
+## Defining kinetic constants
 
 Kinetic constants are defined in a `kinetic_constants` dictionary, where each value is a string specifying the magnitude and unit (e.g., `"0.001 1/year"`). MANTIS automatically converts these into internal SI units (meters, moles, seconds).
 
@@ -159,7 +129,7 @@ kinetic_constants: dict = {
 ```
 
 
-### Age-dependent reaction rates
+## Age-dependent reaction rates
 
 Organic matter reactivity decreases with depth as sediment ages and labile compounds are degraded. In MANTIS, age-dependent reaction rate constants can be defined using the built-in `sed_age` function from `mantis.diff_lib`:
 
@@ -186,7 +156,7 @@ Two scaling modes are supported:
 The sediment age profile $A(z)$ is computed automatically from 1D advective-diffusive transport accounting for burial velocity ($w$), porosity compaction ($\phi$), and bioturbation mixing ($D_b$).
 
 
-### Setting up reactions
+## Setting up reactions
 
 Microbial sulfate reduction rates are sensitive to sulfate concentrations, so in the reactions file, we first define a limiter for `SO4`. This is followed by a list of dictionaries that define the reactions of the model. The reaction name is arbitrary, but the chemical reaction can only use names that are defined in the species file. An important limitation is that the stoichiometric must be integer numbers. The kinetic constant name must exist in the kinetic constants file, the limiters parameter will only accept values that are defined in the `limiters` dictionary. A note on limiters. The canonical form of writing a limiter is
 
@@ -223,7 +193,7 @@ reactions = [
 ```
 
 
-### How Mantis determines reaction order
+## How Mantis determines reaction order
 
 By default, Mantis assigns reaction order based on the number of reactants in the reaction stoichiometry:
 
@@ -247,7 +217,7 @@ You can explicitly override this default for any reaction by specifying the `rea
 -   `"reaction_order": 2`: Explicit second-order mass action ($R = k \cdot [A] \cdot [B] \cdot \prod \text{limiters}$).
 
 
-### Defining the plot output
+## Defining the plot output
 
 Mantis provides a default plot output that can be adapted to a variety of layouts. Its basic structure requires that you define the x-axis scale, as well as one or more panels. For each panel, you can create a one or more `liquid_species` objects, none or more `solid_species` objects which allow for the mapping into weight percent, none or more `reaction_rates` objects that allow for the continuous display of negative and positive rates on a logarithmic scale, and isotope object, that allows for broken scales. These objects are then grouped into one or more vertical panels.
 
@@ -285,7 +255,7 @@ plot_panels = [
 ```
 
 
-### A note on Units
+## A note on Units
 
 Under the hood, MANTIS standardizes all transport and reaction PDEs into SI-derived volumetric units: $$\text{Internal Concentration Unit} = \mathbf{mol/m^3} \quad (\equiv 1\ \text{mmol/L} \equiv 1\ \text{mM} \equiv 1000\ \mu\text{mol/L} \equiv 1\ \mu\text{mol/cm}^3)$$
 
@@ -298,7 +268,7 @@ Crucially, concentrations are defined **per unit volume of their respective phas
 -   **Depths and Transport**: Depth $z$ is in meters ($\text{m}$), time $t$ in seconds ($\text{s}$), and diffusion coefficients in $\text{m}^2/\text{s}$.
 
 
-#### Output Units
+### Output Units
 
 When the simulation completes or exports data (`<model_name>.csv`):
 
@@ -322,7 +292,7 @@ c_fes_umol_g = solid_conc_to_umol_per_g(df.c_FeS, d=2.6)
 ```
 
 
-#### B. Converting to Dry Weight Percent ($\text{wt}\%$)
+### B. Converting to Dry Weight Percent ($\text{wt}\%$)
 
 To convert $C_{\text{solid}}$ to weight percent of dry sediment matrix given molecular weight $M_w$ ($\text{g/mol}$): $$\text{wt}\% = \frac{C_{\text{solid}} \cdot M_w}{\rho_{\text{sed}} \cdot 10^4}$$
 
@@ -336,7 +306,7 @@ fes_wt_pct = solid_conc_to_wt_percent(df.c_FeS, mw=87.91, d=2.6, phi=df.phi)
 ```
 
 
-### Adding measured data
+## Adding measured data
 
 The plot file can specify a second csv file that contains data to compare against. For this to work you need to add the name of the csv file, as well as a mapping table at the beginning of the `plot_layout` file
 
