@@ -229,9 +229,8 @@ def test_carbonate_configured_via_speciation_block():
     from mantis import DiageneticModel
     from pathlib import Path
 
-    simplefe_dir = Path(__file__).resolve().parent.parent / "nbk" / "SimpleFe"
-    if not (simplefe_dir / "species.py").exists():
-        pytest.skip("SimpleFe directory not present.")
+    simplefe_dir = Path(__file__).resolve().parent.parent / "src" / "mantis" / "examples" / "SimpleFe"
+    assert (simplefe_dir / "species.py").exists(), f"SimpleFe directory not found: {simplefe_dir}"
 
     model = DiageneticModel(
         base_dir=simplefe_dir,

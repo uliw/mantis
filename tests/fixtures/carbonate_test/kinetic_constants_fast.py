@@ -90,6 +90,17 @@ def get_reaction_constants(
         "K_SO4": [0.9, "umol/cm^3", "mol/m^3"],
         "K_Fe3_diss_red": [10.4, "umol/cm^3", "mol/m^3"],
         "K_Fe3": [1e-3, "dimensionless", "dimensionless"],
+        # Isotope fractionation factors & transition thresholds
+        "msr_alpha": [1.07, "dimensionless", "dimensionless"],
+        "TS2_O2_alpha": [0.995, "dimensionless", "dimensionless"],
+        "S0_O2_alpha": [1.0, "dimensionless", "dimensionless"],
+        "dispro_hs_alpha": [0.993, "dimensionless", "dimensionless"],
+        "dispro_SO4_hs_split": [3.0, "dimensionless", "dimensionless"],
+        "h2s_hs_alpha": [0.99991542, "dimensionless", "dimensionless"],
+        "K_SO4_alpha": [1e-3, "umol/cm^3", "mol/m^3"],
+        "K_TS2_alpha": [1e-3, "umol/cm^3", "mol/m^3"],
+        # Primary respiration stoichiometry
+        "POC_O2_ratio": [1.27, "dimensionless", "dimensionless"],
         # Carbonate system constants
         # Calcite dissolution and precipitation rate constants:
         # Jourabchi, Van Cappellen, & Regnier (2005), Am. J. Sci. 305: 919-956, Table 2.

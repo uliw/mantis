@@ -397,3 +397,76 @@ def test_missing_reactions_file_raises_filenotfound(tmp_path):
         resolve_and_prepare_equations(p_dict, base_dir=tmp_path)
 
 
+def test_isotope_fractionation_auto_explicit_limiter(tmp_path):
+    """Verify base implicit limiters in isotope_fractionation auto-convert to explicit form."""
+    from mantis.generate_equation_system import EquationSystemGenerator
+
+    rxn_file = tmp_path / "reactions.py"
+    rxn_file.write_text(
+        '''
+limiters = {
+    "SO4": "1.0 / (c.SO4 + K_SO4)",
+    "SO4_alpha": "1.0 / (c.SO4 + K_SO4_alpha)",
+}
+reactions = [
+    {
+        "reaction_name": "sulfate_reduction_fast",
+        "reaction": "2 POC_fast + SO4 -> TS2",
+        "k_value_name": "POC_fast",
+        "limiters": ["SO4"],
+        "isotope_fractionation": {
+            "SO4_S32 to TS2_S32": ["msr_alpha", "SO4_alpha"],
+        },
+    },
+]
+''',
+        encoding="utf-8",
+    )
+
+    validator = ReactionSystemValidator(
+        species_path=SPECIES_FILE,
+        constants_path=CONSTANTS_FILE,
+        reactions_path=rxn_file,
+    )
+    reactions = [
+        {
+            "reaction_name": "sulfate_reduction_fast",
+            "reaction": "2 POC_fast + SO4 -> TS2",
+            "k_value_name": "POC_fast",
+            "limiters": ["SO4"],
+            "isotope_fractionation": {
+                "SO4_S32 to TS2_S32": ["msr_alpha", "SO4_alpha"],
+            },
+        },
+    ]
+    assert validator.validate_reactions(reactions) == []
+
+    # Undefined isotope fractionation limiter must fail validation
+    bad_reactions = [
+        {
+            "reaction_name": "sulfate_reduction_fast",
+            "reaction": "2 POC_fast + SO4 -> TS2",
+            "k_value_name": "POC_fast",
+            "limiters": ["SO4"],
+            "isotope_fractionation": {
+                "SO4_S32 to TS2_S32": ["msr_alpha", "NONEXISTENT_LIM"],
+            },
+        },
+    ]
+    errs = validator.validate_reactions(bad_reactions)
+    assert any("NONEXISTENT_LIM" in e for e in errs)
+
+    generator = EquationSystemGenerator(reactions=reactions, validator=validator)
+    code = generator.generate_code()
+
+    # get_limiters derives SO4_alpha_explicit from the base implicit limiter
+    assert 'K_SO4_alpha = getattr(mp, "K_SO4_alpha", 0.0)' in code
+    assert 'limiters["SO4_alpha_explicit"] = (c.SO4) * _l_SO4_alpha' in code
+    # Reaction function looks up _explicit first
+    assert 'lim.get("SO4_alpha_explicit", lim.get("SO4_alpha", 1.0))' in code
+    # No reaction_parameters emitted
+    assert "reaction_parameters" not in code
+    assert "fractionation_factors" not in code
+
+
+

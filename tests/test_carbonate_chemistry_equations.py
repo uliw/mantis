@@ -37,12 +37,14 @@ def get_limiters(c, mp):
     K_O2 = getattr(mp, "K_O2", 0.0)
     K_O2_TS2 = getattr(mp, "K_O2_TS2", 0.0)
     K_SO4 = getattr(mp, "K_SO4", 0.0)
+    K_SO4_alpha = getattr(mp, "K_SO4_alpha", 0.0)
+    K_TS2_alpha = getattr(mp, "K_TS2_alpha", 0.0)
     _l_O2 = 1.0 / (c.O2 + K_O2)
     limiters["O2"] = _l_O2
     limiters["O2_implicit"] = _l_O2
     limiters["O2_inhibit"] = (K_O2) * _l_O2
     limiters["O2_inhib"] = limiters["O2_inhibit"]
-    _l_O2_TS2 = 1.0 / (c.O2 + mp.K_O2_TS2)
+    _l_O2_TS2 = 1.0 / (c.O2 + K_O2_TS2)
     limiters["O2_TS2"] = _l_O2_TS2
     limiters["O2_TS2_implicit"] = _l_O2_TS2
     limiters["O2_TS2_implicit"] = _l_O2_TS2
@@ -58,10 +60,12 @@ def get_limiters(c, mp):
     limiters["Fe3_diss_red_implicit"] = _l_Fe3_diss_red
     limiters["Fe3_diss_red_inhibit"] = (K_Fe3_diss_red) * _l_Fe3_diss_red
     limiters["Fe3_diss_red_inhib"] = limiters["Fe3_diss_red_inhibit"]
-    _l_SO4_alpha_explicit = c.SO4 / (c.SO4 + 1e-3)
-    limiters["SO4_alpha_explicit"] = _l_SO4_alpha_explicit
-    _l_TS2_alpha_explicit = c.TS2 / (c.TS2 + 1e-3)
-    limiters["TS2_alpha_explicit"] = _l_TS2_alpha_explicit
+    _l_SO4_alpha = 1.0 / (c.SO4 + K_SO4_alpha)
+    limiters["SO4_alpha"] = _l_SO4_alpha
+    limiters["SO4_alpha_explicit"] = (c.SO4) * _l_SO4_alpha
+    _l_TS2_alpha = 1.0 / (c.TS2 + K_TS2_alpha)
+    limiters["TS2_alpha"] = _l_TS2_alpha
+    limiters["TS2_alpha_explicit"] = (c.TS2) * _l_TS2_alpha
     _l_calcite_diss_limiter = np.maximum(1.0 - (c.Ca2 * c.CO3) / (mp.Ksp_calcite + 1e-30), 0.0) * (3.0 * np.minimum(np.maximum(1.0 - (c.Ca2 * c.CO3) / (mp.Ksp_calcite + 1e-30), 0.0) / 0.01, 1.0)**2 - 2.0 * np.minimum(np.maximum(1.0 - (c.Ca2 * c.CO3) / (mp.Ksp_calcite + 1e-30), 0.0) / 0.01, 1.0)**3)
     limiters["calcite_diss_limiter"] = _l_calcite_diss_limiter
     limiters["calcite_diss_limiter_implicit"] = _l_calcite_diss_limiter
@@ -170,7 +174,7 @@ def rxn_sulfate_reduction_fast(c, k_val, lim, LHS, RHS, RATES, CROSS, mp):
     )
     if getattr(mp, "isotopes", False):
         _coeff_base_iso_0 = k_num * getattr(c, "POC_fast") * _lim_SO4 * _inh_O2 * _inh_Fe3_diss_red
-        _alpha_0 = 1.0 + (getattr(mp, "msr_alpha", 1.0) - 1.0) * lim.get("SO4_alpha_explicit", 1.0)
+        _alpha_0 = 1.0 + (getattr(mp, "msr_alpha", 1.0) - 1.0) * lim.get("SO4_alpha_explicit", lim.get("SO4_alpha", 1.0))
         coeff_master_iso_0 = calculate_fractionated_rate_coeff(
             _coeff_base_iso_0, getattr(c, "SO4"), getattr(c, "SO4_S32"), _alpha_0, eps=1e-30
         )
@@ -205,7 +209,7 @@ def rxn_sulfate_reduction_slow(c, k_val, lim, LHS, RHS, RATES, CROSS, mp):
     )
     if getattr(mp, "isotopes", False):
         _coeff_base_iso_0 = k_num * getattr(c, "POC_slow") * _lim_SO4 * _inh_O2 * _inh_Fe3_diss_red
-        _alpha_0 = 1.0 + (getattr(mp, "msr_alpha", 1.0) - 1.0) * lim.get("SO4_alpha_explicit", 1.0)
+        _alpha_0 = 1.0 + (getattr(mp, "msr_alpha", 1.0) - 1.0) * lim.get("SO4_alpha_explicit", lim.get("SO4_alpha", 1.0))
         coeff_master_iso_0 = calculate_fractionated_rate_coeff(
             _coeff_base_iso_0, getattr(c, "SO4"), getattr(c, "SO4_S32"), _alpha_0, eps=1e-30
         )
@@ -238,7 +242,7 @@ def rxn_hs_oxidation(c, k_val, lim, LHS, RHS, RATES, CROSS, mp):
     )
     if getattr(mp, "isotopes", False):
         _coeff_base_iso_0 = k_num * mp.hs_frac * getattr(c, "O2") * _lim_O2_TS2
-        _alpha_0 = 1.0 + (getattr(mp, "TS2_O2_alpha", 1.0) - 1.0) * lim.get("TS2_alpha_explicit", 1.0)
+        _alpha_0 = 1.0 + (getattr(mp, "TS2_O2_alpha", 1.0) - 1.0) * lim.get("TS2_alpha_explicit", lim.get("TS2_alpha", 1.0))
         coeff_master_iso_0 = calculate_fractionated_rate_coeff(
             _coeff_base_iso_0, getattr(c, "TS2"), getattr(c, "TS2_S32"), _alpha_0, eps=1e-30
         )
@@ -1035,7 +1039,3 @@ def compute_chemical_jacobian(c, mp, k, species_names):
     return J
 
 diagenetic_reactions.compute_chemical_jacobian = compute_chemical_jacobian
-
-reaction_parameters = {'msr_alpha': 1.07, 'TS2_O2_alpha': 0.995, 'S0_O2_alpha': 1.0, 'dispro_hs_alpha': 0.993, 'dispro_SO4_hs_split': 3.0, 'h2s_hs_alpha': 0.99991542, 'POC_O2_ratio': 1.27, 'K_epsilon_msr': 0.2, 'K_epsilon_TS2_O2': 0.01}
-
-fractionation_factors = reaction_parameters

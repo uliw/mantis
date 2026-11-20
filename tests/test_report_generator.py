@@ -131,10 +131,10 @@ def test_report_generator_with_isotopes(tmp_path):
             "reaction_name": "sulfate_reduction_fast",
             "reaction": "2 POC_fast + SO4 -> TS2",
             "k_value_name": "POC_fast",
-            "isotope_fractionation": {"SO4_S32 to TS2_S32": ["msr_alpha", "SO4_alpha_explicit"]},
+            "isotope_fractionation": {"SO4_S32 to TS2_S32": ["msr_alpha", "SO4_alpha"]},
         }
     ]
-    mp.reaction_parameters = {"msr_alpha": 1.07}
+    mp.k = {"msr_alpha": 1.07}
     mp.speciation = {
         "sulfide_acid_base": {
             "type": "acid_base",

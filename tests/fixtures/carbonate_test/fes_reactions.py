@@ -24,38 +24,18 @@ Template Structure & Design:
 """
 
 
-# -------------------------------------------------------------------------
-# Reaction Parameters & Isotope Fractionation Factors
-# -------------------------------------------------------------------------
-reaction_parameters = {
-    # Isotope fractionation factors
-    "msr_alpha": 1.07,
-    "TS2_O2_alpha": 0.995,
-    "S0_O2_alpha": 1.0,
-    "dispro_hs_alpha": 0.993,
-    "dispro_SO4_hs_split": 3.0,
-    "h2s_hs_alpha": 0.99991542,
-    # Primary respiration stoichiometry
-    "POC_O2_ratio": 1.27,
-    # Transition factors for isotope fractionation limiters
-    "K_epsilon_msr": 0.2,
-    "K_epsilon_TS2_O2": 0.01,
-}
-fractionation_factors = reaction_parameters
-
-
 limiters = {
     # Base implicit limiters: L_imp = 1.0 / (C + K)
     # The parser automatically derives explicit (C * L_imp) and inhibition (K * L_imp = 1 - C * L_imp)
     "O2": "1.0 / (c.O2 + K_O2)",
-    "O2_TS2": "1.0 / (c.O2 + mp.K_O2_TS2)",
+    "O2_TS2": "1.0 / (c.O2 + K_O2_TS2)",
     "SO4": "1.0 / (c.SO4 + K_SO4)",
     "Fe3": "1.0 / (np.maximum(c.Fe3, 0.0) + K_Fe3)",
     "Fe3_diss_red": "1.0 / (np.maximum(c.Fe3, 0.0) + K_Fe3_diss_red)",
 
-    # Custom isotope explicit fractionation limiters 
-    "SO4_alpha_explicit": "c.SO4 / (c.SO4 + 1e-3)",
-    "TS2_alpha_explicit": "c.TS2 / (c.TS2 + 1e-3)",
+    # Isotope fractionation limiters (auto-converted to explicit form C / (C + K))
+    "SO4_alpha": "1.0 / (c.SO4 + K_SO4_alpha)",
+    "TS2_alpha": "1.0 / (c.TS2 + K_TS2_alpha)",
 
     # Carbonate saturation limiters
     "Omega_calcite": "(c.Ca2 * c.CO3) / (mp.Ksp_calcite + 1e-30)",
@@ -101,7 +81,7 @@ reactions = [
         "inhibitors": ["O2", "Fe3_diss_red"],
         "isotope_species": {"SO4": "SO4_S32", "TS2": "TS2_S32"},
         "isotope_fractionation": {
-            "SO4_S32 to TS2_S32": ["msr_alpha", "SO4_alpha_explicit"]
+            "SO4_S32 to TS2_S32": ["msr_alpha", "SO4_alpha"]
         },
     },
     {
@@ -112,7 +92,7 @@ reactions = [
         "inhibitors": ["O2", "Fe3_diss_red"],
         "isotope_species": {"SO4": "SO4_S32", "TS2": "TS2_S32"},
         "isotope_fractionation": {
-            "SO4_S32 to TS2_S32": ["msr_alpha", "SO4_alpha_explicit"]
+            "SO4_S32 to TS2_S32": ["msr_alpha", "SO4_alpha"]
         },
     },
 
@@ -126,7 +106,7 @@ reactions = [
         "limiters": ["O2_TS2"],
         "isotope_species": {"SO4": "SO4_S32", "TS2": "TS2_S32", "HS": "HS_S32"},
         "isotope_fractionation": {
-            "HS_S32 to S0_S32": ["TS2_O2_alpha", "TS2_alpha_explicit"]
+            "HS_S32 to S0_S32": ["TS2_O2_alpha", "TS2_alpha"]
         },
     },
     {
