@@ -31,10 +31,19 @@ isotope_standards: dict = {
   },
 #+END_SRC
 
-Reactions without kinetic isotope effects do not need to be modified. If a reaction involves a kinetic isotope effect we must add the fractionation factor to the ~reaction_parameters~ dictionary, and then add a line that specifies which isotope, and which species are involved. Since the isotope effect of microbially mediated sulfate reduction is concentration dependent, the below code additionally specifies a Monod-type limiter for the fractionation factor.  Please note the dictionary key must follow the ~species_isotope to species_isotope~ pattern. Otherwise the parser will fail. 
+Reactions without kinetic isotope effects do not need to be modified. If a reaction involves a kinetic isotope effect we add the fractionation factor (and any fractionation threshold constant) to the ~kinetic_constants~ dictionary in ~kinetic_constants.py~, define the limiter in the standard implicit form ~1.0 / (C + K)~ in ~limiters~, and specify which isotope and species are involved in ~isotope_fractionation~. MANTIS automatically converts limiters referenced in ~isotope_fractionation~ into their explicit dimensionless form ($C / (C + K)$). Please note the dictionary key must follow the ~species_isotope to species_isotope~ pattern. Otherwise the parser will fail.
 #+BEGIN_SRC jupyter-python
-reaction_parameters = {
+# In kinetic_constants.py:
+kinetic_constants = {
+    # ...
     "msr_alpha": 1.07,
+    "K_SO4_alpha": "1e-3 umol/cm^3",
+}
+
+# In reactions.py:
+limiters = {
+    # ...
+    "SO4_alpha": "1.0 / (c.SO4 + K_SO4_alpha)",
 }
 {
         "reaction_name": "sulfate_reduction",
@@ -43,7 +52,7 @@ reaction_parameters = {
         "limiters": ["SO4"],
         "inhibitors": ["O2", "Fe3_diss_red"],
         "isotope_fractionation": {
-            "SO4_S32 to TS2_S32": ["msr_alpha", "SO4_alpha_explicit"]
+            "SO4_S32 to TS2_S32": ["msr_alpha", "SO4_alpha"]
         },
     },
 #+END_SRC
@@ -187,7 +196,7 @@ Since a species can have more than one isotope system (e.g., sulfate has sulfur 
             "DIC": "DIC_C12",
         },
         "isotope_fractionation": {
-            "SO4_S32 to TS2_S32": ["msr_alpha", "SO4_alpha_explicit"]
+            "SO4_S32 to TS2_S32": ["msr_alpha", "SO4_alpha"]
         },
 #+END_SRC
 
