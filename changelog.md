@@ -8,6 +8,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-20
+
+### Added
+
+- **Isotope Fractionation Limiter Validation & Auto-Conversion (`generate_equation_system.py`)**:
+  - Added validation in `ReactionSystemValidator.validate_reactions()` ensuring that all limiters referenced in `isotope_fractionation` entries are defined in `limiters` (matching either `<name>` or `<name>_explicit`), raising a clear fatal error otherwise.
+  - Added automatic explicit conversion for isotope fractionation limiters in `EquationSystemGenerator`: limiters defined in standard implicit form (`1.0 / (C + K)`) and referenced in `isotope_fractionation` are automatically resolved to their explicit dimensionless form (`C / (C + K)`), removing the need for manual `_explicit` limiter definitions.
+  - Added unit test `test_isotope_fractionation_auto_explicit_limiter` in `tests/test_generate_equation_system.py`.
+- **Sphinx Documentation Sidebar & Packaging Extras**:
+  - Added custom Sphinx sidebar template (`docs/_templates/layout.html`) displaying the current package version (`v{{ release }}`) and Read the Docs version/language switchers, and enabled displaying the project title alongside the logo in `docs/conf.py`.
+  - Added `nox`, `uv`, and Sphinx documentation dependencies to `[project.optional-dependencies].dev` and included the `doc` dependency group plus `nox` and `uv` in `[dependency-groups].dev` in `pyproject.toml`.
+
+### Changed
+
+- **Unified Reaction & Kinetic Constants Syntax (Breaking Change)**:
+  - Consolidated all stoichiometric ratios, isotope fractionation factors, and fractionation threshold constants into `kinetic_constants` (`kinetic_constants.py`) instead of separate `reaction_parameters` or `fractionation_factors` dictionaries in `reactions.py`.
+  - Simplified `DiageneticModel` (`model.py`) parameter loading accordingly.
+  - Updated all bundled examples (`Luff_and_Wallmann_2003` and all `velde_et_al_2016` variants), test fixtures, generated equation files, and example SVG plots to the new `kinetic_constants` and implicit fractionation limiter syntax.
+- **Documentation & Tutorials**:
+  - Updated `Tutorial_2` (`docs/Tutorial_2.org` and `docs/Tutorial_2.md`) to document defining isotope fractionation factors and thresholds in `kinetic_constants.py` and referencing implicit limiters in `isotope_fractionation`.
+  - Added an `ffmpeg` installation note to `Tutorial_1` (`docs/Tutorial_1.org` and `docs/Tutorial_1.md`) clarifying that `ffmpeg` is an optional external dependency only required for the video backend.
+
+### Fixed
+
+- **Simulation Report Generator (`report_generator.py`)**:
+  - Updated `generate_simulation_report()` to read isotope fractionation factors ($\alpha$) from `mp.k` instead of the removed `mp.reaction_parameters`.
+- **Test & Docstring Fixes**:
+  - Fixed `SimpleFe` example directory path resolution in `tests/test_carbonate_chemistry.py` (`src/mantis/examples/SimpleFe`).
+  - Fixed reST literal block formatting (`::`) in the `diff_lib.get_flux()` docstring.
+
+### Removed
+
+- **Deprecated Reaction Parameter Dictionaries (Breaking Change)**:
+  - Removed `reaction_parameters` and `fractionation_factors` support from `reactions.py` AST extraction, `make_null_reactions()` (`generate_equation_system.py`), and `DiageneticModel` (`model.py`).
+- **Legacy Test Suite Cleanup**:
+  - Removed 9 obsolete legacy test files (`test_direct_solver_numpy.py`, `test_equivalence.py`, `test_fes_flux_limited.py`, `test_fes_predictor_corrector.py`, `test_fes_smooth_transition.py`, `test_fes_symmetrical_picard.py`, `test_log_compression.py`, `test_monod_linearization.py`, and `test_s0_disproportionation.py`).
+
+## [0.8.2] - 2026-11-19
+
 ### Added
 
 - **Development Tooling & Workflow Configuration**:
