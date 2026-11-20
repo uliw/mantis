@@ -503,7 +503,8 @@ def get_flux(
     """Calculate the 1D vertical flux of a chemical species at a given depth or lower boundary.
 
     The total flux J(z) is defined following standard diagenetic transport theory
-    (positive downwards into the sediment column):
+    (positive downwards into the sediment column)::
+
         J(z) = J_adv(z) + J_diff(z)
              = eff_phi(z) * w(z) * C(z) - eff_phi(z) * D_eff(z) * (dC / dz)
 
