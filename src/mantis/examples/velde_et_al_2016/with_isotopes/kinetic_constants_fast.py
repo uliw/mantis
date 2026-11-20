@@ -45,6 +45,14 @@ kinetic_constants: dict = {
     "K_SO4": "0.9 umol/cm^3",
     "K_Fe3_diss_red": "10.4 umol/cm^3",
     "K_Fe3": "1e-3 dimensionless",
+    # Isotope fractionation factors & transition thresholds
+    "msr_alpha": 1.07,
+    "TS2_O2_alpha": 0.995,
+    "dispro_hs_alpha": 0.993,
+    "K_SO4_alpha": "1e-3 umol/cm^3",
+    "K_TS2_alpha": "1e-3 umol/cm^3",
+    # Primary respiration stoichiometry
+    "POC_O2_ratio": 1.27,
 }
 
 

@@ -20,13 +20,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 Reaction network and kinetic limiters for the Luff & Wallmann (2003) Hydrate Ridge model.
 """
 
-reaction_parameters = {
-    # Redfield stoichiometry: C:N:P = 106:16:1
-    "C_N_ratio": 106.0 / 16.0,
-    "C_P_ratio": 106.0 / 1.0,
-}
-fractionation_factors = reaction_parameters
-
 limiters = {
     # Sulfate limitation and inhibition
     "SO4": "1.0 / (c.SO4 + K_SO4)",

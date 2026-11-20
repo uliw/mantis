@@ -41,22 +41,11 @@ Template Structure & Design:
 """
 
 
-# -------------------------------------------------------------------------
-# Reaction Parameters & Isotope Fractionation Factors
-# -------------------------------------------------------------------------
-reaction_parameters = {
-    # Primary respiration stoichiometry
-    "POC_O2_ratio": 1.27,
-    # Transition factors for isotope fractionation limiters
-    "K_epsilon_msr": 0.2,
-}
-
-
 limiters = {
     # Base implicit limiters: L_imp = 1.0 / (C + K)
     # The parser automatically derives explicit (C * L_imp) and inhibition (K * L_imp = 1 - C * L_imp)
     "O2": "1.0 / (c.O2 + K_O2)",
-    "O2_TS2": "1.0 / (c.O2 + mp.K_O2_TS2)",
+    "O2_TS2": "1.0 / (c.O2 + K_O2_TS2)",
     "SO4": "1.0 / (c.SO4 + K_SO4)",
     "Fe3": "1.0 / (np.maximum(c.Fe3, 0.0) + K_Fe3)",
     "Fe3_diss_red": "1.0 / (np.maximum(c.Fe3, 0.0) + K_Fe3_diss_red)",

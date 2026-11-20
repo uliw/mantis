@@ -45,6 +45,8 @@ kinetic_constants: dict = {
     "K_SO4": "0.9 umol/cm^3",
     "K_Fe3_diss_red": "10.4 umol/cm^3",
     "K_Fe3": "1e-3 dimensionless",
+    # Primary respiration stoichiometry
+    "POC_O2_ratio": 1.27,
 }
 
 

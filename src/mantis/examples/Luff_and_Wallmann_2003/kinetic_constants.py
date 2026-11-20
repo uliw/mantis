@@ -26,4 +26,7 @@ kinetic_constants: dict = {
     "k_calcite_diss": "0.015 1/year",
     "k_aragonite_precip": "0.8 mol/(m^3*year)",
     "k_aragonite_diss": "5.0 1/year",
+    # Redfield stoichiometry: C:N:P = 106:16:1
+    "C_N_ratio": 106.0 / 16.0,
+    "C_P_ratio": 106.0 / 1.0,
 }
