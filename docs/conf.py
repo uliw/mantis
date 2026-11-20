@@ -77,7 +77,7 @@ html_static_path = ["_static"]
 html_logo = "_static/mantis.svg"
 html_css_files = ["custom.css"]
 html_theme_options = {
-    "logo_only": True,
+    "logo_only": False,
     "navigation_depth": 4,
     "collapse_navigation": False,
     "sticky_navigation": True,

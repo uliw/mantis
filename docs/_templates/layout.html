@@ -1,0 +1,28 @@
+{% extends "!layout.html" %}
+
+{% block sidebartitle %}
+  {#- Logo and project title -#}
+  {%- set _logo_url = logo_url|default(pathto('_static/' + (logo or ""), 1)) %}
+  {%- set _root_doc = root_doc|default(master_doc) %}
+  <a href="{{ pathto(_root_doc) }}"{% if not theme_logo_only %} class="icon icon-home"{% endif %}>
+    {% if not theme_logo_only %}{{ project }}{% endif %}
+    {%- if logo or logo_url %}
+      <img src="{{ _logo_url }}" class="logo" alt="{{ _('Logo') }}"/>
+    {%- endif %}
+  </a>
+
+  <div class="version" style="color: rgba(255, 255, 255, 0.75); font-size: 0.9em; text-align: center; margin-top: -0.2em; margin-bottom: 0.8em; font-weight: bold;">
+    v{{ release }}
+  </div>
+
+  {%- if READTHEDOCS or DEBUG %}
+    {%- if theme_version_selector or theme_language_selector %}
+      <div class="switch-menus">
+        <div class="version-switch"></div>
+        <div class="language-switch"></div>
+      </div>
+    {%- endif %}
+  {%- endif %}
+
+  {%- include "searchbox.html" %}
+{% endblock %}

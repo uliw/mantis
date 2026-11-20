@@ -1,5 +1,7 @@
 # Installation
 
+Note: The video backend requires a working ffmpeg installation but ffmpeg will not be installed by the installation scripts. Further, the ffmpeg integration has only been tested under Linux. Using this with Windows or MacOS may, or may not work. However, Mantis works just fine if ffmpeg is not installed.
+
 
 ## pip
 
