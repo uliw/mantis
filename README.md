@@ -28,7 +28,7 @@ While MANTIS provides robust and unconditionally stable solutions for stiff reac
 1. **Time-Invariant Spatial Mesh**:
    - The spatial grid $z$ is static throughout the simulation. Dynamic grid adaptation, moving boundaries, or expanding domains (e.g., physical sediment column growth over time) are not currently supported.
 2. **Time-Invariant Porosity**:
-   - The porosity profile $\phi(z)$ is stationary in time (steady-state compaction). Transient sediment compaction or compaction-driven dynamic fluid expulsion over time is not currently modeled.
+   - The porosity profile $\phi(z)$ is stationary in time (steady-state compaction). Transient sediment compaction or compaction-driven dynamic fluid expulsion over time is not currently modeled. A furture version may address this though.
 3. **Time-Invariant Temperature**:
    - The temperature profile of $T(z)$ is steady-state. Dynamic thermal evolution and time-dependent diffusion coefficients or rate constants driven by non-isothermal thermal transients are not currently supported.
 

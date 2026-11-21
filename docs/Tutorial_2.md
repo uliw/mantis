@@ -50,6 +50,26 @@ limiters = {
     },
 ```
 
+Since a species can have more than one isotope system (e.g., sulfate has sulfur and oxygen), we must explicitly state which isotopes participate in a reaction, and, in case they involve a kinetic isotope effect, include that as well. The below example is from `examples/velde_et_al_2016/with_isotopes_CaCO_dissolution`
+
+```jupyter-python
+{
+        "reaction_name": "sulfate_reduction_slow",
+        "reaction": "2 POC_slow + SO4 -> TS2 + 2 DIC + 2 TA",
+        "k_value_name": "POC_slow",
+        "limiters": ["SO4"],
+        "inhibitors": ["O2", "Fe3_diss_red"],
+        "isotope_species": {
+            "SO4": "SO4_S32",
+            "TS2": "TS2_S32",
+            "POC_slow": "POC_slow_C12",
+            "DIC": "DIC_C12",
+        },
+        "isotope_fractionation": {
+            "SO4_S32 to TS2_S32": ["msr_alpha", "SO4_alpha"]
+        },
+```
+
 
 ## Sorption & Speciation
 
@@ -188,25 +208,7 @@ speciation = {
     },
 ```
 
-Since a species can have more than one isotope system (e.g., sulfate has sulfur and oxygen), we must explicitly state which isotopes participate in a reaction, and, in case they involve a kinetic isotope effect, include that as well. The below example is from `examples/velde_et_al_2016/with_isotopes_CaCO_dissolution`
-
-```jupyter-python
-{
-        "reaction_name": "sulfate_reduction_slow",
-        "reaction": "2 POC_slow + SO4 -> TS2 + 2 DIC + 2 TA",
-        "k_value_name": "POC_slow",
-        "limiters": ["SO4"],
-        "inhibitors": ["O2", "Fe3_diss_red"],
-        "isotope_species": {
-            "SO4": "SO4_S32",
-            "TS2": "TS2_S32",
-            "POC_slow": "POC_slow_C12",
-            "DIC": "DIC_C12",
-        },
-        "isotope_fractionation": {
-            "SO4_S32 to TS2_S32": ["msr_alpha", "SO4_alpha"]
-        },
-```
+The example in `examples/chromatographic_fractionation` shows how to set up equilibrium fractionation effects between a sorbed and liquid phase like $\ce{Fe2+}$
 
 
 ## Dynamic pH and Carbonate Chemistry

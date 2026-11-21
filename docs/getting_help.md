@@ -1,7 +1,7 @@
-- [Getting help](#org0448486)
+- [Getting help](#org69d5e93)
 
 
-<a id="org0448486"></a>
+<a id="org69d5e93"></a>
 
 # Getting help
 
