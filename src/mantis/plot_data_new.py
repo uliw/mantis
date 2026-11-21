@@ -1316,6 +1316,10 @@ def _pretty_species_label(name, rel_elem=None):
         "Fe2_liq": r"Fe$^{2+}_{liq}$",
         "Fe2_total": r"Fe$^{2+}_{tot}$",
         "Fe2_dis": r"Fe$^{2+}_{dis}$",
+        "Fe2_sorbed": r"Fe$^{2+}_{sorb}$",
+        "d56Fe_Fe2_total": r"$\delta^{56}$Fe (Fe$^{2+}_{tot}$)",
+        "d56Fe_Fe2_liq": r"$\delta^{56}$Fe (Fe$^{2+}_{liq}$)",
+        "d56Fe_Fe2_sorbed": r"$\delta^{56}$Fe (Fe$^{2+}_{sorb}$)",
         "POC": "POC",
         "POC_fast": "POC$_{fast}$",
         "POC_slow": "POC$_{slow}$",
@@ -1428,6 +1432,38 @@ def _compile_single_spec(
 
     series_data = []
 
+    def _append_external(target_series, sp_key, base_st):
+        if sp_key not in mapped_external_series:
+            return
+        ext_info = mapped_external_series[sp_key]
+        if isinstance(ext_info, dict):
+            ez = ext_info["z"]
+            ey = ext_info["data"]
+            elbl = ext_info["label"]
+            t_unit = ext_info.get("target_unit")
+            s_unit = ext_info.get("source_unit")
+            # If target_unit was not explicitly set in species_mapping,
+            # convert to the spec's units if applicable
+            if t_unit is None and s_unit is not None and units:
+                ey = _convert_generic_unit(
+                    ey, s_unit, units, df=df, ext_df=None, rel_to=rel_to or "Fe"
+                )
+        else:
+            ez, ey, elbl = ext_info
+        est = _resolve_measured_data_style(base_st, spec_measured_data_as)
+        target_series.append([ez, ey, elbl, est])
+
+    def _isotope_ylabel(prefix):
+        if "34S" in prefix:
+            return r"$\delta^{34}$ [mUr VCDT]"
+        if "18O" in prefix:
+            return r"$\delta^{18}$O [mUr VSMOW]"
+        if "13C" in prefix:
+            return r"$\delta^{13}$C [mUr VPDB]"
+        if "56Fe" in prefix:
+            return r"$\delta^{56}$Fe [mUr IRMM-014]"
+        return rf"$\delta$ [{prefix}]"
+
     if kind == "reaction_rates":
         for sp_entry in species_list:
             sp, inline_st = _unpack_species_entry(sp_entry)
@@ -1501,18 +1537,10 @@ def _compile_single_spec(
                 st["fill_only"] = st.pop("fillonly")
             lbl = _pretty_species_label(sp)
             p0_series.append([df[col], lbl, st])
+            _append_external(p0_series, sp, st)
 
         target_subplot[pos_axis_key] = p0_series
-
-        if "34S" in p0:
-            iso_label = r"$\delta^{34}$ [mUr VCDT]"
-        elif "18O" in p0:
-            iso_label = r"$\delta^{18}$O [mUr VSMOW]"
-        elif "13C" in p0:
-            iso_label = r"$\delta^{13}$C [mUr VPDB]"
-        else:
-            iso_label = rf"$\delta$ [{p0}]"
-        target_subplot[f"{pos_axis_key}_ylabel"] = spec.get("ylabel", iso_label)
+        target_subplot[f"{pos_axis_key}_ylabel"] = spec.get("ylabel", _isotope_ylabel(p0))
 
         _apply_lim_and_scale(target_subplot, lim, scale or "linear", pos_axis_key)
         if broken:
@@ -1530,15 +1558,9 @@ def _compile_single_spec(
                     st["fill_only"] = st.pop("fillonly")
                 lbl = _pretty_species_label(sp)
                 p1_series.append([df[col], lbl, st])
+                _append_external(p1_series, sp, st)
             target_subplot["right1"] = p1_series
-            if "18O" in p1:
-                target_subplot["right1_ylabel"] = r"$\delta^{18}$O [mUr VSMOW]"
-            elif "34S" in p1:
-                target_subplot["right1_ylabel"] = r"$\delta^{34}$ [mUr VCDT]"
-            elif "13C" in p1:
-                target_subplot["right1_ylabel"] = r"$\delta^{13}$C [mUr VPDB]"
-            else:
-                target_subplot["right1_ylabel"] = rf"$\delta$ [{p1}]"
+            target_subplot["right1_ylabel"] = _isotope_ylabel(p1)
 
     elif kind == "solid":
         for sp_entry in species_list:
@@ -1561,24 +1583,7 @@ def _compile_single_spec(
                 st["fill_only"] = st.pop("fillonly")
             lbl = _pretty_species_label(sp, rel_elem=rel_to if units and "wt" in str(units).lower() else None)
             series_data.append([converted_col, lbl, st])
-            if sp in mapped_external_series:
-                ext_info = mapped_external_series[sp]
-                if isinstance(ext_info, dict):
-                    ez = ext_info["z"]
-                    ey = ext_info["data"]
-                    elbl = ext_info["label"]
-                    t_unit = ext_info.get("target_unit")
-                    s_unit = ext_info.get("source_unit")
-                    # If target_unit was not explicitly set in species_mapping,
-                    # convert to the spec's units if applicable
-                    if t_unit is None and s_unit is not None and units:
-                        ey = _convert_generic_unit(
-                            ey, s_unit, units, df=df, ext_df=None, rel_to=rel_to or "Fe"
-                        )
-                else:
-                    ez, ey, elbl = ext_info
-                est = _resolve_measured_data_style(st, spec_measured_data_as)
-                series_data.append([ez, ey, elbl, est])
+            _append_external(series_data, sp, st)
 
         target_subplot[pos_axis_key] = series_data
         if rel_to:
@@ -1604,24 +1609,7 @@ def _compile_single_spec(
                 st["fill_only"] = st.pop("fillonly")
             lbl = _pretty_species_label(sp)
             series_data.append([col_data, lbl, st])
-            if sp in mapped_external_series:
-                ext_info = mapped_external_series[sp]
-                if isinstance(ext_info, dict):
-                    ez = ext_info["z"]
-                    ey = ext_info["data"]
-                    elbl = ext_info["label"]
-                    t_unit = ext_info.get("target_unit")
-                    s_unit = ext_info.get("source_unit")
-                    # If target_unit was not explicitly set in species_mapping,
-                    # convert to the spec's units if applicable
-                    if t_unit is None and s_unit is not None and units:
-                        ey = _convert_generic_unit(
-                            ey, s_unit, units, df=df, ext_df=None, rel_to=rel_to or "Fe"
-                        )
-                else:
-                    ez, ey, elbl = ext_info
-                est = _resolve_measured_data_style(st, spec_measured_data_as)
-                series_data.append([ez, ey, elbl, est])
+            _append_external(series_data, sp, st)
 
         target_subplot[pos_axis_key] = series_data
         units = units or "mmol/l"
