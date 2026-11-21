@@ -34,8 +34,17 @@ While MANTIS provides robust and unconditionally stable solutions for stiff reac
 
 
 ## Installation & Documentation 
+```
+pip install mantis-rtm
+mantis_create_examples.py
+```
 
-Please refer to https://mantis-rtm.readthedocs.io/en/latest
+Note that the optional video generation backend requires a working ffmpeg installation, and has not been tested on MacOS or Windows.
+
+Please refer to https://mantis-rtm.readthedocs.io/en/latest for detailed usage instructions.
+
+## Contributing
+Please see [Contribution Guide](CONTRIBUTING.md).
 
 ## License
-This project is licensed under the GPL-3.0 License. See the [LICENSE](LICENSE) file for details.
+This project is licensed under the AGPL-3.0 License. See the [LICENSE](LICENSE) file for details.
