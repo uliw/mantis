@@ -8,6 +8,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-11-21
+
+### Added
+
+- **Chromatographic Isotope Fractionation Example & Tutorial**:
+  - Added `src/mantis/examples/chromatographic_fractionation/` demonstrating dynamic mixed-phase sorption and chromatographic isotope fractionation.
+  - Added chromatographic isotope fractionation documentation and figure to `Tutorial_3` (`docs/Tutorial_3.org`, `docs/Tutorial_3.md`, `docs/run_chromatographic_fractionation.svg`).
+- **Community & Governance Files**:
+  - Added `CODE_OF_CONDUCT.md` and `CONTRIBUTING.md`, linked from `README.md`.
+- **Mixed-Phase Transport & Benchmark Tests**:
+  - Added `tests/test_dynamic_mixed_phase_transport.py` for dynamic mixed-phase species transport.
+  - Added `tests/test_chromatographic_fractionation_benchmark.py` for chromatographic fractionation benchmarking.
+
+### Changed
+
+- **CI & Type Checking Enforcement**:
+  - Updated `.github/workflows/tests.yml` and `noxfile.py` to enforce `mypy` static type checking before running `pytest`.
+  - Updated GitHub Actions workflow dependencies (`.github/workflows/publish-pypi.yml`, `tests.yml`, `typecheck.yml`).
+
+### Fixed
+
+- **Dynamic Mixed-Phase Species Handling**:
+  - Implemented dynamic mixed-phase species handling and partitioning in `src/mantis/diff_lib.py` and `src/mantis/monolithic_solver.py` (with supporting updates in `model.py`, `plot_data_new.py`, and `species_parser.py`).
+- **Static Type Check Errors**:
+  - Fixed `mypy` static type check errors across `diff_lib.py`, `monolithic_solver.py`, `model.py`, `generate_equation_system.py`, `plot_data_new.py`, and `species_parser.py`.
+- **Documentation & Example Fixes**:
+  - Fixed anchor links in `docs/getting_help.md` and updated isotope reaction documentation in `docs/Tutorial_2.org` / `docs/Tutorial_2.md`.
+  - Updated `src/mantis/examples/SimpleFe/run_simplefe.svg` timestamp and styling.
+
 ## [0.9.0] - 2026-11-20
 
 ### Added
