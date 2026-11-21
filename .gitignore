@@ -43,6 +43,8 @@ CLAUDE.md
 !src/mantis/examples/SimpleFe/run_simplefe_reference.csv
 !src/mantis/examples/SimpleFe/SimpleFe_Du_2023.csv
 !src/mantis/examples/Luff_and_Wallmann_2003/run_luff_model_reference.csv
+!src/mantis/examples/chromatographic_fractionation/run_chromatographic_fractionation_reference.csv
+!src/mantis/examples/chromatographic_fractionation/analytical_ogata_banks.csv
 
 
 # Virtual environments

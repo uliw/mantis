@@ -2,7 +2,7 @@
 
 [![Build Status](https://github.com/uliw/mantis/actions/workflows/tests.yml/badge.svg)](https://github.com/uliw/mantis/actions/workflows/tests.yml)
 [![Type Checking](https://github.com/uliw/mantis/actions/workflows/typecheck.yml/badge.svg)](https://github.com/uliw/mantis/actions/workflows/typecheck.yml)
-[![Documentation Status](https://readthedocs.org/projects/mantis-rtm/badge/?version=latest)](https://mantis-rtm.readthedocs.io/en/latest/?badge=latest)
+[![Documentation Status](https://img.shields.io/readthedocs/mantis-rtm)](https://mantis-rtm.readthedocs.io/en/latest/?badge=latest)
 [![PyPI Version](https://img.shields.io/pypi/v/mantis-rtm.svg)](https://pypi.org/project/mantis-rtm/)
 [![Conda Version](https://img.shields.io/conda/vn/conda-forge/mantis-rtm.svg)](https://anaconda.org/conda-forge/mantis-rtm)
 [![Python Versions](https://img.shields.io/badge/python-3.13%20%7C%203.14%20%7C%203.15-blue.svg)](https://pypi.org/project/mantis-rtm/)
