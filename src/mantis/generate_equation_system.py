@@ -333,7 +333,10 @@ class ReactionSystemValidator:
                 parent_name = parts[0]
                 subphase = parts[1] if len(parts) > 1 else "dissolved"
                 parent_meta = getattr(self, "species_defs", {}).get(parent_name, {})
-                if isinstance(parent_meta, dict) and "partition" in parent_meta:
+                if isinstance(parent_meta, dict) and (
+                    "partition" in parent_meta
+                    or (parent_meta.get("phase") == "mixed" and subphase in ("dissolved", "sorbed"))
+                ):
                     return f"getattr(mp, '{parent_name}_{subphase}', getattr(mp, '{sp}', 1.0))"
 
             # 3. Isotopic companion inheriting base species speciation factor

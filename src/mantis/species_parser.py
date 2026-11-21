@@ -504,6 +504,8 @@ def parse_and_validate_species_dict(
             "bot_type": parent_bc.get("bot_type", "Neumann"),
             "bot": parent_bc.get("bot", 0.0),
         }
+        if "basis" in parent_bc:
+            comp_bc_entry["basis"] = parent_bc["basis"]
         if "dbl" in parent_bc:
             comp_bc_entry["dbl"] = parent_bc["dbl"]
 

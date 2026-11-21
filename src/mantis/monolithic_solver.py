@@ -39,8 +39,11 @@ import numpy as np
 
 from .diff_lib import (
     ArrayProxy,
+    compute_carbonate_speciation,
     data_container,
+    evaluate_mixed_phase_fractions,
     get_time_units,
+    is_mixed_species_dynamic,
     save_state,
 )
 from .live_plot_lib import parse_time_to_seconds, save_final_pdf, write_to_queue_async
@@ -377,6 +380,185 @@ def build_native_1d_transport_stencil(
     return ab, b_transport
 
 
+def _harmonic_face_mean(arr: np.ndarray) -> np.ndarray:
+    """Compute distance-free harmonic face mean, returning 0 across zero-diffusivity faces."""
+    both_pos = (arr[:-1] > 1e-30) & (arr[1:] > 1e-30)
+    out = np.zeros(len(arr) - 1, dtype=np.float64)
+    if np.any(both_pos):
+        out[both_pos] = 2.0 / (1.0 / arr[:-1][both_pos] + 1.0 / arr[1:][both_pos])
+    return out
+
+
+def _phase_face_weights(
+    eff_phi_arr: np.ndarray,
+    D_arr: np.ndarray,
+    w_arr: np.ndarray,
+    d_centers: np.ndarray,
+    scheme: str = "powerlaw",
+) -> tuple[np.ndarray, np.ndarray]:
+    """Compute Patankar power-law (or upwind) finite-volume face conductances (aE, aW)."""
+    eff_phi_face = 0.5 * (eff_phi_arr[:-1] + eff_phi_arr[1:])
+    G = (eff_phi_face * _harmonic_face_mean(D_arr)) / d_centers
+    F = 0.5 * (eff_phi_arr[:-1] * w_arr[:-1] + eff_phi_arr[1:] * w_arr[1:])
+    if scheme == "upwind":
+        aE = G + np.maximum(F, 0.0)
+        aW = G + np.maximum(-F, 0.0)
+    else:
+        Pe = F / np.maximum(G, 1e-30)
+        A_pe = np.maximum(0.0, (1.0 - 0.1 * np.abs(Pe)) ** 5)
+        aE = G * A_pe + np.maximum(F, 0.0)
+        aW = G * A_pe + np.maximum(-F, 0.0)
+    return aE, aW
+
+
+def _phase_boundary_weights(
+    phi_b: float,
+    D_b: float,
+    w_b: float,
+    dz_b: float,
+    delta_dbl: float = 0.0,
+    is_outflow_right: bool = False,
+) -> tuple[float, float]:
+    """Compute boundary face weights (diag_weight, rhs_weight) for a single mobile phase."""
+    if delta_dbl > 0.0 and D_b > 1e-30:
+        theta2 = max(1.0 - np.log(max(phi_b, 1e-4) ** 2), 1.0)
+        D_cond = 1.0 / (dz_b / (phi_b * D_b) + delta_dbl / (D_b * theta2))
+    else:
+        D_cond = (phi_b * D_b) / dz_b
+    F_b = phi_b * w_b
+    Pe_b = F_b / max(D_cond, 1e-30)
+    A_b = max(0.0, (1.0 - 0.1 * abs(Pe_b)) ** 5)
+    if is_outflow_right:
+        return D_cond * A_b + max(F_b, 0.0), D_cond * A_b + max(-F_b, 0.0)
+    return D_cond * A_b + max(-F_b, 0.0), D_cond * A_b + max(F_b, 0.0)
+
+
+def build_two_phase_mixed_stencil(
+    z: np.ndarray,
+    dx: np.ndarray,
+    phi: Any,
+    D_mol_raw: Any,
+    D_bio: Any,
+    w_pw: Any,
+    w_solid: Any,
+    f_dis: Any,
+    bc_props: dict[str, Any],
+    D_irr: np.ndarray | None = None,
+    solid_scheme: str = "powerlaw",
+    mp: Any | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Construct conservative two-phase 1D finite-volume stencil for mixed species.
+
+    Partitions fluxes physically by phase (dissolved fraction ``f_dis`` moves with
+    porewater diffusion/advection; sorbed fraction ``1 - f_dis`` moves with solid
+    bioturbation/burial) so spatially and temporally varying ``f_dis(z, t)`` preserves
+    exact mass conservation and exact dissolved equilibrium invariance.
+    """
+    N = len(z)
+    bc_type = bc_props.get("type", "Dirichlet")
+    sp_phase = bc_props.get("phase", "mixed")
+    basis = bc_props.get("basis")
+    if basis in ("liquid", "porewater"):
+        is_dissolved = True
+    elif basis == "solid":
+        is_dissolved = False
+    else:
+        is_dissolved = (sp_phase == "liquid")
+
+    def _to_arr(val: Any) -> np.ndarray:
+        a = np.asarray(val.value if hasattr(val, "value") else val, dtype=np.float64)
+        return np.full(N, float(a), dtype=np.float64) if a.ndim == 0 else a
+
+    eff_phi_val = _to_arr(phi)
+    eff_phi_arr = eff_phi_val if is_dissolved else (1.0 - eff_phi_val)
+    f_arr = np.clip(_to_arr(f_dis), 0.0, 1.0)
+    f_sorb = 1.0 - f_arr
+
+    D_mol_arr = np.maximum(_to_arr(D_mol_raw), 0.0)
+    D_bio_arr = np.maximum(_to_arr(D_bio), 0.0)
+    w_pw_arr = _to_arr(w_pw)
+    w_sol_arr = _to_arr(w_solid)
+
+    d_centers = z[1:] - z[:-1]
+    aE_liq, aW_liq = _phase_face_weights(eff_phi_arr, D_mol_arr, w_pw_arr, d_centers, scheme="powerlaw")
+    sorb_scheme = "upwind" if (solid_scheme == "upwind" and not is_dissolved) else "powerlaw"
+    aE_sorb, aW_sorb = _phase_face_weights(eff_phi_arr, D_bio_arr, w_sol_arr, d_centers, scheme=sorb_scheme)
+
+    # Combined conservative face coefficients acting on total cell concentrations
+    a_E = aE_liq * f_arr[:-1] + aE_sorb * f_sorb[:-1]
+    a_W = aW_liq * f_arr[1:] + aW_sorb * f_sorb[1:]
+
+    ab = np.zeros((3, N), dtype=np.float64)
+    b_transport = np.zeros(N, dtype=np.float64)
+    ab[0, 1:] = -a_W
+    ab[2, :-1] = -a_E
+    ab[1, 0] = a_E[0]
+    ab[1, 1:-1] = a_W[:-1] + a_E[1:]
+    ab[1, -1] = a_W[-1]
+
+    # Left boundary (z = 0)
+    top_val = float(bc_props.get("top", 0.0))
+    d_top = z[0]
+    phi_top = eff_phi_arr[0]
+    if bc_type in ("Dirichlet", "dissolved"):
+        delta_val = (
+            float(
+                bc_props.get(
+                    "dbl",
+                    bc_props.get(
+                        "diffusive_boundary_layer",
+                        getattr(mp, "diffusive_boundary_layer", getattr(mp, "dbl", 0.0))
+                        if mp is not None
+                        else 0.0,
+                    ),
+                )
+            )
+            if is_dissolved
+            else 0.0
+        )
+        d_in_l, r_in_l = _phase_boundary_weights(
+            phi_top, float(D_mol_arr[0]), float(w_pw_arr[0]), d_top, delta_dbl=delta_val
+        )
+        d_in_s, r_in_s = _phase_boundary_weights(
+            phi_top, float(D_bio_arr[0]), float(w_sol_arr[0]), d_top
+        )
+        ab[1, 0] += d_in_l * f_arr[0] + d_in_s * f_sorb[0]
+        b_transport[0] += (r_in_l * f_arr[0] + r_in_s * f_sorb[0]) * top_val
+    elif bc_type in ("Robin", "particulate"):
+        b_transport[0] += top_val
+    elif bc_type == "Neumann":
+        b_transport[0] -= phi_top * (f_arr[0] * D_mol_arr[0] + f_sorb[0] * D_bio_arr[0]) * top_val
+
+    # Right boundary (z = L)
+    bot_type = bc_props.get("bot_type", "Neumann")
+    bot_val = float(bc_props.get("bot", 0.0))
+    if bot_type == "Neumann":
+        ab[1, -1] += eff_phi_arr[-1] * (f_arr[-1] * w_pw_arr[-1] + f_sorb[-1] * w_sol_arr[-1])
+        if bot_val != 0.0:
+            b_transport[-1] -= eff_phi_arr[-1] * (f_arr[-1] * D_mol_arr[-1] + f_sorb[-1] * D_bio_arr[-1]) * bot_val
+    elif bot_type == "Dirichlet":
+        d_bot = (z[-1] - z[-2]) / 2.0
+        phi_bot = eff_phi_arr[-1]
+        d_out_l, r_out_l = _phase_boundary_weights(
+            phi_bot, float(D_mol_arr[-1]), float(w_pw_arr[-1]), d_bot, is_outflow_right=True
+        )
+        d_out_s, r_out_s = _phase_boundary_weights(
+            phi_bot, float(D_bio_arr[-1]), float(w_sol_arr[-1]), d_bot, is_outflow_right=True
+        )
+        ab[1, -1] += d_out_l * f_arr[-1] + d_out_s * f_sorb[-1]
+        b_transport[-1] += (r_out_l * f_arr[-1] + r_out_s * f_sorb[-1]) * bot_val
+
+    # Bio-irrigation (porewater exchange)
+    if D_irr is not None:
+        irr_arr = np.asarray(D_irr, dtype=np.float64)
+        if np.any(irr_arr > 0):
+            phi_pw = _to_arr(phi)
+            ab[1, :] += phi_pw * irr_arr * f_arr * dx
+            b_transport += phi_pw * irr_arr * f_arr[0] * dx * top_val
+
+    return ab, b_transport
+
+
 class GovernorStats:
     """Accumulates solver and governor events and reports summary breakdown."""
 
@@ -506,6 +688,17 @@ class MonolithicNewtonSystem:
 
         phi_val = np.asarray(mp.phi.value if hasattr(mp.phi, "value") else mp.phi)
         solid_scheme = getattr(mp, "solid_convection_term", "powerlaw")
+        self.phi_val = phi_val
+        self.solid_scheme = solid_scheme
+        self.mp = mp
+        self._mixed_transport_cfg: dict[int, dict[str, Any]] = {}
+
+        species_defs = getattr(mp, "species_defs", None) or getattr(mp, "species", {})
+        if not isinstance(species_defs, dict):
+            species_defs = {}
+        speciation_defs = getattr(mp, "speciation", {})
+        if not isinstance(speciation_defs, dict):
+            speciation_defs = {}
 
         newton_atol_base = float(getattr(mp, "newton_atol", 1e-6))
         species_atol_map = getattr(mp, "species_atol", {})
@@ -536,60 +729,91 @@ class MonolithicNewtonSystem:
             eff_phi_val = phi_val if is_diss else (1.0 - phi_val)
             self.eff_phi_vol[:, s_idx] = eff_phi_val * self.vol
 
-            # Effective diffusion coefficient
-            D_eff = s_obj.get("D_total", None)
-            if D_eff is None:
-                D_mol_val = getattr(D_mol, name, 0.0) if D_mol is not None else 0.0
-                D_bio_val = getattr(D_mol, "D_bio", 0.0) if D_mol is not None else 0.0
-                if sp_phase == "mixed":
-                    # Lumped mixed-phase species (e.g. Fe2_total):
-                    # Look up dynamic or static dissolved fraction
-                    f_dis = getattr(mp, f"{name}_dis_frac", getattr(mp, f"{name.lower()}_dis_frac", None))
-                    if f_dis is None:
-                        f_dis = getattr(mp, "fe2_dis_frac", getattr(mp, f"{name}_dissolved", getattr(mp, "Fe2_diss", 1.0)))
-                    f_dis = np.asarray(f_dis, dtype=np.float64)
-
-                    d_diss_stored = getattr(D_mol, f"{name}_diss_frac", 1.0)
-                    if np.all(d_diss_stored == 1.0) and not np.all(f_dis == 1.0):
-                        # D_mol_val is unscaled molecular diffusion: partition both diffusion and bioturbation
-                        D_eff = np.maximum(f_dis * D_mol_val + (1.0 - f_dis) * D_bio_val, 1e-20)
-                    else:
-                        # D_mol_val was already scaled by diss_frac in model.py
-                        D_eff = np.maximum(D_mol_val + (1.0 - f_dis) * D_bio_val, 1e-20)
-                else:
-                    f_dis = None
-                    D_eff = np.maximum(D_mol_val + D_bio_val, 1e-20)
-            else:
-                f_dis = None
-
-            # Advection velocity
-            w_val = getattr(mp, "w", 0.0)
-            if is_diss:
-                w_val = w_val - getattr(mp, "advection", 0.0)
-            else:
-                if hasattr(phi_val, "__len__") and len(phi_val) > 1 and np.ndim(w_val) == 0:
-                    phi_inf = float(phi_val[-1])
-                    w_val = float(w_val) * (1.0 - phi_inf) / np.maximum(1.0 - np.asarray(phi_val, dtype=np.float64), 1e-6)
-
-            # Bio-irrigation (dissolved and mixed species)
             D_irr_val = (
                 getattr(D_mol, "D_irr", None)
                 if ((is_diss or sp_phase == "mixed") and D_mol is not None)
                 else None
             )
 
-            ab, b_t = build_native_1d_transport_stencil(
-                z=self.z,
-                dx=self.vol,
-                phi=phi_val,
-                D_cell=D_eff,
-                w=w_val,
-                bc_props=props,
-                D_irr=D_irr_val,
-                solid_scheme=solid_scheme,
-                mp=mp,
-                f_dis=f_dis if sp_phase == "mixed" else None,
-            )
+            # Effective diffusion coefficient & stencil construction
+            D_eff = s_obj.get("D_total", None)
+            w_val = getattr(mp, "w", 0.0)
+            if D_eff is None and sp_phase == "mixed":
+                D_mol_val = getattr(D_mol, name, 0.0) if D_mol is not None else 0.0
+                D_bio_val = getattr(D_mol, "D_bio", 0.0) if D_mol is not None else 0.0
+                f_dis = getattr(mp, f"{name}_dis_frac", getattr(mp, f"{name.lower()}_dis_frac", None))
+                if f_dis is None:
+                    f_dis = getattr(mp, "fe2_dis_frac", getattr(mp, f"{name}_dissolved", getattr(mp, "Fe2_diss", 1.0)))
+                f_dis = np.asarray(f_dis, dtype=np.float64)
+
+                d_diss_stored = getattr(D_mol, f"{name}_diss_frac", 1.0) if D_mol is not None else 1.0
+                d_stored_arr = np.asarray(d_diss_stored, dtype=np.float64)
+                if np.all(d_stored_arr == 1.0):
+                    D_mol_raw = D_mol_val
+                else:
+                    D_mol_raw = np.asarray(D_mol_val, dtype=np.float64) / np.maximum(d_stored_arr, 1e-30)
+
+                if not is_diss and hasattr(phi_val, "__len__") and len(phi_val) > 1 and np.ndim(w_val) == 0:
+                    phi_inf = float(phi_val[-1])
+                    w_solid: Any = float(w_val) * (1.0 - phi_inf) / np.maximum(1.0 - np.asarray(phi_val, dtype=np.float64), 1e-6)
+                else:
+                    w_solid = w_val
+                w_pw = w_solid - float(getattr(mp, "advection", 0.0))
+
+                ab, b_t = build_two_phase_mixed_stencil(
+                    z=self.z,
+                    dx=self.vol,
+                    phi=phi_val,
+                    D_mol_raw=D_mol_raw,
+                    D_bio=D_bio_val,
+                    w_pw=w_pw,
+                    w_solid=w_solid,
+                    f_dis=f_dis,
+                    bc_props=props,
+                    D_irr=D_irr_val,
+                    solid_scheme=solid_scheme,
+                    mp=mp,
+                )
+
+                is_dyn = (
+                    is_mixed_species_dynamic(name, species_defs, speciation_defs, mp)
+                    if (species_defs and name in species_defs)
+                    else False
+                )
+                self._mixed_transport_cfg[s_idx] = {
+                    "name": name,
+                    "D_mol_raw": D_mol_raw,
+                    "D_bio": D_bio_val,
+                    "w_pw": w_pw,
+                    "w_solid": w_solid,
+                    "bc_props": props,
+                    "D_irr": D_irr_val,
+                    "is_dynamic": is_dyn,
+                }
+            else:
+                if D_eff is None:
+                    D_mol_val = getattr(D_mol, name, 0.0) if D_mol is not None else 0.0
+                    D_bio_val = getattr(D_mol, "D_bio", 0.0) if D_mol is not None else 0.0
+                    D_eff = np.maximum(D_mol_val + D_bio_val, 1e-20)
+                if is_diss:
+                    w_val = w_val - getattr(mp, "advection", 0.0)
+                else:
+                    if hasattr(phi_val, "__len__") and len(phi_val) > 1 and np.ndim(w_val) == 0:
+                        phi_inf = float(phi_val[-1])
+                        w_val = float(w_val) * (1.0 - phi_inf) / np.maximum(1.0 - np.asarray(phi_val, dtype=np.float64), 1e-6)
+
+                ab, b_t = build_native_1d_transport_stencil(
+                    z=self.z,
+                    dx=self.vol,
+                    phi=phi_val,
+                    D_cell=D_eff,
+                    w=w_val,
+                    bc_props=props,
+                    D_irr=D_irr_val,
+                    solid_scheme=solid_scheme,
+                    mp=mp,
+                    f_dis=None,
+                )
 
             # ab has shape (3, N):
             # row 0: superdiagonal (ab[0, i+1] couples to cell i+1)
@@ -600,6 +824,19 @@ class MonolithicNewtonSystem:
                 self.C[:-1, s_idx] = ab[0, 1:]
                 self.A[1:, s_idx] = ab[2, :-1]
             self.b_transport[:, s_idx] = b_t
+
+        self.dynamic_mixed_indices: list[int] = sorted(
+            [idx for idx, cfg in self._mixed_transport_cfg.items() if cfg["is_dynamic"]],
+            key=lambda idx: (
+                "isotope_of" in species_defs.get(self.species_names[idx], {})
+                if species_defs
+                else False,
+                idx,
+            ),
+        )
+        self._dynamic_mixed_names: list[str] = [
+            self.species_names[idx] for idx in self.dynamic_mixed_indices
+        ]
 
         # Preallocated scratch buffers for Block TDMA
         self.B_work = np.zeros((N, S, S), dtype=np.float64)
@@ -638,6 +875,40 @@ class MonolithicNewtonSystem:
         """Updates CellVariables in-place with u_target."""
         for s_idx, s_obj in enumerate(self.species_struct):
             s_obj["var"].setValue(u_target[:, s_idx])
+
+    def update_dynamic_transport(self, c_eval: Any, mp_eval: Any) -> None:
+        """Rebuild transport stencils in-place for mixed species with state-dependent f_dis."""
+        if not self.dynamic_mixed_indices:
+            return
+        f_map = evaluate_mixed_phase_fractions(
+            c_eval,
+            mp_eval,
+            species_names=self._dynamic_mixed_names,
+            update_mp=True,
+        )
+        N = self.num_cells
+        for s_idx in self.dynamic_mixed_indices:
+            cfg = self._mixed_transport_cfg[s_idx]
+            f_dis = f_map.get(cfg["name"], 1.0)
+            ab, b_t = build_two_phase_mixed_stencil(
+                z=self.z,
+                dx=self.vol,
+                phi=self.phi_val,
+                D_mol_raw=cfg["D_mol_raw"],
+                D_bio=cfg["D_bio"],
+                w_pw=cfg["w_pw"],
+                w_solid=cfg["w_solid"],
+                f_dis=f_dis,
+                bc_props=cfg["bc_props"],
+                D_irr=cfg["D_irr"],
+                solid_scheme=self.solid_scheme,
+                mp=mp_eval,
+            )
+            self.B_trans[:, s_idx] = ab[1, :]
+            if N > 1:
+                self.C[:-1, s_idx] = ab[0, 1:]
+                self.A[1:, s_idx] = ab[2, :-1]
+            self.b_transport[:, s_idx] = b_t
 
     def evaluate_transport_operator(self, u: np.ndarray) -> np.ndarray:
         """Computes T * u for all species: A * u_{i-1} + B_trans * u_i + C * u_{i+1}."""
@@ -744,6 +1015,15 @@ def run_non_steady_state_solver_monolithic(
         """Evaluates bulk reaction rates for a given concentration state."""
         for s_idx, s_name in enumerate(mono_system.species_names):
             c_numpy[s_name].value[:] = u_eval[:, s_idx]
+        if mono_system.dynamic_mixed_indices:
+            if hasattr(c_numpy, "TA") and hasattr(c_numpy, "DIC"):
+                compute_carbonate_speciation(c_numpy, mp_numpy)
+            evaluate_mixed_phase_fractions(
+                c_numpy,
+                mp_numpy,
+                species_names=mono_system._dynamic_mixed_names,
+                update_mp=True,
+            )
         mp_numpy.current_dt = dt_step
         _, rates_out = diagenetic_reactions(mp_numpy, c_numpy, k, f=f_res_scratch)
         return {s: np.array(val, copy=True) for s, val in rates_out.items()}
@@ -785,8 +1065,9 @@ def run_non_steady_state_solver_monolithic(
                         total_newton_iters += 1
                         governor_stats.total_sweeps += 1
 
-                        # 1. Evaluate base reaction rates
+                        # 1. Evaluate base reaction rates & update dynamic mixed-phase transport
                         rates_base = _eval_rates(u_curr, current_dt)
+                        mono_system.update_dynamic_transport(c_numpy, mp_numpy)
 
                         # 2. Form residual vector R = (eff_phi_vol / dt)*(u - u_old) + T*u - b_trans - vol*rates
                         Tu = mono_system.evaluate_transport_operator(u_curr)
@@ -867,6 +1148,7 @@ def run_non_steady_state_solver_monolithic(
                                 u_trial[neg_mask] = np.where(u_curr[neg_mask] < 1e-6, 0.0, 0.1 * u_curr[neg_mask])
 
                             rates_trial = _eval_rates(u_trial, current_dt)
+                            mono_system.update_dynamic_transport(c_numpy, mp_numpy)
                             Tu_trial = mono_system.evaluate_transport_operator(u_trial)
                             R_trial = (mono_system.eff_phi_vol / current_dt) * (u_trial - u_old) + Tu_trial - mono_system.b_transport
                             for s_idx, s_name in enumerate(mono_system.species_names):
@@ -956,6 +1238,15 @@ def run_non_steady_state_solver_monolithic(
             # Step accepted
             governor_stats.total_steps += 1
             mono_system.sync_to_variables(u_curr)
+            if mono_system.dynamic_mixed_indices:
+                if hasattr(c, "TA") and hasattr(c, "DIC"):
+                    compute_carbonate_speciation(c, mp)
+                evaluate_mixed_phase_fractions(
+                    c,
+                    mp,
+                    species_names=mono_system._dynamic_mixed_names,
+                    update_mp=True,
+                )
             total_time += current_dt
 
             # Optional post-step instantaneous reactions

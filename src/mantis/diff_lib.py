@@ -48,6 +48,7 @@ These helpers are primarily intended for modelling isotope diffusion and fractio
 processes in geological simulations.
 """
 
+import ast
 from collections.abc import Sequence
 from typing import Any
 
@@ -632,6 +633,16 @@ def get_flux(
 
     eff_phi_arr = phi_arr if is_dissolved else (1.0 - phi_arr)
 
+    # Resolve dissolved partition fraction for mixed-phase species before velocity/diffusion scaling
+    f_dis_arr: np.ndarray | None = None
+    if sp_phase == "mixed":
+        f_dis = getattr(mp, f"{species}_dis_frac", getattr(mp, f"{species.lower()}_dis_frac", None)) if mp is not None else None
+        if f_dis is None and mp is not None:
+            f_dis = getattr(mp, "fe2_dis_frac", getattr(mp, f"{species}_dissolved", getattr(mp, "Fe2_diss", 1.0)))
+        if f_dis is None:
+            f_dis = 1.0
+        f_dis_arr = np.asarray(_get_val(f_dis), dtype=np.float64)
+
     # 6. Extract advective velocity w
     w_raw = None
     if df is not None and "w" in df:
@@ -647,7 +658,16 @@ def get_flux(
             w_arr = np.full(N, float(w_arr), dtype=np.float64)
 
     # Accounting for compaction or porewater advection
-    if is_dissolved:
+    if sp_phase == "mixed":
+        adv_sub = getattr(mp, "advection", 0.0) if mp is not None else 0.0
+        if not is_dissolved and len(phi_arr) > 1 and np.all(w_arr == w_arr[0]):
+            phi_inf = float(phi_arr[-1])
+            w_solid = w_arr * (1.0 - phi_inf) / np.maximum(1.0 - phi_arr, 1e-6)
+        else:
+            w_solid = w_arr
+        f_dis_adv = 1.0 if f_dis_arr is None else f_dis_arr
+        w_eff = w_solid - f_dis_adv * float(_get_val(adv_sub))
+    elif is_dissolved:
         adv_sub = getattr(mp, "advection", 0.0) if mp is not None else 0.0
         w_eff = w_arr - float(_get_val(adv_sub))
     else:
@@ -690,33 +710,67 @@ def get_flux(
         D_bio_arr = np.full(N, float(D_bio_arr), dtype=np.float64)
 
     if sp_phase == "mixed":
-        f_dis = getattr(mp, f"{species}_dis_frac", getattr(mp, f"{species.lower()}_dis_frac", None)) if mp is not None else None
-        if f_dis is None and mp is not None:
-            f_dis = getattr(mp, "fe2_dis_frac", getattr(mp, f"{species}_dissolved", getattr(mp, "Fe2_diss", 1.0)))
-        if f_dis is None:
-            f_dis = 1.0
-        f_dis_arr = np.asarray(_get_val(f_dis), dtype=np.float64)
-        D_eff_arr = np.maximum(f_dis_arr * D_mol_arr + (1.0 - f_dis_arr) * D_bio_arr, 0.0)
-    elif is_solid:
-        D_eff_arr = np.maximum(D_bio_arr, 0.0)
-    else:
-        D_eff_arr = np.maximum(D_mol_arr + D_bio_arr, 0.0)
+        assert f_dis_arr is not None
+        d_diss_stored: float | np.ndarray = 1.0
+        if D_mol is not None:
+            if hasattr(D_mol, f"{species}_diss_frac"):
+                d_diss_stored = _get_val(getattr(D_mol, f"{species}_diss_frac"))
+            elif isinstance(D_mol, dict) and f"{species}_diss_frac" in D_mol:
+                d_diss_stored = _get_val(D_mol[f"{species}_diss_frac"])
+        elif df is not None and f"{species}_diss_frac" in df:
+            d_diss_stored = np.asarray(df[f"{species}_diss_frac"], dtype=np.float64)
 
-    # 8. Compute concentration gradient dC/dz
-    if N == 1:
-        dC_dz = np.zeros(1, dtype=np.float64)
-    else:
-        dC_dz = np.gradient(c_arr, z_arr)
-        # Check boundary condition specifications for exact boundary derivatives if at edges
-        bc_map = getattr(mp, "bc_map", None)
-        sp_bc = bc_map.get(species, {}) if isinstance(bc_map, dict) else {}
-        if sp_bc.get("bot_type") == "Neumann":
-            dC_dz[-1] = float(sp_bc.get("bot", 0.0))
-        if sp_bc.get("type") == "Neumann":
-            dC_dz[0] = float(sp_bc.get("top", 0.0))
+        d_stored_arr = np.asarray(d_diss_stored, dtype=np.float64)
+        if np.all(d_stored_arr == 1.0):
+            D_mol_raw_arr = D_mol_arr
+        else:
+            D_mol_raw_arr = D_mol_arr / np.maximum(d_stored_arr, 1e-30)
 
-    # 9. Compute total flux profile: J = eff_phi * w * C - eff_phi * D * (dC/dz)
-    flux_profile = eff_phi_arr * w_eff * c_arr - eff_phi_arr * D_eff_arr * dC_dz
+        f_b = np.clip(f_dis_arr, 0.0, 1.0)
+        if N == 1:
+            d_cliq_dz = np.zeros(1, dtype=np.float64)
+            d_csorb_dz = np.zeros(1, dtype=np.float64)
+        else:
+            d_cliq_dz = np.gradient(f_b * c_arr, z_arr)
+            d_csorb_dz = np.gradient((1.0 - f_b) * c_arr, z_arr)
+            bc_map = getattr(mp, "bc_map", None)
+            sp_bc = bc_map.get(species, {}) if isinstance(bc_map, dict) else {}
+            is_const_f = (f_b.ndim == 0) or bool(np.allclose(f_b, f_b.flat[0], rtol=0.0, atol=1e-12))
+            if is_const_f:
+                f0 = float(f_b.flat[0]) if f_b.ndim > 0 else float(f_b)
+                if sp_bc.get("bot_type") == "Neumann":
+                    bot_g = float(sp_bc.get("bot", 0.0))
+                    d_cliq_dz[-1] = f0 * bot_g
+                    d_csorb_dz[-1] = (1.0 - f0) * bot_g
+                if sp_bc.get("type") == "Neumann":
+                    top_g = float(sp_bc.get("top", 0.0))
+                    d_cliq_dz[0] = f0 * top_g
+                    d_csorb_dz[0] = (1.0 - f0) * top_g
+
+        flux_profile = eff_phi_arr * w_eff * c_arr - eff_phi_arr * (
+            D_mol_raw_arr * d_cliq_dz + D_bio_arr * d_csorb_dz
+        )
+    else:
+        if is_solid:
+            D_eff_arr = np.maximum(D_bio_arr, 0.0)
+        else:
+            D_eff_arr = np.maximum(D_mol_arr + D_bio_arr, 0.0)
+
+        # 8. Compute concentration gradient dC/dz
+        if N == 1:
+            dC_dz = np.zeros(1, dtype=np.float64)
+        else:
+            dC_dz = np.gradient(c_arr, z_arr)
+            # Check boundary condition specifications for exact boundary derivatives if at edges
+            bc_map = getattr(mp, "bc_map", None)
+            sp_bc = bc_map.get(species, {}) if isinstance(bc_map, dict) else {}
+            if sp_bc.get("bot_type") == "Neumann":
+                dC_dz[-1] = float(sp_bc.get("bot", 0.0))
+            if sp_bc.get("type") == "Neumann":
+                dC_dz[0] = float(sp_bc.get("top", 0.0))
+
+        # 9. Compute total flux profile: J = eff_phi * w * C - eff_phi * D * (dC/dz)
+        flux_profile = eff_phi_arr * w_eff * c_arr - eff_phi_arr * D_eff_arr * dC_dz
 
     # 10. Evaluate flux at target depth or lower boundary
     if depth is None:
@@ -2819,6 +2873,367 @@ def partition_equilibrium_isotope(
 partition_equilibrium_isotope_32 = partition_equilibrium_isotope
 
 
+def _classify_mixed_fraction_token(token: str, species_defs: dict[str, Any]) -> str | None:
+    """Classify a species/isotope token in an alpha key as 'sorbed' or 'dissolved'."""
+    tok = str(token).strip()
+    meta = species_defs.get(tok, {}) if isinstance(species_defs, dict) else {}
+    if isinstance(meta, dict) and meta:
+        base_name = meta.get("isotope_of", tok)
+        base_meta = species_defs.get(base_name, meta)
+        if isinstance(base_meta, dict):
+            alias_str = str(base_meta.get("alias_of", ""))
+            if base_meta.get("phase") == "solid" or alias_str.endswith(".sorbed"):
+                return "sorbed"
+            if base_meta.get("phase") == "liquid" or alias_str.endswith(".dissolved"):
+                return "dissolved"
+    tl = tok.lower()
+    if "sorb" in tl:
+        return "sorbed"
+    if "liq" in tl or "diss" in tl:
+        return "dissolved"
+    return None
+
+
+def resolve_mixed_isotope_alpha(
+    sp_name: str,
+    parent_name: str,
+    mp: Any,
+    speciation_defs: dict[str, Any] | None = None,
+    species_defs: dict[str, Any] | None = None,
+) -> float | None:
+    """Resolve equilibrium fractionation factor alpha (R_sorbed / R_dissolved)
+    for a mixed-phase isotope companion `sp_name` of `parent_name`.
+    """
+    explicit = getattr(mp, f"{sp_name.lower()}_alpha", None) if mp is not None else None
+    if explicit is not None:
+        return float(explicit)
+
+    if species_defs is None and mp is not None:
+        species_defs = getattr(mp, "species_defs", None) or getattr(mp, "species", {})
+    if not isinstance(species_defs, dict):
+        species_defs = {}
+    if speciation_defs is None and mp is not None:
+        speciation_defs = getattr(mp, "speciation", {})
+    if not isinstance(speciation_defs, dict):
+        return None
+
+    sp_meta = species_defs.get(sp_name, {})
+    sp_std = sp_meta.get("isotope_standard") if isinstance(sp_meta, dict) else None
+    sp_elem = sp_meta.get("element") if isinstance(sp_meta, dict) else None
+
+    for _sys_name, sys_cfg in speciation_defs.items():
+        if not isinstance(sys_cfg, dict):
+            continue
+        if sys_cfg.get("primary") != parent_name and sys_cfg.get("parent") != parent_name:
+            continue
+        eq_frac = sys_cfg.get("equilibrium_fractionation", sys_cfg.get("isotope_fractionation"))
+        if eq_frac is None:
+            continue
+        if isinstance(eq_frac, dict):
+            eq_std = eq_frac.get("standard")
+            if eq_std and sp_std and eq_std != sp_std and eq_std != sp_elem:
+                continue
+            a_entry = eq_frac.get("alpha")
+        else:
+            a_entry = eq_frac
+
+        if isinstance(a_entry, dict):
+            for a_k, a_v in a_entry.items():
+                clean_k = str(a_k).strip()
+                tokens = None
+                if "_to_" in clean_k:
+                    tokens = clean_k.split("_to_")
+                elif " / " in clean_k:
+                    tokens = clean_k.split(" / ")
+                elif "/" in clean_k:
+                    tokens = clean_k.split("/")
+                if tokens and len(tokens) == 2:
+                    cls1 = _classify_mixed_fraction_token(tokens[0], species_defs)
+                    cls2 = _classify_mixed_fraction_token(tokens[1], species_defs)
+                    if cls1 == "sorbed" and cls2 == "dissolved":
+                        return float(a_v)
+                    if cls1 == "dissolved" and cls2 == "sorbed":
+                        return 1.0 / float(a_v)
+                else:
+                    return float(a_v)
+        elif isinstance(a_entry, (int, float)):
+            return float(a_entry)
+    return None
+
+
+def _expression_is_state_dependent(
+    expr: str,
+    species_defs: dict[str, Any],
+    mp: Any = None,
+) -> bool:
+    """Return True if an analytical partition expression references any state variable."""
+    try:
+        tree = ast.parse(str(expr), mode="eval")
+    except SyntaxError:
+        return True
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and node.id in species_defs:
+            return True
+        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id == "c":
+            return True
+    names = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
+    is_carb = bool(
+        getattr(mp, "is_carbonate", False)
+        or ("TA" in species_defs and "DIC" in species_defs)
+    )
+    if is_carb and ("pH" in names or "Hplus" in names):
+        return True
+    return False
+
+
+def get_mixed_dissolved_fraction_spec(
+    sp_name: str,
+    species_defs: dict[str, Any],
+    speciation_defs: dict[str, Any],
+    mp: Any = None,
+) -> tuple[str | None, dict[str, float], bool]:
+    """Return `(expr, constants, is_dynamic)` for the dissolved fraction of a mixed species."""
+    meta = species_defs.get(sp_name, {}) if isinstance(species_defs, dict) else {}
+    constants: dict[str, float] = {}
+    if isinstance(meta.get("constants"), dict):
+        for ck, cv in meta["constants"].items():
+            constants[str(ck)] = float(cv)
+
+    matched_systems: list[dict[str, Any]] = []
+    if isinstance(speciation_defs, dict):
+        for sys_cfg in speciation_defs.values():
+            if not isinstance(sys_cfg, dict):
+                continue
+            if sys_cfg.get("primary") == sp_name or sys_cfg.get("parent") == sp_name:
+                matched_systems.append(sys_cfg)
+                if isinstance(sys_cfg.get("constants"), dict):
+                    for ck, cv in sys_cfg["constants"].items():
+                        constants[str(ck)] = float(cv)
+
+    expr: str | None = None
+    part = meta.get("partition") if isinstance(meta, dict) else None
+    if isinstance(part, dict) and "dissolved" in part:
+        expr = str(part["dissolved"])
+    else:
+        dis_candidates: list[tuple[int, str]] = []
+        sorb_candidates: list[str] = []
+        for sys_cfg in matched_systems:
+            sub_sp = sys_cfg.get("species", {})
+            if not isinstance(sub_sp, dict):
+                continue
+            for sub_name, sub_meta in sub_sp.items():
+                if not isinstance(sub_meta, dict) or sub_meta.get("fraction") is None:
+                    continue
+                sub_expr = str(sub_meta["fraction"])
+                if isinstance(sub_meta.get("constants"), dict):
+                    for ck, cv in sub_meta["constants"].items():
+                        constants[str(ck)] = float(cv)
+                sl = sub_name.lower()
+                if "dis" in sl:
+                    dis_candidates.append((0, sub_expr))
+                elif "liq" in sl or sub_meta.get("phase") == "liquid":
+                    dis_candidates.append((1, sub_expr))
+                elif "sorb" in sl or sub_meta.get("phase") == "solid":
+                    sorb_candidates.append(sub_expr)
+        if dis_candidates:
+            dis_candidates.sort(key=lambda item: item[0])
+            expr = dis_candidates[0][1]
+        elif sorb_candidates:
+            expr = f"1.0 - ({sorb_candidates[0]})"
+
+    if expr is not None:
+        is_dynamic = _expression_is_state_dependent(expr, species_defs, mp=mp)
+        return expr, constants, is_dynamic
+
+    if sp_name == "Fe2_total" and mp is not None:
+        if getattr(mp, "enable_iron_speciation", False) or hasattr(mp, "beta_FeHS"):
+            return None, constants, True
+
+    return None, constants, False
+
+
+def is_mixed_species_dynamic(
+    sp_name: str,
+    species_defs: dict[str, Any],
+    speciation_defs: dict[str, Any],
+    mp: Any = None,
+) -> bool:
+    """Return True if a mixed-phase species (or its parent) has a state-dependent f_dis."""
+    meta = species_defs.get(sp_name, {}) if isinstance(species_defs, dict) else {}
+    if not isinstance(meta, dict):
+        return False
+    target_name = meta.get("isotope_of", sp_name) if "isotope_of" in meta else sp_name
+    if target_name not in species_defs:
+        return False
+    return get_mixed_dissolved_fraction_spec(target_name, species_defs, speciation_defs, mp=mp)[2]
+
+
+def _build_mixed_eval_ctx(c: Any, mp: Any) -> dict[str, Any]:
+    """Build evaluation context exposing constants, parameters, pH, phi, dstopw, and live fields."""
+    phi_raw = getattr(mp, "phi", 0.8) if mp is not None else 0.8
+    phi_val = np.asarray(phi_raw.value if hasattr(phi_raw, "value") else phi_raw, dtype=np.float64)
+    dstopw = (1.0 - phi_val) / np.maximum(phi_val, 1e-6)
+    mp_ph = getattr(mp, "pH", 7.0) if mp is not None else 7.0
+    if c is not None and hasattr(c, "pH"):
+        c_ph = getattr(c, "pH")
+        ph_arr: Any = np.asarray(c_ph.value if hasattr(c_ph, "value") else c_ph, dtype=np.float64)
+    else:
+        ph_arr = float(mp_ph) if mp_ph is not None else 7.0
+    h_arr = 10.0 ** (-ph_arr)
+
+    eval_ctx: dict[str, Any] = {
+        "k": getattr(mp, "k", {}) if mp is not None else {},
+        "mp": mp,
+        "np": np,
+        "phi": phi_val,
+        "dstopw": dstopw,
+        "Hplus": h_arr,
+        "pH": ph_arr,
+    }
+    if c is not None:
+        eval_ctx["c"] = c
+    if c is not None:
+        keys = c.keys() if isinstance(c, dict) else dir(c)
+        for s_name in keys:
+            if str(s_name).startswith("_") or s_name in eval_ctx:
+                continue
+            v = c[s_name] if isinstance(c, dict) else getattr(c, s_name, None)
+            if v is not None:
+                if hasattr(v, "value"):
+                    eval_ctx[s_name] = np.asarray(v.value, dtype=np.float64)
+                elif isinstance(v, (np.ndarray, float, int)):
+                    eval_ctx[s_name] = np.asarray(v, dtype=np.float64)
+    if mp is not None:
+        attrs = mp.keys() if isinstance(mp, dict) else dir(mp)
+        for attr in attrs:
+            if str(attr).startswith("_") or attr in eval_ctx:
+                continue
+            v = mp[attr] if isinstance(mp, dict) else getattr(mp, attr, None)
+            if isinstance(v, (float, int, np.floating, np.integer, np.ndarray)):
+                eval_ctx[attr] = v
+    return eval_ctx
+
+
+def evaluate_mixed_phase_fractions(
+    c: Any,
+    mp: Any,
+    species_names: Sequence[str] | None = None,
+    update_mp: bool = True,
+) -> dict[str, float | np.ndarray]:
+    """Evaluate dissolved/sorbed fractions for mixed-phase parents and isotope companions."""
+    if mp is None:
+        return {}
+    species_defs = getattr(mp, "species_defs", None) or getattr(mp, "species", None)
+    if not isinstance(species_defs, dict):
+        return {}
+    speciation_defs = getattr(mp, "speciation", {})
+    if not isinstance(speciation_defs, dict):
+        speciation_defs = {}
+
+    if species_names is None:
+        target_set = {
+            s for s, m in species_defs.items()
+            if isinstance(m, dict) and m.get("phase") == "mixed"
+        }
+    else:
+        target_set = set(species_names)
+        for s in list(target_set):
+            m = species_defs.get(s, {})
+            if isinstance(m, dict) and "isotope_of" in m:
+                target_set.add(m["isotope_of"])
+
+    primaries = [
+        s for s in species_defs
+        if s in target_set
+        and isinstance(species_defs[s], dict)
+        and species_defs[s].get("phase") == "mixed"
+        and "isotope_of" not in species_defs[s]
+    ]
+    companions = [
+        s for s in species_defs
+        if s in target_set
+        and isinstance(species_defs[s], dict)
+        and species_defs[s].get("phase") == "mixed"
+        and "isotope_of" in species_defs[s]
+    ]
+
+    eval_ctx: dict[str, Any] | None = None
+    results: dict[str, float | np.ndarray] = {}
+
+    def _clip_val(raw_v: Any) -> float | np.ndarray:
+        raw_v = raw_v.value if hasattr(raw_v, "value") else raw_v
+        arr = np.asarray(raw_v, dtype=np.float64)
+        arr = np.clip(arr, 0.0, 1.0)
+        return float(arr) if arr.ndim == 0 else arr
+
+    for sp_name in primaries:
+        expr, constants, _is_dyn = get_mixed_dissolved_fraction_spec(
+            sp_name, species_defs, speciation_defs, mp=mp
+        )
+        val: float | np.ndarray | None = None
+        if expr is not None:
+            if eval_ctx is None:
+                eval_ctx = _build_mixed_eval_ctx(c, mp)
+            local_ctx = dict(eval_ctx)
+            for ck, cv in constants.items():
+                local_ctx[ck] = float(cv)
+                if ck.startswith("pK"):
+                    local_ctx[ck[1:]] = 10.0 ** (-float(cv))
+            try:
+                val = _clip_val(eval(expr, local_ctx))
+            except Exception:
+                val = None
+
+        if val is None and sp_name == "Fe2_total" and hasattr(mp, "fe2_dis_frac"):
+            val = _clip_val(mp.fe2_dis_frac)
+
+        if val is None:
+            fb = getattr(
+                mp,
+                f"{sp_name}_dis_frac",
+                getattr(
+                    mp,
+                    f"{sp_name}_dissolved",
+                    getattr(mp, "Fe2_diss", getattr(mp, "fe2_dis_frac", 1.0)) if sp_name == "Fe2_total" else 1.0,
+                ),
+            )
+            val = _clip_val(fb)
+
+        results[sp_name] = val
+        if update_mp:
+            setattr(mp, f"{sp_name}_dis_frac", val)
+            setattr(mp, f"{sp_name}_dissolved", val)
+            setattr(mp, f"{sp_name}_sorbed", 1.0 - val)
+            if sp_name == "Fe2_total":
+                mp.fe2_dis_frac = val
+                mp.Fe2_diss = val
+                mp.Fe2_sorb = 1.0 - val
+
+    for sp_name in companions:
+        parent_name = species_defs[sp_name]["isotope_of"]
+        parent_f = results.get(parent_name)
+        if parent_f is None:
+            parent_f = _clip_val(
+                getattr(mp, f"{parent_name}_dis_frac", getattr(mp, f"{parent_name}_dissolved", 1.0))
+            )
+        alpha_val = resolve_mixed_isotope_alpha(
+            sp_name, parent_name, mp, speciation_defs=speciation_defs, species_defs=species_defs
+        )
+        if alpha_val is not None:
+            denom = parent_f + float(alpha_val) * (1.0 - parent_f)
+            iso_val = _clip_val(parent_f / np.maximum(denom, 1e-12))
+        else:
+            iso_val = parent_f
+
+        results[sp_name] = iso_val
+        if update_mp:
+            setattr(mp, f"{sp_name}_dis_frac", iso_val)
+            setattr(mp, f"{sp_name}_dissolved", iso_val)
+            setattr(mp, f"{sp_name}_sorbed", 1.0 - iso_val)
+
+    return results
+
+
 def compute_ph_from_ta_dic(ta: float, dic: float, mp: Any = None) -> float:
     """Calculate porewater pH given Total Alkalinity (TA) and Dissolved Inorganic Carbon (DIC).
 
@@ -2999,7 +3414,7 @@ def compute_carbonate_speciation(c: Any, mp: Any) -> None:
             }
             for sp_name, meta, factor in non_carb_species:
                 conc = None
-                parent_raw = meta.get("equilibrium_of") or meta.get("alias_of")
+                parent_raw = meta.get("alias_of") or meta.get("equilibrium_of")
                 if parent_raw:
                     parent_name = str(parent_raw).split(".", 1)[0]
                     if hasattr(c, parent_name):
@@ -3037,7 +3452,7 @@ def compute_carbonate_speciation(c: Any, mp: Any) -> None:
             # Approximate d(ta_non_carb)/d(ln_h) for standard acid-base fractions Ka / (H + Ka)
             d_non_carb = np.zeros_like(ta_val, dtype=np.float64)
             for sp_name, meta, factor in non_carb_species:
-                parent_raw = meta.get("equilibrium_of") or meta.get("alias_of")
+                parent_raw = meta.get("alias_of") or meta.get("equilibrium_of")
                 if parent_raw:
                     parent_name = str(parent_raw).split(".", 1)[0]
                     if hasattr(c, parent_name):
@@ -3166,42 +3581,19 @@ def update_all_species(c: Any, mp: Any) -> None:
     if hasattr(c, "TA") and hasattr(c, "DIC"):
         compute_carbonate_speciation(c, mp)
 
-    # 2. Setup evaluation context for equilibrium and partition fractions
-    phi_val = get_v(mp.phi) if hasattr(mp, "phi") else 0.8
-    mp_ph = getattr(mp, "pH", 7.0)
-    ph_arr = get_v(c.pH) if hasattr(c, "pH") else (float(mp_ph) if mp_ph is not None else 7.0)
-    h_arr = 10.0 ** (-ph_arr)
+    # 1b. Update dynamic mixed-phase dissolved/sorbed fractions & companion f_dis
+    evaluate_mixed_phase_fractions(c, mp, update_mp=True)
 
-    k = getattr(mp, "k", {})
-    eval_ctx = {
-        "k": k,
-        "mp": mp,
-        "np": np,
-        "Hplus": h_arr,
-        "pH": ph_arr,
-    }
-    # Expose all species from c in evaluation context for dynamic speciation expressions
-    for s_name in dir(c):
-        if not s_name.startswith("_") and s_name not in eval_ctx:
-            v = getattr(c, s_name, None)
-            if v is not None:
-                if hasattr(v, "value"):
-                    eval_ctx[s_name] = np.asarray(v.value, dtype=np.float64)
-                elif isinstance(v, (np.ndarray, float, int)):
-                    eval_ctx[s_name] = np.asarray(v, dtype=np.float64)
-    # Expose numeric constants and parameters from mp
-    for attr in dir(mp):
-        if not attr.startswith("_") and attr not in eval_ctx:
-            v = getattr(mp, attr, None)
-            if isinstance(v, (float, int, np.ndarray)):
-                eval_ctx[attr] = v
+    # 2. Setup evaluation context for equilibrium and partition fractions
+    eval_ctx = _build_mixed_eval_ctx(c, mp)
+    phi_val = eval_ctx["phi"]
 
     # Evaluate dynamic / equilibrium species
     for sp_name, meta in species_defs.items():
         if not isinstance(meta, dict):
             continue
 
-        parent_raw = meta.get("equilibrium_of") or meta.get("alias_of")
+        parent_raw = meta.get("alias_of") or meta.get("equilibrium_of")
         if parent_raw:
             parts = str(parent_raw).split(".", 1)
             parent_name = parts[0]
@@ -3213,13 +3605,13 @@ def update_all_species(c: Any, mp: Any) -> None:
 
                 if sp_name == "Fe2_liq" and hasattr(mp, "fe2_liq_frac"):
                     child_val = parent_val * np.asarray(mp.fe2_liq_frac, dtype=np.float64)
-                elif sp_name in ("Fe2_dis", "Fe2_dissolved") and hasattr(c, "POC"):
+                elif sp_name in ("Fe2_dis", "Fe2_dissolved") and hasattr(c, "POC") and meta.get("fraction") is None:
                     poc_arr = get_v(c.POC)
                     dstopw = (1.0 - phi_val) / np.maximum(phi_val, 1e-6)
                     k_ads = float(getattr(mp, "KFe_ads", 0.001))
                     ads_fac = 1.0 + k_ads * poc_arr * dstopw
                     child_val = parent_val / ads_fac
-                elif "fraction" in meta:
+                elif meta.get("fraction") is not None:
                     frac_ctx = dict(eval_ctx)
                     if "constants" in meta and isinstance(meta["constants"], dict):
                         for c_name, c_val in meta["constants"].items():
@@ -3234,12 +3626,19 @@ def update_all_species(c: Any, mp: Any) -> None:
                 elif subphase is not None:
                     attr_name = f"{parent_name}_{subphase}"
                     if hasattr(mp, attr_name):
-                        child_val = parent_val * float(getattr(mp, attr_name))
+                        child_val = parent_val * np.asarray(getattr(mp, attr_name), dtype=np.float64)
                     else:
                         parent_meta = species_defs.get(parent_name, {})
                         parent_part = parent_meta.get("partition", {})
                         p_expr = parent_part.get(subphase, "1.0")
-                        p_val = eval(p_expr, eval_ctx)
+                        sub_ctx = dict(eval_ctx)
+                        for p_consts in (meta.get("constants"), parent_meta.get("constants")):
+                            if isinstance(p_consts, dict):
+                                for c_name, c_val in p_consts.items():
+                                    sub_ctx[c_name] = float(c_val)
+                                    if c_name.startswith("pK"):
+                                        sub_ctx[c_name[1:]] = 10.0 ** (-float(c_val))
+                        p_val = eval(p_expr, sub_ctx)
                         child_val = parent_val * p_val
 
                 elif "partition" in meta:
@@ -3307,8 +3706,37 @@ def update_all_species(c: Any, mp: Any) -> None:
             if not isinstance(sub_sp_map, dict) or len(sub_sp_map) < 2:
                 continue
 
+            alpha_entry = eq_frac_cfg.get("alpha") if isinstance(eq_frac_cfg, dict) else eq_frac_cfg
             sp_keys = list(sub_sp_map.keys())
             sp1, sp2 = sp_keys[0], sp_keys[1]
+
+            # If alpha_entry explicitly names two species/companions (e.g. in a 3-species complexation block),
+            # resolve (sp1, sp2) from those named pair tokens so the right pair is partitioned.
+            if isinstance(alpha_entry, dict):
+                iso_to_parent: dict[str, str] = {}
+                for sk, sm in sub_sp_map.items():
+                    iso_to_parent[sk] = sk
+                    if isinstance(sm, dict) and isinstance(sm.get("isotopes"), dict):
+                        for ik in sm["isotopes"].keys():
+                            iso_to_parent[str(ik)] = sk
+                for s_k, s_m in species_defs.items():
+                    if isinstance(s_m, dict) and s_m.get("isotope_of") in sub_sp_map:
+                        iso_to_parent.setdefault(str(s_k), str(s_m["isotope_of"]))
+                for k_a in alpha_entry.keys():
+                    ck = str(k_a).strip()
+                    toks = None
+                    if "_to_" in ck:
+                        toks = ck.split("_to_")
+                    elif " / " in ck:
+                        toks = ck.split(" / ")
+                    elif "/" in ck:
+                        toks = ck.split("/")
+                    if toks and len(toks) == 2:
+                        p_a = iso_to_parent.get(toks[0].strip())
+                        p_b = iso_to_parent.get(toks[1].strip())
+                        if p_a and p_b and p_a != p_b:
+                            sp1, sp2 = p_b, p_a
+                            break
 
             c_sp1 = getattr(c, sp1, None)
             c_sp2 = getattr(c, sp2, None)
@@ -3323,8 +3751,6 @@ def update_all_species(c: Any, mp: Any) -> None:
             denom_tot = val_sp1 + val_sp2 + 1e-30
             f1 = val_sp1 / denom_tot
             f2 = val_sp2 / denom_tot
-
-            alpha_entry = eq_frac_cfg.get("alpha") if isinstance(eq_frac_cfg, dict) else eq_frac_cfg
 
             for prim_iso, iso_ref in primary_iso_dict.items():
                 if not hasattr(c, prim_iso):

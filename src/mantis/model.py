@@ -1098,11 +1098,19 @@ class DiageneticModel:
             # Check phase partition fractions
             fractions = sys_cfg.get("fractions", {})
             if isinstance(fractions, dict):
+                is_carb_cfg = getattr(self.mp, "is_carbonate", False) or "carbonate_equilibrium_chemistry" in self.p_dict or (
+                    "TA" in transport_species and "DIC" in transport_species
+                )
+                has_rxns = len(getattr(self, "_raw_reactions", [])) > 0
                 for f_k, f_expr in fractions.items():
                     if isinstance(f_expr, str):
                         for tsp in transport_species:
                             if tsp not in parent_names and re.search(r'\b' + re.escape(tsp) + r'\b', f_expr):
                                 return True, f"phase partition '{sys_name}.{f_k}' dynamically couples transport species '{tsp}'"
+                            if has_rxns and tsp in parent_names and re.search(r'\b' + re.escape(tsp) + r'\b', f_expr):
+                                return True, f"nonlinear self-sorption partition '{sys_name}.{f_k}' depends on '{tsp}'"
+                        if is_carb_cfg and (re.search(r'\bpH\b', f_expr) or re.search(r'\bHplus\b', f_expr)):
+                            return True, f"phase partition '{sys_name}.{f_k}' depends on dynamic carbonate pH"
 
         # 3. Dynamic carbonate chemistry coupling to mineral saturation
         is_carbonate = getattr(self.mp, "is_carbonate", False) or "carbonate_equilibrium_chemistry" in self.p_dict
@@ -1564,29 +1572,56 @@ class DiageneticModel:
 
         # Dynamic speciation & phase partition calculations from species_defs
         Hplus = 10.0 ** (-float(self.mp.pH)) if self.mp.pH is not None else None
+        phi_eval = self.mp.phi.value if hasattr(self.mp.phi, "value") else self.mp.phi
+        phi_arr = np.asarray(phi_eval, dtype=np.float64)
+        dstopw_eval = (1.0 - phi_arr) / np.maximum(phi_arr, 1e-6)
         eval_ctx: dict[str, Any] = {
             "k": k,
             "mp": self.mp,
             "np": np,
+            "phi": phi_arr,
+            "dstopw": dstopw_eval,
             "Hplus": Hplus,
             "pH": float(self.mp.pH) if self.mp.pH is not None else None,
         }
 
+        spec_consts_by_primary: dict[str, dict[str, float]] = {}
+        if isinstance(speciation_defs, dict):
+            for _sys_cfg in speciation_defs.values():
+                if not isinstance(_sys_cfg, dict):
+                    continue
+                _prim = _sys_cfg.get("primary") or _sys_cfg.get("parent")
+                _consts = _sys_cfg.get("constants")
+                if isinstance(_prim, str) and isinstance(_consts, dict):
+                    c_map = spec_consts_by_primary.setdefault(_prim, {})
+                    for _ck, _cv in _consts.items():
+                        c_map[str(_ck)] = float(_cv)
+                        if str(_ck).startswith("pK"):
+                            c_map[str(_ck)[1:]] = 10.0 ** (-float(_cv))
+
         for sp_name, meta in species_defs.items():
             # Check partition for mixed species (e.g. Fe2_total: dissolved, sorbed)
             if "partition" in meta and isinstance(meta["partition"], dict):
+                part_ctx = dict(eval_ctx)
+                if sp_name in spec_consts_by_primary:
+                    part_ctx.update(spec_consts_by_primary[sp_name])
                 for p_key, p_expr in meta["partition"].items():
-                    raw_val = eval(p_expr, eval_ctx)
-                    val = float(raw_val) if np.ndim(raw_val) == 0 else np.asarray(raw_val, dtype=np.float64)
-                    setattr(self.mp, f"{sp_name}_{p_key}", val)
-                    eval_ctx[f"{sp_name}_{p_key}"] = val
-                    # Alias for Fe2_total.dissolved / sorbed
-                    if sp_name == "Fe2_total" and p_key == "dissolved":
-                        self.mp.Fe2_diss = val
-                        eval_ctx["Fe2_diss"] = val
-                    elif sp_name == "Fe2_total" and p_key == "sorbed":
-                        self.mp.Fe2_sorb = val
-                        eval_ctx["Fe2_sorb"] = val
+                    try:
+                        raw_val = eval(str(p_expr), part_ctx)
+                        val = float(raw_val) if np.ndim(raw_val) == 0 else np.asarray(raw_val, dtype=np.float64)
+                        setattr(self.mp, f"{sp_name}_{p_key}", val)
+                        eval_ctx[f"{sp_name}_{p_key}"] = val
+                        # Alias for Fe2_total.dissolved / sorbed
+                        if sp_name == "Fe2_total" and p_key == "dissolved":
+                            self.mp.Fe2_diss = val
+                            eval_ctx["Fe2_diss"] = val
+                        elif sp_name == "Fe2_total" and p_key == "sorbed":
+                            self.mp.Fe2_sorb = val
+                            eval_ctx["Fe2_sorb"] = val
+                    except Exception:
+                        # Dynamic partition expression depends on state fields not yet initialized;
+                        # evaluated after initial conditions in evaluate_mixed_phase_fractions().
+                        pass
 
             # Check fraction for equilibrium speciation (e.g. HS: Ka1 / (Hplus + Ka1))
             if meta.get("fraction") is not None:
@@ -1749,20 +1784,80 @@ class DiageneticModel:
                     raise AttributeError(f"Diffusion function '{fn_name}' for species '{sp_name}' not found in species.py or diff_lib.")
 
         # Lumped mixed-phase diffusion scaling (porewater retardation)
-        for sp_name, meta in species_defs.items():
-            if meta.get("phase") == "mixed" and hasattr(D_mol, sp_name):
-                diss_frac: float | np.ndarray = 1.0
+        from mantis.diff_lib import (
+            evaluate_mixed_phase_fractions,
+            is_mixed_species_dynamic,
+            resolve_mixed_isotope_alpha,
+        )
+
+        mixed_items = sorted(
+            species_defs.items(),
+            key=lambda kv: ("isotope_of" in kv[1]) if isinstance(kv[1], dict) else False,
+        )
+        for sp_name, meta in mixed_items:
+            if not isinstance(meta, dict) or meta.get("phase") != "mixed" or not hasattr(D_mol, sp_name):
+                continue
+
+            if is_mixed_species_dynamic(sp_name, species_defs, speciation_defs, self.mp):
+                # Dynamic partitioning f_dis(z, t) will be applied directly in the conservative
+                # two-phase transport stencil using unscaled D_mol.<sp_name>.
+                setattr(D_mol, f"{sp_name}_diss_frac", 1.0)
+                continue
+
+            diss_frac: float | np.ndarray = 1.0
+            is_companion = "isotope_of" in meta
+            parent_name = meta.get("isotope_of")
+
+            if is_companion and parent_name in species_defs:
+                parent_diss = getattr(
+                    self.mp,
+                    f"{parent_name}_dis_frac",
+                    getattr(
+                        self.mp,
+                        f"{parent_name}_dissolved",
+                        getattr(self.mp, "fe2_dis_frac", getattr(self.mp, "Fe2_diss", 1.0)),
+                    ),
+                )
+                parent_diss_val = (
+                    float(parent_diss) if np.ndim(parent_diss) == 0 else np.asarray(parent_diss, dtype=np.float64)
+                )
+                alpha_val = resolve_mixed_isotope_alpha(
+                    sp_name,
+                    parent_name,
+                    self.mp,
+                    speciation_defs=speciation_defs,
+                    species_defs=species_defs,
+                )
+                if alpha_val is not None:
+                    # f_dis_iso = f_dis / (f_dis + alpha_eq * (1 - f_dis))
+                    # where alpha_eq = R_sorbed / R_dissolved
+                    denom_iso = parent_diss_val + float(alpha_val) * (1.0 - parent_diss_val)
+                    diss_frac = parent_diss_val / np.maximum(denom_iso, 1e-12)
+                else:
+                    diss_frac = parent_diss_val
+
+                setattr(self.mp, f"{sp_name}_dis_frac", diss_frac)
+                setattr(self.mp, f"{sp_name}_dissolved", diss_frac)
+                setattr(self.mp, f"{sp_name}_sorbed", 1.0 - diss_frac)
+            else:
                 part = meta.get("partition", {})
-                if "dissolved" in part:
+                if isinstance(part, dict) and "dissolved" in part:
                     try:
-                        raw_diss = eval(part["dissolved"], eval_ctx)
+                        part_ctx = dict(eval_ctx)
+                        if sp_name in spec_consts_by_primary:
+                            part_ctx.update(spec_consts_by_primary[sp_name])
+                        raw_diss = eval(str(part["dissolved"]), part_ctx)
                         diss_frac = float(raw_diss) if np.ndim(raw_diss) == 0 else np.asarray(raw_diss, dtype=np.float64)
+                        setattr(self.mp, f"{sp_name}_dis_frac", diss_frac)
+                        setattr(self.mp, f"{sp_name}_dissolved", diss_frac)
+                        setattr(self.mp, f"{sp_name}_sorbed", 1.0 - diss_frac)
                     except Exception:
                         diss_frac = getattr(self.mp, f"{sp_name}_dissolved", getattr(self.mp, f"{sp_name}_dis_frac", getattr(self.mp, "Fe2_diss", getattr(self.mp, "fe2_dis_frac", 1.0))))
                 else:
                     diss_frac = getattr(self.mp, f"{sp_name}_dissolved", getattr(self.mp, f"{sp_name}_dis_frac", getattr(self.mp, "Fe2_diss", getattr(self.mp, "fe2_dis_frac", 1.0))))
-                setattr(D_mol, sp_name, getattr(D_mol, sp_name) * diss_frac)
-                setattr(D_mol, f"{sp_name}_diss_frac", diss_frac)
+
+            setattr(D_mol, sp_name, getattr(D_mol, sp_name) * diss_frac)
+            setattr(D_mol, f"{sp_name}_diss_frac", diss_frac)
 
         # Bioturbation & Bio-irrigation profiles
         bi_atten = getattr(self.mp, "BI_attenuation", self.mp.BI_depth)
@@ -1885,6 +1980,9 @@ class DiageneticModel:
         # Restore state if specified
         if self.mp.state_data:
             read_state(c, self.mp.state_data)
+
+        # Evaluate mixed-phase dissolved/sorbed fractions & isotope companions from initial state
+        evaluate_mixed_phase_fractions(c, self.mp, update_mp=True)
 
         check_peclet_numbers(mesh, self.mp, D_mol, species_transport, bc_map)
 
