@@ -1586,18 +1586,15 @@ class DiageneticModel:
         }
 
         spec_consts_by_primary: dict[str, dict[str, float]] = {}
-        if isinstance(speciation_defs, dict):
-            for _sys_cfg in speciation_defs.values():
-                if not isinstance(_sys_cfg, dict):
-                    continue
-                _prim = _sys_cfg.get("primary") or _sys_cfg.get("parent")
-                _consts = _sys_cfg.get("constants")
-                if isinstance(_prim, str) and isinstance(_consts, dict):
-                    c_map = spec_consts_by_primary.setdefault(_prim, {})
-                    for _ck, _cv in _consts.items():
-                        c_map[str(_ck)] = float(_cv)
-                        if str(_ck).startswith("pK"):
-                            c_map[str(_ck)[1:]] = 10.0 ** (-float(_cv))
+        for _sys_cfg in speciation_defs.values():
+            _prim = _sys_cfg.get("primary") or _sys_cfg.get("parent")
+            _consts = _sys_cfg.get("constants")
+            if isinstance(_prim, str) and isinstance(_consts, dict):
+                c_map = spec_consts_by_primary.setdefault(_prim, {})
+                for _ck, _cv in _consts.items():
+                    c_map[str(_ck)] = float(_cv)
+                    if str(_ck).startswith("pK"):
+                        c_map[str(_ck)[1:]] = 10.0 ** (-float(_cv))
 
         for sp_name, meta in species_defs.items():
             # Check partition for mixed species (e.g. Fe2_total: dissolved, sorbed)

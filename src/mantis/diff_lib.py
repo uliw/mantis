@@ -2876,7 +2876,7 @@ partition_equilibrium_isotope_32 = partition_equilibrium_isotope
 def _classify_mixed_fraction_token(token: str, species_defs: dict[str, Any]) -> str | None:
     """Classify a species/isotope token in an alpha key as 'sorbed' or 'dissolved'."""
     tok = str(token).strip()
-    meta = species_defs.get(tok, {}) if isinstance(species_defs, dict) else {}
+    meta = species_defs.get(tok, {})
     if isinstance(meta, dict) and meta:
         base_name = meta.get("isotope_of", tok)
         base_meta = species_defs.get(base_name, meta)
@@ -2993,7 +2993,7 @@ def get_mixed_dissolved_fraction_spec(
     mp: Any = None,
 ) -> tuple[str | None, dict[str, float], bool]:
     """Return `(expr, constants, is_dynamic)` for the dissolved fraction of a mixed species."""
-    meta = species_defs.get(sp_name, {}) if isinstance(species_defs, dict) else {}
+    meta = species_defs.get(sp_name, {})
     constants: dict[str, float] = {}
     if isinstance(meta.get("constants"), dict):
         for ck, cv in meta["constants"].items():
@@ -3059,7 +3059,7 @@ def is_mixed_species_dynamic(
     mp: Any = None,
 ) -> bool:
     """Return True if a mixed-phase species (or its parent) has a state-dependent f_dis."""
-    meta = species_defs.get(sp_name, {}) if isinstance(species_defs, dict) else {}
+    meta = species_defs.get(sp_name, {})
     if not isinstance(meta, dict):
         return False
     target_name = meta.get("isotope_of", sp_name) if "isotope_of" in meta else sp_name

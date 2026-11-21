@@ -18,12 +18,13 @@ PYPROJECT = nox.project.load_toml("pyproject.toml")
 
 @nox.session(default=True)
 def tests(session: nox.Session) -> None:
-    """Run the unit and benchmark test suite."""
-    session.install("-e", ".", *nox.project.dependency_groups(PYPROJECT, "test"))
+    """Run the unit and benchmark test suite together with type checks."""
+    session.install("-e", ".", *nox.project.dependency_groups(PYPROJECT, "test"), *nox.project.dependency_groups(PYPROJECT, "lint"))
+    session.run("mypy")
     session.run("pytest", *session.posargs)
 
 
-@nox.session(default=False)
+@nox.session(default=True)
 def lint(session: nox.Session) -> None:
     """Run static type checking and linting."""
     session.install("-e", ".", *nox.project.dependency_groups(PYPROJECT, "lint"))
