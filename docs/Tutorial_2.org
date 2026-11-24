@@ -11,6 +11,78 @@
 
 * Advanced usage 
 
+** Bioturbation and Bio-irrigation
+
+Macrofaunal reworking of sediment particles (bioturbation) and burrow flushing of porewater (bio-irrigation) are represented as separate transport processes acting on the solid and dissolved phases, respectively.
+
+Solid-phase bioturbation is formulated as local, Fickian /intraphase/ biodiffusion (Boudreau, 1986; Meysman et al., 2005), in which the solid volume fraction $(1 - \phi)$ is placed outside the spatial concentration gradient:
+
+\begin{equation}
+J_{\text{bio}, s} = -(1 - \phi)\, D_b(z)\, \frac{\partial C_s}{\partial z}
+\end{equation}
+
+where $J_{\text{bio}, s}$ denotes the bioturbative diffusive flux of solid species $s$ ($\text{mol} \cdot \text{m}^{-2} \cdot \text{s}^{-1}$), $\phi$ denotes sediment porosity, $D_b(z)$ denotes the depth-dependent biodiffusion coefficient ($\text{m}^2 \cdot \text{s}^{-1}$), and $C_s$ denotes the solid-phase concentration ($\text{mol} \cdot \text{m}^{-3}_{\text{solid}}$). In this intraphase formulation, particle mixing homogenizes solid-phase concentrations without driving a net flux of porosity (i.e., solid grains are exchanged with solid grains while preserving the prescribed steady-state porosity profile).
+
+MANTIS supports two depth-dependent profiles for the biodiffusion coefficient $D_b(z)$. By default, MANTIS uses the sigmoidal profile (van de Velde & Meysman, 2016):
+
+\begin{equation}
+D_b(z) = \frac{D_{b,0}}{1 + \exp\!\left(\dfrac{z - x_L}{0.25\, x_{\text{bm}}}\right)}
+\end{equation}
+
+where $D_{b,0}$ denotes the biodiffusivity at the sediment--water interface (SWI), $z$ denotes sediment depth, $x_L$ denotes the depth of the bioturbated mixed layer, and $x_{\text{bm}}$ denotes the attenuation length scale governing the width of the transition zone. Optionally, one can select an exponential profile:
+
+\begin{equation}
+D_b(z) = D_{b,0} \exp\!\left(-\frac{z}{x_{\text{bm}}}\right)
+\end{equation}
+
+where $D_{b,0}$ denotes the biodiffusivity at the SWI and $x_{\text{bm}}$ denotes the exponential attenuation depth scale. Bioturbation applies to all solid particulate species as well as to the adsorbed fraction $(1 - f_{\text{dis}})$ of mixed-phase (sorbing) species.
+
+Bio-irrigation is parameterized as a nonlocal exchange process (Boudreau, 1984; Emerson et al., 1984) that flushes porewater at depth $z$ directly with overlying bottom water at concentration $C_{s,0}$:
+
+\begin{equation}
+I_s(z) = \phi(z)\, \alpha(z)\, \left(C_{s,0} - C_{\text{dis}, s}(z)\right)
+\end{equation}
+
+where $I_s(z)$ denotes the nonlocal bio-irrigation exchange rate ($\text{mol} \cdot \text{m}^{-3}_{\text{bulk}} \cdot \text{s}^{-1}$), $\phi(z)$ denotes sediment porosity, $\alpha(z)$ denotes the depth-dependent bio-irrigation coefficient ($\text{s}^{-1}$), $C_{s,0}$ denotes the overlying bottom-water concentration at the SWI, and $C_{\text{dis}, s}(z)$ denotes the local dissolved concentration (equal to $f_{\text{dis}, s} C_{\text{total}, s}$ for mixed-phase species). The irrigation exchange rate $\alpha(z)$ decreases exponentially with sediment depth (van de Velde & Meysman, 2016):
+
+\begin{equation}
+\alpha(z) = \alpha_0 \exp\!\left(-\frac{z}{x_{\text{irr}}}\right)
+\end{equation}
+
+where $\alpha_0$ denotes the bio-irrigation coefficient at the SWI and $x_{\text{irr}}$ denotes the characteristic irrigation attenuation depth. Bio-irrigation acts exclusively on dissolved solutes and the dissolved fraction of mixed-phase species, leaving solid particulate transport unaffected.
+
+*** Configuring Bioturbation and Bio-irrigation
+
+Both processes are configured via dictionaries passed to ~model.configure(...)~ (bio-irrigation defaults to zero if omitted). To choose between the two bioturbation depth profiles, set the ~"profile"~ key in the ~bioturbation~ dictionary:
+
+- ~"sigmoidal"~ (default): Uses both ~"depth"~ ($x_L$) and ~"attenuation"~ (or ~"decay"~, $x_{\text{bm}}$) to produce a well-mixed upper layer of roughly constant $D_{b,0}$ down to $x_L$ followed by a smooth transition over width $x_{\text{bm}}$.
+- ~"exponential"~: Decays monotonically from $D_{b,0}$ at the SWI with e-folding length scale ~"attenuation"~ (or ~"decay"~; falls back to ~"depth"~ if omitted).
+
+For ~bioirrigation~, MANTIS always uses the exponential profile above, parameterized by ~"BI0"~ ($\alpha_0$) and ~"attenuation"~ (or ~"decay"~ / ~"depth"~, $x_{\text{irr}}$).
+
+#+BEGIN_SRC jupyter-python
+model.configure(
+    # Default sigmoidal bioturbation profile (mixed layer + smooth transition):
+    bioturbation={
+        "BT0": "4 cm^2/year",
+        "depth": "6 cm",
+        "attenuation": "2 cm",
+        "profile": "sigmoidal",  # optional; "sigmoidal" is the default
+    },
+    # Or, for an exponential bioturbation profile:
+    # bioturbation={
+    #     "BT0": "4 cm^2/year",
+    #     "attenuation": "3 cm",
+    #     "profile": "exponential",
+    # },
+    # Exponential bio-irrigation profile:
+    bioirrigation={
+        "BI0": "182.6 /year",
+        "attenuation": "3.5 cm",
+    },
+)
+#+END_SRC
+
 ** Kinetic Isotope Effects 
 To model isotope effects the main model script must set ~isotopes=True~, the species file must define isotope species, and the reaction file must define isotope effects (you also need to update the plot file). A full example is available in the ~examples/velde_et_al_2016/with_isotopes/~ directory. The below snippets outline the basic steps. 
 

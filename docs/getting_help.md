@@ -1,7 +1,7 @@
-- [Getting help](#orgcfd6744)
+- [Getting help](#orgf60a89c)
 
 
-<a id="orgcfd6744"></a>
+<a id="orgf60a89c"></a>
 
 # Getting help
 
