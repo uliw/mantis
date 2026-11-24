@@ -110,8 +110,8 @@ model.configure(
 - ~advection~ (str | float, default: ~0.0~):
   - *Context*: Additional porewater fluid advection velocity (e.g., ~"10 cm/yr"~ upwards in methane seep or cold vent systems).
   - *When to set*: Essential for cold vents, groundwater discharge, or compaction-driven upward advection.
-- ~phi~ (float | list | ndarray, default: ~0.8~):
-  - *Context*: Sediment porosity. May be a constant float or a depth-dependent profile.
+- ~phi~ (float | dict | callable | list | ndarray, default: ~0.8~):
+  - *Context*: Sediment porosity. May be a constant float, a ~dict~ defining an exponential compaction profile (keys: ~"top"~, ~"bottom"~ / ~"inf"~, and ~"half_depth"~ / ~"z_half"~ or ~"decay"~ / ~"z_decay"~, which automatically calls [[*~compute_porosity_profile~][~compute_porosity_profile~]]), a callable ~phi(z)~ accepting depth coordinates ~z~ [m], or a pre-computed ~list~ / ~ndarray~ matching the grid length. Note that passing a ~list~ or ~ndarray~ uses the values directly without calling ~compute_porosity_profile~; Mantis provides [[*~compute_porosity_profile~][~compute_porosity_profile~]] to compute exponential depth profiles directly.
   - *When to set*: Set based on core measurements. Porosity scales solute inventories and governs tortuosity corrections ($D_{\text{eff}} = \phi^2 D_{\text{mol}}$).
 - ~temp~ (float | list, default: ~10.0~):
   - *Context*: Sediment temperature [°C]. Can be a constant or a two-element list ~[T_top, T_bottom]~ to impose a linear geothermal gradient.
@@ -346,3 +346,63 @@ panel_isotopes = isotopes({
   - 2 elements ~(min, max)~: Standard continuous axis limits.
   - 4 elements ~(min_lower, max_lower, min_upper, max_upper)~: Broken axis. In sulfur isotope systems where residual sulfate is enriched (+20‰) while biogenic sulfide and pyrite are depleted (-40‰), this cleanly excludes the large intermediate unpopulated zone.
 - Multiple isotope systems: If species belonging to multiple isotope systems (e.g., $\delta^{34}\text{S}$ and $\delta^{13}\text{C}$) are included in a single panel, Mantis automatically places the first group on the primary axis and the second group on a twin right axis.
+
+** Utility Functions
+
+*** ~compute_porosity_profile~
+Computes an exponential sediment porosity profile with depth:
+
+$$\phi(z) = \phi_{\text{bottom}} + (\phi_{\text{top}} - \phi_{\text{bottom}}) \exp\left(-\frac{z}{z_{\text{decay}}}\right)$$
+
+#+BEGIN_SRC python
+from mantis.diff_lib import compute_porosity_profile
+
+phi_profile = compute_porosity_profile(
+    z,
+    phi_top=0.9,
+    phi_bottom=0.75,
+    z_half="5 cm",
+)
+#+END_SRC
+
+- ~z~ (array-like):
+  - *Context*: Sediment depth coordinates in meters.
+- ~phi_top~ (float):
+  - *Context*: Porosity at the sediment-water interface ($z = 0$).
+- ~phi_bottom~ (float):
+  - *Context*: Asymptotic porosity at depth ($z \to \infty$).
+- ~z_half~ (float | str | None, default: ~None~):
+  - *Context*: Depth at which porosity has decreased halfway toward ~phi_bottom~ (accepts unit strings such as ~"5 cm"~ or meters as float). Related to ~z_decay~ by $z_{\text{decay}} = z_{\text{half}} / \ln 2$.
+- ~z_decay~ (float | str | None, default: ~None~):
+  - *Context*: $e$-folding attenuation depth ($1/\lambda$; accepts unit strings or meters as float). Either ~z_half~ or ~z_decay~ must be specified.
+- *Returns*:
+  - ~np.ndarray~: Porosity profile evaluated at each depth coordinate in ~z~.
+- *When to use*: Call directly when you want to construct, inspect, or customize an exponential porosity array before passing it to ~model.configure(phi=...)~, or pass a configuration ~dict~ to ~model.configure(phi={"top": 0.9, "bottom": 0.75, "half_depth": "5 cm"})~ to have Mantis invoke it automatically.
+
+*** ~compute_sediment_age~
+Calculates the steady-state mean sediment age profile $A(z)$ [yr] by solving the 1D advective-diffusive aging equation for solid sediment particles:
+
+$$\frac{d}{dz}\left[-(1 - \phi)\,D_b\,\frac{dA}{dz} + (1 - \phi)\,v_s\,A\right] = 1 - \phi$$
+
+#+BEGIN_SRC python
+from mantis.diff_lib import compute_sediment_age
+
+age_yr = compute_sediment_age(
+    z,
+    w=0.002,       # m/yr (consistent with z in m)
+    phi=phi_arr,
+    Db=Db_arr,     # m^2/yr
+)
+#+END_SRC
+
+- ~z~ (array-like):
+  - *Context*: Sediment depth coordinates (e.g., in meters or centimeters). Units of ~w~ and ~Db~ must be consistent with ~z~.
+- ~w~ (float | array-like):
+  - *Context*: Solid sediment burial velocity $v_s(z)$ in $\text{depth\_unit}/\text{yr}$.
+- ~phi~ (float | array-like | None, default: ~None~):
+  - *Context*: Sediment porosity profile. Compaction is incorporated through the solid volume fraction $(1 - \phi)$. If ~None~, porosity is assumed uniform (no compaction).
+- ~Db~ (float | array-like | None, default: ~None~):
+  - *Context*: Bioturbation biodiffusion coefficient profile in $\text{depth\_unit}^2/\text{yr}$. If ~None~ or all zero, evaluates the pure unmixed advective burial integral. Bioirrigation affects only dissolved solutes and does not alter solid particle age.
+- *Returns*:
+  - ~np.ndarray~: Mean sediment age profile $A(z)$ in years.
+- *When to use*: Use in post-processing or analysis scripts to convert sediment depth into mean depositional age, accounting for burial rate, compaction, and bioturbative mixing.
