@@ -301,7 +301,7 @@ class ReactionSystemValidator:
     def get_parent_species(self, sp: str) -> str:
         """Returns the primary transport state variable name for a given species.
 
-        E.g. HS -> TS2, Fe2_liq -> Fe2_total, SO4 -> SO4.
+        E.g. HS -> H2S_tot, Fe2_liq -> Fe2_total, SO4 -> SO4.
         """
         meta = getattr(self, "species_defs", {}).get(sp)
         if isinstance(meta, dict):

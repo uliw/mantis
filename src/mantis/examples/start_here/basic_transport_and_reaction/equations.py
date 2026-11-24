@@ -1,20 +1,3 @@
-"""Mantis-RTM: A Python library for reaction-transport modeling
-
-Copyright (C), 2026 - Ulrich G. Wortmann
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or (at
-your option) any later version.
-
-This program is distributed in the hope that it will be useful, but
-WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with this program.  If not, see <https://www.gnu.org/licenses/>.
-"""
 """equations.py
 
 Auto-generated reaction equations system module for MANTIS.
@@ -60,7 +43,7 @@ def get_limiters(c, mp):
 # -----------------------------------------------------------------------------
 
 def rxn_sulfate_reduction(c, k_val, lim, LHS, RHS, RATES, CROSS, mp):
-    """Reaction: 2 POC + SO4 -> TS2"""
+    """Reaction: 2 POC + SO4 -> H2S_tot"""
     has_solid = True
     k_num = mp.k.get("POC") if hasattr(mp, "k") else getattr(k_val, "POC", 0.0)
     _lim_SO4 = lim.get("SO4_implicit", lim.get("SO4", 1.0))
@@ -70,7 +53,7 @@ def rxn_sulfate_reduction(c, k_val, lim, LHS, RHS, RATES, CROSS, mp):
         CROSS=CROSS, LHS=LHS, RATES=RATES, mp=mp,
         master_species={"POC": 2.0},
         reactants={"SO4": 1.0},
-        products={'TS2': 1.0},
+        products={'H2S_tot': 1.0},
         coeff_master=coeff_master, rate_master=rate_master,
         has_solid=has_solid, reaction_name="sulfate_reduction",
         ref_species="POC", stoich_ref=2.0,
@@ -177,22 +160,22 @@ def compute_chemical_jacobian(c, mp, k, species_names):
         _dco3_dta = - (_dic_val * _K1 * _K2 / _denom**2) * _dD_dh * _dh_dta
         _dco3_ddic = (_K1 * _K2 / _denom) - (_dic_val * _K1 * _K2 / _denom**2) * _dD_dh * _dh_ddic
 
-    # Reaction: sulfate_reduction (2 POC + SO4 -> TS2)
-    if "POC" in idx and "SO4" in idx and "TS2" in idx:
+    # Reaction: sulfate_reduction (2 POC + SO4 -> H2S_tot)
+    if "H2S_tot" in idx and "POC" in idx and "SO4" in idx:
         _raw_k_sulfate_reduction = mp.k.get("POC") if hasattr(mp, "k") else getattr(k, "POC", 0.0)
         k_num_sulfate_reduction = np.asarray(_raw_k_sulfate_reduction, dtype=np.float64) if np.ndim(_raw_k_sulfate_reduction) > 0 else float(_raw_k_sulfate_reduction)
+        c_H2S_tot = np.asarray(c["H2S_tot"].value if hasattr(c["H2S_tot"], "value") else c["H2S_tot"])
         c_POC = np.asarray(c["POC"].value if hasattr(c["POC"], "value") else c["POC"])
         c_SO4 = np.asarray(c["SO4"].value if hasattr(c["SO4"], "value") else c["SO4"])
-        c_TS2 = np.asarray(c["TS2"].value if hasattr(c["TS2"], "value") else c["TS2"])
         _lim_SO4 = lim.get("SO4_implicit", lim.get("SO4", 1.0))
         d_POC_sulfate_reduction = solid_fac * (k_num_sulfate_reduction / 2.0) * c_SO4 * _lim_SO4
         J[:, idx["POC"], idx["POC"]] -= 2.0 * d_POC_sulfate_reduction
         J[:, idx["SO4"], idx["POC"]] -= 1.0 * d_POC_sulfate_reduction
-        J[:, idx["TS2"], idx["POC"]] += 1.0 * d_POC_sulfate_reduction
+        J[:, idx["H2S_tot"], idx["POC"]] += 1.0 * d_POC_sulfate_reduction
         d_SO4_sulfate_reduction = solid_fac * (k_num_sulfate_reduction / 2.0) * c_POC * _lim_SO4
         J[:, idx["POC"], idx["SO4"]] -= 2.0 * d_SO4_sulfate_reduction
         J[:, idx["SO4"], idx["SO4"]] -= 1.0 * d_SO4_sulfate_reduction
-        J[:, idx["TS2"], idx["SO4"]] += 1.0 * d_SO4_sulfate_reduction
+        J[:, idx["H2S_tot"], idx["SO4"]] += 1.0 * d_SO4_sulfate_reduction
 
     return J
 

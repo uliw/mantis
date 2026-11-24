@@ -121,7 +121,7 @@ species = {
         "bc_top": {"Dirichlet": 28.2},
         "prefill": True,
     },
-    "TS2": {
+    "H2S_tot": {
         "phase": "liquid",
         "include": True,
         "formula": "H2S",
@@ -214,7 +214,7 @@ reactions = [
     # -------------------------------------------------------------------------
     {
         "reaction_name": "sulfate_reduction_slow",
-        "reaction": "2 POC + SO4 -> TS2",
+        "reaction": "2 POC + SO4 -> H2S_tot",
         "k_value_name": "POC",
         "limiters": ["SO4"],
         "inhibitors": None,
@@ -228,7 +228,7 @@ reactions = [
 By default, Mantis assigns reaction order based on the number of reactants in the reaction stoichiometry:
 
 -   **Single-reactant reactions** (e.g. `POC -> DIC`) are treated as **first-order**: $$ R = k \cdot [A] \cdot \prod \text{limiters} \cdot \prod \text{inhibitors} $$
--   **Multiple-reactant reactions** (e.g. `CH4 + SO4 -> TS2 + DIC`) follow **second-order** mass-action kinetics: $$ R = k \cdot [A] \cdot [B] \cdot \prod \text{limiters} \cdot \prod \text{inhibitors} $$
+-   **Multiple-reactant reactions** (e.g. `CH4 + SO4 -> H2S_tot + DIC`) follow **second-order** mass-action kinetics: $$ R = k \cdot [A] \cdot [B] \cdot \prod \text{limiters} \cdot \prod \text{inhibitors} $$
 
 You can explicitly override this default for any reaction by specifying the `reaction_order` property (values: `0`, `1`, or `2`):
 
@@ -259,7 +259,7 @@ z_lim = (0, 1)  # (z_min, z_max) in meters (default for log: (1e-4, display_leng
 # ----  concentration data panel  --- #
 liquid_species_1 = liquid_species({
     "scale": "lin",
-    "species": ["SO4", "TS2"],
+    "species": ["SO4", "H2S_tot"],
     "lim": (0, 30),
     "units": "mmol/l",
 })
@@ -303,7 +303,7 @@ Crucially, concentrations are defined **per unit volume of their respective phas
 When the simulation completes or exports data (`<model_name>.csv`):
 
 -   `c_<species>`: Reported directly in **$\text{mmol/L}$** (numerically equivalent to $\text{mol/m}^3$):
--   Solutes (e.g., `c_SO4`, `c_O2`, `c_TS2`) are in **$\text{mmol / L of porewater}$**.
+-   Solutes (e.g., `c_SO4`, `c_O2`, `c_H2S_tot`) are in **$\text{mmol / L of porewater}$**.
 -   Solids (e.g., `c_FeS`, `c_Fe3`, `c_POC_slow`) are in **$\text{mmol / L of pure solid}$**.
 -   `f_<species>`: Net production/consumption reaction rates in **$\text{mol} / (\text{m}^3 \cdot \text{s})$**.
 -   `d_<species>` and `d34S_<species>`: Isotope delta values (e.g., `d_SO4`, `d34S_SO4`, `d34S_FeS2`) in **$\text{milli Urey}$** ($\text{mUr}$, relative to reference standards such as VCDT or VPDB). Note 1 mUr = 1&permil;

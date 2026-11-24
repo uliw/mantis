@@ -46,7 +46,7 @@ z_lim = (0, 1)  # (z_min, z_max) in meters (default for log: (1e-4, display_leng
 # ----  concentration data panel  --- #
 liquid_species_1 = liquid_species({
     "scale": "lin",
-    "species": ["SO4", "TS2"],
+    "species": ["SO4", "H2S_tot"],
     "lim": (0, 30),
     "units": "mmol/l",
 })

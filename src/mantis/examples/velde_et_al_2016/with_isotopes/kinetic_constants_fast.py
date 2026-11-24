@@ -28,10 +28,10 @@ kinetic_constants: dict = {
     "POC_slow": "0.1 1/year",  # reactive OM, Velde et al
     "Fe2_p_eq": "696 dimensionless",  # sorbed vs Fe2+ Fe2+ liq.
     # FeS + HS -> FeS2
-    "FeS_TS2": "5e-8 m^3/(mol*second)",  # FeS + H2S -> FeS2, at 10C -> notes.org
+    "FeS_H2S_tot": "5e-8 m^3/(mol*second)",  # FeS + H2S -> FeS2, at 10C -> notes.org
     "Hplus": f"{10 ** (-7.5)} mol/l",
     # Oxidation reactions after Velde at eal 2016
-    "TS2_O2": "1e7 cm^3/(umol*year)",
+    "H2S_tot_O2": "1e7 cm^3/(umol*year)",
     "Fe3_hs": "494 cm^3/(umol*year)",  # check with halevy
     "FeS_O2": "1e7 cm^3/(umol*year)",
     "Fe2_O2": "1e7 cm^3/(umol*year)",
@@ -41,16 +41,16 @@ kinetic_constants: dict = {
     "FeS_sp": "10**-3.5 mol/l",  # FeS equilibrium constant
     # Monod half-saturation & inhibition thresholds
     "K_O2": "0.001 umol/cm^3",
-    "K_O2_TS2": "0.001 umol/cm^3",
+    "K_O2_H2S_tot": "0.001 umol/cm^3",
     "K_SO4": "0.9 umol/cm^3",
     "K_Fe3_diss_red": "10.4 umol/cm^3",
     "K_Fe3": "1e-3 dimensionless",
     # Isotope fractionation factors & transition thresholds
     "msr_alpha": 1.07,
-    "TS2_O2_alpha": 0.995,
+    "H2S_tot_O2_alpha": 0.995,
     "dispro_hs_alpha": 0.993,
     "K_SO4_alpha": "1e-3 umol/cm^3",
-    "K_TS2_alpha": "1e-3 umol/cm^3",
+    "K_H2S_tot_alpha": "1e-3 umol/cm^3",
     # Primary respiration stoichiometry
     "POC_O2_ratio": 1.27,
 }

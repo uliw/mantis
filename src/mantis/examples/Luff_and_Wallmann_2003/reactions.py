@@ -39,29 +39,29 @@ reactions = [
     # 1. Anaerobic Oxidation of Methane (AOM)
     # CH4 + SO4^2- -> HCO3^- + HS^- + H2O
     # In DIC / TA notation:
-    # 1 CH4 + 1 SO4 -> 1 DIC + 2 TA + 1 TS2
+    # 1 CH4 + 1 SO4 -> 1 DIC + 2 TA + 1 H2S_tot
     # Rate: k_AOM * [CH4] * [SO4] (already bimolecular by master/reactant)
     # -------------------------------------------------------------------------
     {
         "reaction_name": "AOM",
-        "reaction": "CH4 + SO4 -> DIC + 2 TA + TS2",
+        "reaction": "CH4 + SO4 -> DIC + 2 TA + H2S_tot",
         "k_value_name": "k_AOM",
     },
 
     # -------------------------------------------------------------------------
     # 2. Organic Carbon Degradation via Sulfate Reduction
-    # 2 CH2O + SO4^2- -> 2 HCO3^- + HS^- + H+ (net: 2 DIC + 2 TA + 1 TS2)
+    # 2 CH2O + SO4^2- -> 2 HCO3^- + HS^- + H+ (net: 2 DIC + 2 TA + 1 H2S_tot)
     # Nutrients release: N: 0.151 TNH4, P: 0.0094 TPO4 per C
     # -------------------------------------------------------------------------
     {
         "reaction_name": "POC_fast_sulfate_reduction",
-        "reaction": "2 POC_fast + SO4 -> 2 DIC + 2 TA + TS2 + 0.302 TNH4 + 0.0188 TPO4",
+        "reaction": "2 POC_fast + SO4 -> 2 DIC + 2 TA + H2S_tot + 0.302 TNH4 + 0.0188 TPO4",
         "k_value_name": "POC_fast",
         "limiters": ["SO4"],
     },
     {
         "reaction_name": "POC_slow_sulfate_reduction",
-        "reaction": "2 POC_slow + SO4 -> 2 DIC + 2 TA + TS2 + 0.302 TNH4 + 0.0188 TPO4",
+        "reaction": "2 POC_slow + SO4 -> 2 DIC + 2 TA + H2S_tot + 0.302 TNH4 + 0.0188 TPO4",
         "k_value_name": "POC_slow",
         "limiters": ["SO4"],
     },

@@ -33,7 +33,7 @@ liquid_species = {
     "species": [
         "O2",
         "SO4",
-        "TS2",
+        "H2S_tot",
         "Fe2_liq",
     ],
     "lim": (1e-6, 50),
@@ -55,7 +55,7 @@ reaction_rates = {
     "species": [
         "POC",
         "SO4",
-        "TS2",
+        "H2S_tot",
         "Fe3",
         "FeS",
         "D_bio",
@@ -64,7 +64,7 @@ reaction_rates = {
 
 # ----  isotope data panel  --- #
 isotopes = {
-    "species": ["d34S_SO4", "d34S_TS2", "d34S_FeS"],
+    "species": ["d34S_SO4", "d34S_H2S_tot", "d34S_FeS"],
     "lim": (-45, -37, 20, 30),  # broken y-axis: exclude -37 to 20
 }
 

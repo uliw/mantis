@@ -33,15 +33,15 @@ The SimpleFe benchmark couples 4 primary biogeochemical reaction processes:
   2. Organoclastic Sulfate Reduction (OSR; RSO4POC):
      CH2O + 0.5 SO4^2- + H+ -> CO2 + 0.5 H2S + H2O
      Normalized per 1.0 mole of SO4^2-:
-     2 POC + SO4 -> 2 DIC + TS2 + 2 TA
+     2 POC + SO4 -> 2 DIC + H2S_tot + 2 TA
      Rate: R2 = k_POC * [POC] * [SO4] / (K_SO4 + [SO4]) * K_FeOOH / (K_FeOOH + [FeOOH])
      (Note the Monod limitation by sulfate and inhibition by reactive iron oxide).
 
   3. Abiotic Sulfide Oxidation by Iron Oxide (RFeOOHH2S):
      2 FeOOH + H2S + 4 H+ -> 2 Fe2+ + S0 + 4 H2O
      In Mantis's DIC/TA conservation formulation:
-     2 FeOOH + TS2 -> 2 Fe2_total + 4 TA
-     Rate: R3 = k_FeOOHH2S * [FeOOH] * [TS2]
+     2 FeOOH + H2S_tot -> 2 Fe2_total + 4 TA
+     Rate: R3 = k_FeOOHH2S * [FeOOH] * [H2S_tot]
 
   4. Iron Monosulfide Precipitation & Reversible Dissolution (RFeS_pre):
      Fe2+ + HS- -> FeS + H+  (consumes 1 TA)
@@ -90,7 +90,7 @@ reactions: List[Dict[str, Any]] = [
     # -------------------------------------------------------------------------
     {
         "reaction_name": "sulfate_reduction_poc",
-        "reaction": "2 POC + SO4 -> 2 DIC + TS2 + 2 TA",
+        "reaction": "2 POC + SO4 -> 2 DIC + H2S_tot + 2 TA",
         "k_value_name": "k_POC",
         "ref_species": "POC",
         "limiters": ["SO4"],
@@ -103,9 +103,9 @@ reactions: List[Dict[str, Any]] = [
     # -------------------------------------------------------------------------
     {
         "reaction_name": "iron_oxide_sulfide_oxidation",
-        "reaction": "2 FeOOH + TS2 -> 2 Fe2_total + 4 TA",
+        "reaction": "2 FeOOH + H2S_tot -> 2 Fe2_total + 4 TA",
         "k_value_name": "k_FeOOHH2S",
-        "ref_species": "TS2",
+        "ref_species": "H2S_tot",
     },
 
     # -------------------------------------------------------------------------

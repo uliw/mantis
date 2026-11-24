@@ -28,14 +28,14 @@ limiters = {
     # Base implicit limiters: L_imp = 1.0 / (C + K)
     # The parser automatically derives explicit (C * L_imp) and inhibition (K * L_imp = 1 - C * L_imp)
     "O2": "1.0 / (c.O2 + K_O2)",
-    "O2_TS2": "1.0 / (c.O2 + K_O2_TS2)",
+    "O2_H2S_tot": "1.0 / (c.O2 + K_O2_H2S_tot)",
     "SO4": "1.0 / (c.SO4 + K_SO4)",
     "Fe3": "1.0 / (np.maximum(c.Fe3, 0.0) + K_Fe3)",
     "Fe3_diss_red": "1.0 / (np.maximum(c.Fe3, 0.0) + K_Fe3_diss_red)",
 
     # Isotope fractionation limiters (auto-converted to explicit form C / (C + K))
     "SO4_alpha": "1.0 / (c.SO4 + K_SO4_alpha)",
-    "TS2_alpha": "1.0 / (c.TS2 + K_TS2_alpha)",
+    "H2S_tot_alpha": "1.0 / (c.H2S_tot + K_H2S_tot_alpha)",
 
     # Carbonate saturation limiters
     "Omega_calcite": "(c.Ca2 * c.CO3) / (mp.Ksp_calcite + 1e-30)",
@@ -75,24 +75,24 @@ reactions = [
     },
     {
         "reaction_name": "sulfate_reduction_fast",
-        "reaction": "2 POC_fast + SO4 -> TS2 + 2 DIC + 2 TA",
+        "reaction": "2 POC_fast + SO4 -> H2S_tot + 2 DIC + 2 TA",
         "k_value_name": "POC_fast",
         "limiters": ["SO4"],
         "inhibitors": ["O2", "Fe3_diss_red"],
-        "isotope_species": {"SO4": "SO4_S32", "TS2": "TS2_S32"},
+        "isotope_species": {"SO4": "SO4_S32", "H2S_tot": "H2S_tot_S32"},
         "isotope_fractionation": {
-            "SO4_S32 to TS2_S32": ["msr_alpha", "SO4_alpha"]
+            "SO4_S32 to H2S_tot_S32": ["msr_alpha", "SO4_alpha"]
         },
     },
     {
         "reaction_name": "sulfate_reduction_slow",
-        "reaction": "2 POC_slow + SO4 -> TS2 + 2 DIC + 2 TA",
+        "reaction": "2 POC_slow + SO4 -> H2S_tot + 2 DIC + 2 TA",
         "k_value_name": "POC_slow",
         "limiters": ["SO4"],
         "inhibitors": ["O2", "Fe3_diss_red"],
-        "isotope_species": {"SO4": "SO4_S32", "TS2": "TS2_S32"},
+        "isotope_species": {"SO4": "SO4_S32", "H2S_tot": "H2S_tot_S32"},
         "isotope_fractionation": {
-            "SO4_S32 to TS2_S32": ["msr_alpha", "SO4_alpha"]
+            "SO4_S32 to H2S_tot_S32": ["msr_alpha", "SO4_alpha"]
         },
     },
 
@@ -102,11 +102,11 @@ reactions = [
     {
         "reaction_name": "hs_oxidation",
         "reaction": "1 HS + 2 O2 + 1 TA -> 1 SO4",
-        "k_value_name": "TS2_O2",
-        "limiters": ["O2_TS2"],
-        "isotope_species": {"SO4": "SO4_S32", "TS2": "TS2_S32", "HS": "HS_S32"},
+        "k_value_name": "H2S_tot_O2",
+        "limiters": ["O2_H2S_tot"],
+        "isotope_species": {"SO4": "SO4_S32", "H2S_tot": "H2S_tot_S32", "HS": "HS_S32"},
         "isotope_fractionation": {
-            "HS_S32 to S0_S32": ["TS2_O2_alpha", "TS2_alpha"]
+            "HS_S32 to S0_S32": ["H2S_tot_O2_alpha", "H2S_tot_alpha"]
         },
     },
     {
@@ -115,7 +115,7 @@ reactions = [
         "k_value_name": "Fe3_hs",
         "limiters": ["Fe3"],
         "inhibitors": ["O2"],
-        "isotope_species": {"SO4": "SO4_S32", "TS2": "TS2_S32", "HS": "HS_S32"},
+        "isotope_species": {"SO4": "SO4_S32", "H2S_tot": "H2S_tot_S32", "HS": "HS_S32"},
     },
     {
         "reaction_name": "Fe2_oxidation",
@@ -140,7 +140,7 @@ reactions = [
             "dissolution": "FeS_isd",
             "equilibrium": "FeS_sp",
         },
-        "isotope_species": {"TS2": "TS2_S32", "FeS": "FeS_S32", "HS": "HS_S32"},
+        "isotope_species": {"H2S_tot": "H2S_tot_S32", "FeS": "FeS_S32", "HS": "HS_S32"},
     },
 
     # -------------------------------------------------------------------------

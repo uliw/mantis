@@ -111,7 +111,7 @@ model.configure(
     -   **Context**: Additional porewater fluid advection velocity (e.g., `"10 cm/yr"` upwards in methane seep or cold vent systems).
     -   **When to set**: Essential for cold vents, groundwater discharge, or compaction-driven upward advection.
 -   `phi` (float | dict | callable | list | ndarray, default: `0.8`):
-    -   **Context**: Sediment porosity. May be a constant float, a `dict` defining an exponential compaction profile (keys: `"top"`, `"bottom"` / `"inf"`, and `"half_depth"` / `"z_half"` or `"decay"` / `"z_decay"`, which automatically calls [`compute_porosity_profile`](#orgc6933ef)), a callable `phi(z)` accepting depth coordinates `z` [m], or a pre-computed `list` / `ndarray` matching the grid length. Note that passing a `list` or `ndarray` uses the values directly without calling `compute_porosity_profile`; Mantis provides [`compute_porosity_profile`](#orgc6933ef) to compute exponential depth profiles directly.
+    -   **Context**: Sediment porosity. May be a constant float, a `dict` defining an exponential compaction profile (keys: `"top"`, `"bottom"` / `"inf"`, and `"half_depth"` / `"z_half"` or `"decay"` / `"z_decay"`, which automatically calls [`compute_porosity_profile`](#org7b6bae8)), a callable `phi(z)` accepting depth coordinates `z` [m], or a pre-computed `list` / `ndarray` matching the grid length. Note that passing a `list` or `ndarray` uses the values directly without calling `compute_porosity_profile`; Mantis provides [`compute_porosity_profile`](#org7b6bae8) to compute exponential depth profiles directly.
     -   **When to set**: Set based on core measurements. Porosity scales solute inventories and governs tortuosity corrections ($D_{\text{eff}} = \phi^2 D_{\text{mol}}$).
 -   `temp` (float | list, default: `10.0`):
     -   **Context**: Sediment temperature [°C]. Can be a constant or a two-element list `[T_top, T_bottom]` to impose a linear geothermal gradient.
@@ -250,7 +250,7 @@ from mantis.diff_lib import get_total_delta
 d34S_burial = get_total_delta(
     result.c,
     result.mp,
-    species="SO4, TS2, FeS",
+    species="SO4, H2S_tot, FeS",
     isotope_standard="S",
     index=-1,
 )
@@ -259,7 +259,7 @@ print(f"Total buried d34S: {d34S_burial:.2f} mUr")
 
 -   `c`: Simulation concentration state container (`result.c`).
 -   `mp`: Model parameters container (`result.mp`).
--   `species` (str | Sequence[str], default: `"SO4, TS2, FeS"`): Comma-separated list or sequence of species to aggregate into the elemental isotope budget.
+-   `species` (str | Sequence[str], default: `"SO4, H2S_tot, FeS"`): Comma-separated list or sequence of species to aggregate into the elemental isotope budget.
 -   `isotope_standard` (str | float, default: look up in `mp.isotope_standards`): Element standard name (e.g., `"S"` for VCDT, `"C"` for VPDB) or direct reference ratio.
 -   `index` (int | None, default: `-1`): Spatial index where the budget is computed. `-1` evaluates burial at the bottom boundary; `0` evaluates influx at the surface; `None` computes across the entire depth column.
 -   **When to use**: Use to verify column-wide isotopic mass conservation or compute net isotopic signatures of buried sediments.
@@ -291,7 +291,7 @@ Configures subplots displaying dissolved porewater solute concentrations.
 
 ```python
 panel_solutes = liquid_species({
-    "species": ["SO4", "TS2", "O2", "Fe2_liq"],
+    "species": ["SO4", "H2S_tot", "O2", "Fe2_liq"],
     "units": "mmol/l",
     "scale": "lin",          # 'lin' or 'log'
     "lim": (0, 30),          # axis min and max in specified units
@@ -344,7 +344,7 @@ Configures subplots displaying rates of chemical transformations.
 
 ```python
 panel_rates = reaction_rates({
-    "species": ["POC", "SO4", "TS2", "FeS"],
+    "species": ["POC", "SO4", "H2S_tot", "FeS"],
     "units": "umol/(cm^3*yr)",  # optional display unit
     "scale": "symlog",           # standard for rates spanning orders of magnitude
     "lim": (-1e-2, 1e-2),
@@ -362,7 +362,7 @@ Configures subplots displaying isotopic compositions ($&delta;$-values in mUr or
 
 ```python
 panel_isotopes = isotopes({
-    "species": ["d34S_SO4", "d34S_TS2", "d34S_FeS"],
+    "species": ["d34S_SO4", "d34S_H2S_tot", "d34S_FeS"],
     "scale": "lin",
     "lim": (-45, -35, 15, 25),  # 4-element tuple creates broken axis
 })

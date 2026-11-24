@@ -14,9 +14,9 @@ def test_reactant_coexistence_well_resolved():
     z_front = 0.03
     width = 0.008
     o2 = 0.5 * (1.0 - np.tanh((z - z_front) / width))
-    ts2 = 0.5 * (1.0 + np.tanh((z - z_front) / width))
+    H2S_tot = 0.5 * (1.0 + np.tanh((z - z_front) / width))
 
-    c = {"O2": o2, "TS2": ts2}
+    c = {"O2": o2, "H2S_tot": H2S_tot}
 
     results = check_reactant_coexistence(z, c, verbose=False)
     assert len(results) > 0
@@ -33,12 +33,12 @@ def test_reactant_coexistence_under_resolved_warning():
 
     # Very sharp step collision at cell 5
     o2 = np.zeros_like(z)
-    ts2 = np.zeros_like(z)
+    H2S_tot = np.zeros_like(z)
     o2[:6] = [1.0, 0.8, 0.6, 0.4, 0.2, 0.05]
     # Remaining 15 elements: index 5 to 19 inclusive
-    ts2[5:] = [0.05, 0.3, 0.7, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+    H2S_tot[5:] = [0.05, 0.3, 0.7, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
 
-    c = data_container({"O2": o2, "TS2": ts2})
+    c = data_container({"O2": o2, "H2S_tot": H2S_tot})
 
     results = check_reactant_coexistence(z, c, verbose=True)
     sulfide_ox = next(r for r in results if r["name"] == "Sulfide Oxidation by O2")
@@ -61,7 +61,7 @@ def test_reactant_coexistence_custom_pairs_and_aliases():
         {
             "name": "Custom FeS",
             "sp_A": "fe2",
-            "sp_B": "TS2",
+            "sp_B": "H2S_tot",
             "k": 5e4,
             "D_eff": 5e-10,
         }

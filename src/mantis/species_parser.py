@@ -533,7 +533,7 @@ def validate_and_normalize_speciation(
 
     Supports unified declarative speciation blocks:
       - 'carbonate_system': thermodynamic seawater carbonate speciation (DIC + TA -> CO3, HCO3, CO2, Hplus, pH)
-      - 'acid_base': acid-base conjugate systems (e.g. TS2 -> HS, H2S)
+      - 'acid_base': acid-base conjugate systems (e.g. H2S_tot -> HS, H2S)
       - 'partition': solid-liquid phase partitioning of lumped pools (e.g. Fe2_total -> dissolved, sorbed)
       - 'complexation': aqueous ligand complexation and free ion fractions (e.g. Fe2_liq, FeHS+)
 

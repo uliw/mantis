@@ -43,13 +43,13 @@ species = {
         "bc_top": {"Dirichlet": 28.2, "d34S": 21.0},
         "prefill": True,
     },
-    "TS2": {
+    "H2S_tot": {
         "phase": "liquid",
         "include": True,
         "formula": "H2S",
         "diff_coeff_function": "diff_coeff",
         "diffusion": {"m0": 10.4, "m1": 0.273},
-        "isotopes": {"TS2_S32": "S"},
+        "isotopes": {"H2S_tot_S32": "S"},
         "bc_top": {"Dirichlet": 0.0, "d34S": 0.0},
     },
     "O2": {
@@ -193,7 +193,7 @@ speciation = {
     },
     "sulfide_acid_base": {
         "type": "acid_base",
-        "primary": "TS2",
+        "primary": "H2S_tot",
         "constants": {"pKa1": 7.0},
         "species": {
             "HS": {

@@ -61,7 +61,7 @@ def test_diagenetic_model_setup(tmp_path):
     assert len(species_transport) > 0
     assert hasattr(c, "SO4")
     assert hasattr(c, "Fe3")
-    assert hasattr(c, "TS2")
+    assert hasattr(c, "H2S_tot")
     assert hasattr(mp, "get_limiters")
     assert callable(mp.get_limiters)
     assert hasattr(mp, "isotope_standards")
@@ -74,7 +74,7 @@ def test_diagenetic_model_setup(tmp_path):
     from mantis.diff_lib import save_data
     df, _ = save_data(mp, c, k, species_transport, z, D_mol, rxn_fn)
     assert "d34S_SO4" in df.columns
-    assert "d34S_TS2" in df.columns
+    assert "d34S_H2S_tot" in df.columns
     assert "d34S_FeS" in df.columns
 
 
@@ -453,13 +453,13 @@ def test_missing_ph_warning_only_when_reactions_require_ph(tmp_path, capsys):
     with open(tmp_species, "w") as f:
         f.write(
             "species = {\n"
-            "    'TS2': {'phase': 'liquid', 'include': True, 'bc_top': {'Dirichlet': 0.0}},\n"
+            "    'H2S_tot': {'phase': 'liquid', 'include': True, 'bc_top': {'Dirichlet': 0.0}},\n"
             "    'HS': {'phase': 'liquid', 'include': False},\n"
             "}\n"
             "speciation = {\n"
             "    'sulfide_acid_base': {\n"
             "        'type': 'acid_base',\n"
-            "        'primary': 'TS2',\n"
+            "        'primary': 'H2S_tot',\n"
             "        'species': {\n"
             "            'HS': {'phase': 'liquid', 'fraction': 'Ka1 / (Hplus + Ka1)'},\n"
             "        },\n"
@@ -468,7 +468,7 @@ def test_missing_ph_warning_only_when_reactions_require_ph(tmp_path, capsys):
         )
     with open(tmp_reactions, "w") as f:
         f.write(
-            "reactions = [{'reaction_name': 'r1', 'reaction': '1 HS -> 1 TS2', 'k_value_name': 'k1'}]\n"
+            "reactions = [{'reaction_name': 'r1', 'reaction': '1 HS -> 1 H2S_tot', 'k_value_name': 'k1'}]\n"
         )
     with open(tmp_constants, "w") as f:
         f.write(

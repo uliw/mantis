@@ -53,14 +53,14 @@ def get_reaction_constants(
             "m^3/(mol*second)",
             "m^3/(mol*second)",
         ],  # FeS + HS -> FeS2
-        "FeS_TS2": [
+        "FeS_H2S_tot": [
             5e-8,
             "m^3/(mol*second)",
             "m^3/(mol*second)",
         ],  # FeS + H2S -> FeS2, at 10C -> notes.org
         "Hplus": [10 ** (-pH), "mol/l", "mol/m^3"],
         # Oxidation reactions after Velde at eal 2016
-        "TS2_O2": [1e7, "cm^3/(umol*year)", "m^3/(mol*second)"],
+        "H2S_tot_O2": [1e7, "cm^3/(umol*year)", "m^3/(mol*second)"],
         "Fe3_hs": [
             494,
             "cm^3/(umol*year)",
@@ -86,19 +86,19 @@ def get_reaction_constants(
         "S0_dispro": [50, "1/year", "1/second"],
         # Monod half-saturation & inhibition thresholds
         "K_O2": [0.001, "umol/cm^3", "mol/m^3"],
-        "K_O2_TS2": [0.001, "umol/cm^3", "mol/m^3"],
+        "K_O2_H2S_tot": [0.001, "umol/cm^3", "mol/m^3"],
         "K_SO4": [0.9, "umol/cm^3", "mol/m^3"],
         "K_Fe3_diss_red": [10.4, "umol/cm^3", "mol/m^3"],
         "K_Fe3": [1e-3, "dimensionless", "dimensionless"],
         # Isotope fractionation factors & transition thresholds
         "msr_alpha": [1.07, "dimensionless", "dimensionless"],
-        "TS2_O2_alpha": [0.995, "dimensionless", "dimensionless"],
+        "H2S_tot_O2_alpha": [0.995, "dimensionless", "dimensionless"],
         "S0_O2_alpha": [1.0, "dimensionless", "dimensionless"],
         "dispro_hs_alpha": [0.993, "dimensionless", "dimensionless"],
         "dispro_SO4_hs_split": [3.0, "dimensionless", "dimensionless"],
         "h2s_hs_alpha": [0.99991542, "dimensionless", "dimensionless"],
         "K_SO4_alpha": [1e-3, "umol/cm^3", "mol/m^3"],
-        "K_TS2_alpha": [1e-3, "umol/cm^3", "mol/m^3"],
+        "K_H2S_tot_alpha": [1e-3, "umol/cm^3", "mol/m^3"],
         # Primary respiration stoichiometry
         "POC_O2_ratio": [1.27, "dimensionless", "dimensionless"],
         # Carbonate system constants

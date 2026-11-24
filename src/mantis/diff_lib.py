@@ -377,7 +377,7 @@ def is_solid_species(species_name: str, mp: Any = None) -> bool:
 
     # 3. Known convention fallback
     known_solids = {"FeS", "FeS2", "S0", "Fe3", "POC", "POC_fast", "POC_slow"}
-    known_liquids = {"SO4", "TS2", "h2s", "hs", "H2S", "HS", "Fe2_total", "O2"}
+    known_liquids = {"SO4", "H2S_tot", "h2s", "hs", "H2S", "HS", "Fe2_total", "O2"}
 
     if base_name in known_solids:
         return True
@@ -396,7 +396,7 @@ def get_species_delta_threshold(
 
     Precedence:
 
-    1. Species-specific parameter: <speciesname>_delta_threshold (e.g. TS2_delta_threshold).
+    1. Species-specific parameter: <speciesname>_delta_threshold (e.g. H2S_tot_delta_threshold).
     2. Phase-specific override: mp.delta_threshold_solid or mp.delta_threshold_liquid.
     3. Defaults: Liquids 0.001 mmol/L; solids bulk-equivalent concentration.
     """
@@ -1613,7 +1613,7 @@ def check_reactant_coexistence(
         Mapping of species names (or variable objects) to concentration arrays.
     reaction_pairs : list of dict, optional
         Custom list of reaction definitions to check. If None, default diagenetic
-        redox/precipitation pairs are checked (TS2+O2, fe2+O2, fe2+TS2, Fe3+TS2, CH4+SO4).
+        redox/precipitation pairs are checked (H2S_tot+O2, fe2+O2, fe2+H2S_tot, Fe3+H2S_tot, CH4+SO4).
         Each dict can specify: 'name', 'sp_A', 'sp_B', 'k', 'k_key', 'D_eff'.
     k : object or dict, optional
         Reaction constants container or dictionary.
@@ -1661,8 +1661,8 @@ def check_reactant_coexistence(
     # 2. Helper to extract species concentration array with aliases
     def _get_species_array(name: str):
         candidates = [name, f"c_{name}", name.lower(), name.upper()]
-        if name in ("TS2", "h2s", "c_h2s", "c_TS2"):
-            candidates += ["TS2", "c_TS2", "h2s", "c_h2s", "HS", "H2S"]
+        if name in ("H2S_tot", "h2s", "c_h2s", "c_H2S_tot"):
+            candidates += ["H2S_tot", "c_H2S_tot", "h2s", "c_h2s", "HS", "H2S"]
         elif name in ("fe2", "Fe2", "fe2_total", "Fe2_total", "Fe2_liq"):
             candidates += ["fe2", "c_fe2", "Fe2", "fe2_total", "Fe2_total", "Fe2_liq"]
         elif name in ("Fe3", "c_Fe3"):
@@ -1690,9 +1690,9 @@ def check_reactant_coexistence(
         reaction_pairs = [
             {
                 "name": "Sulfide Oxidation by O2",
-                "sp_A": "TS2",
+                "sp_A": "H2S_tot",
                 "sp_B": "O2",
-                "k_key": "TS2_O2",
+                "k_key": "H2S_tot_O2",
             },
             {
                 "name": "Fe2 Oxidation by O2",
@@ -1701,16 +1701,16 @@ def check_reactant_coexistence(
                 "k_key": "fe2_O2",
             },
             {
-                "name": "FeS Precipitation (Fe2 + TS2)",
+                "name": "FeS Precipitation (Fe2 + H2S_tot)",
                 "sp_A": "fe2",
-                "sp_B": "TS2",
+                "sp_B": "H2S_tot",
                 "k_key": "fe2_h2s",
             },
             {
-                "name": "Iron Reduction by Sulfide (Fe3 + TS2)",
+                "name": "Iron Reduction by Sulfide (Fe3 + H2S_tot)",
                 "sp_A": "Fe3",
-                "sp_B": "TS2",
-                "k_key": "Fe3_TS2",
+                "sp_B": "H2S_tot",
+                "k_key": "Fe3_H2S_tot",
             },
             {
                 "name": "Methane Oxidation by SO4 (SMTZ)",
@@ -1759,10 +1759,10 @@ def check_reactant_coexistence(
             k_candidates = [k_key] if k_key else []
             if k_key == "fe2_O2":
                 k_candidates += ["Fe2_O2", "fe2_O2"]
-            elif k_key == "Fe3_TS2":
-                k_candidates += ["Fe3_hs", "Fe3_TS2", "Fe3_h2s"]
+            elif k_key == "Fe3_H2S_tot":
+                k_candidates += ["Fe3_hs", "Fe3_H2S_tot", "Fe3_h2s"]
             elif k_key == "fe2_h2s":
-                k_candidates += ["FeS_isp", "fe2_h2s", "FeS_TS2"]
+                k_candidates += ["FeS_isp", "fe2_h2s", "FeS_H2S_tot"]
 
             for cand in k_candidates:
                 if hasattr(k, cand):
@@ -1784,8 +1784,8 @@ def check_reactant_coexistence(
             ]
             if sp_a in ("fe2", "Fe2") or sp_b in ("fe2", "Fe2"):
                 cand_list += ["Fe2_total", "fe2_total", "Fe2", "fe2"]
-            if sp_a in ("TS2", "h2s") or sp_b in ("TS2", "h2s"):
-                cand_list += ["TS2", "h2s"]
+            if sp_a in ("H2S_tot", "h2s") or sp_b in ("H2S_tot", "h2s"):
+                cand_list += ["H2S_tot", "h2s"]
 
             for sp_cand in cand_list:
                 if hasattr(D_mol, sp_cand):
@@ -2319,7 +2319,7 @@ def make_grid2(
 def get_total_delta(
     c: Any,
     mp: Any,
-    species: str | Sequence[str] | int | np.integer | None = "SO4, TS2, FeS",
+    species: str | Sequence[str] | int | np.integer | None = "SO4, H2S_tot, FeS",
     isotope_standard: str | float | None = None,
     index: int | None = -1,
     isotope_standart: str | float | None = None,
@@ -2346,7 +2346,7 @@ def get_total_delta(
         Model parameters object containing phi, species definitions, and isotope standards.
     species : str, Sequence[str], or None, optional
         Comma-separated string or sequence of species names to include in the summation
-        (e.g., "SO4, TS2, FeS" or ["SO4", "TS2", "FeS"]). Defaults to "SO4, TS2, FeS".
+        (e.g., "SO4, H2S_tot, FeS" or ["SO4", "H2S_tot", "FeS"]). Defaults to "SO4, H2S_tot, FeS".
     isotope_standard : str or float, optional
         Isotope standard identifier (e.g., "S", "VCDT") to look up in mp.isotope_standards / mp,
         or direct numeric reference ratio (e.g., 0.044162589).
@@ -2367,7 +2367,7 @@ def get_total_delta(
     # Backward compatibility: if an int or index-like object was passed as 3rd positional argument
     if isinstance(species, (int, np.integer)) and not isinstance(species, bool):
         index = int(species)
-        species = "SO4, TS2, FeS"
+        species = "SO4, H2S_tot, FeS"
 
     # Resolve isotope reference ratio argument
     std_arg = isotope_standart if isotope_standart is not None else isotope_standard
@@ -2413,9 +2413,9 @@ def get_total_delta(
         )
 
     # Parse species list
-    is_default_species = species is None or species == "SO4, TS2, FeS"
+    is_default_species = species is None or species == "SO4, H2S_tot, FeS"
     if species is None:
-        species_list = ["SO4", "TS2", "FeS"]
+        species_list = ["SO4", "H2S_tot", "FeS"]
     elif isinstance(species, str):
         species_list = [s.strip() for s in species.replace(",", " ").split() if s.strip()]
     elif isinstance(species, (list, tuple, set)):
@@ -3471,12 +3471,12 @@ def compute_carbonate_speciation(c: Any, mp: Any) -> None:
             h_plus = np.clip(H_cur * np.exp(delta_ln), 1e-13, 1e-3)
             ta_carb = np.maximum(ta_val - ta_non_carb, 1e-12)
     else:
-        # Fallback for models without explicit include_in_TA if TS2 is present
+        # Fallback for models without explicit include_in_TA if H2S_tot is present
         Ka1_H2S = 10.0 ** (-float(getattr(mp, "pKa1_H2S", 7.0)))
-        ts2_raw = getattr(c, "TS2", None)
-        if ts2_raw is not None:
-            ts2_val = _get_val_arr(ts2_raw)
-            if np.any(ts2_val > 1e-12):
+        H2S_tot_raw = getattr(c, "H2S_tot", None)
+        if H2S_tot_raw is not None:
+            H2S_tot_val = _get_val_arr(H2S_tot_raw)
+            if np.any(H2S_tot_val > 1e-12):
                 ln_h = np.log(np.clip(h_plus, 1e-13, 1e-3))
                 for _ in range(10):
                     H_cur = np.exp(ln_h)
@@ -3487,15 +3487,15 @@ def compute_carbonate_speciation(c: Any, mp: Any) -> None:
                     ddenom_c = (2.0 * H_cur + K1) * H_cur
                     dta_c = (dnum_c * denom_c - num_c * ddenom_c) / (denom_c**2)
                     hs_denom = H_cur + Ka1_H2S
-                    hs_val = ts2_val * Ka1_H2S / hs_denom
-                    dhs = - (ts2_val * Ka1_H2S * H_cur) / (hs_denom**2)
+                    hs_val = H2S_tot_val * Ka1_H2S / hs_denom
+                    dhs = - (H2S_tot_val * Ka1_H2S * H_cur) / (hs_denom**2)
                     f_val = ta_c + hs_val - ta_val
                     df_val = dta_c + dhs
                     delta_ln = - f_val / np.minimum(df_val, -1e-15)
                     delta_ln = np.clip(delta_ln, -2.0, 2.0)
                     ln_h = ln_h + delta_ln
                 h_plus = np.exp(ln_h)
-                hs_alk = ts2_val * (Ka1_H2S / (h_plus + Ka1_H2S))
+                hs_alk = H2S_tot_val * (Ka1_H2S / (h_plus + Ka1_H2S))
                 ta_carb = np.maximum(ta_val - hs_alk, 1e-12)
                 ta_non_carb = hs_alk
 
@@ -3537,9 +3537,9 @@ def compute_carbonate_speciation(c: Any, mp: Any) -> None:
             beta_SO4 = float(getattr(mp, "beta_SO4", 0.00912))
             KFe_ads = float(getattr(mp, "KFe_ads", 0.001))
 
-            ts2_raw = getattr(c, "TS2", 0.0)
-            ts2_val = np.asarray(getattr(ts2_raw, "value", ts2_raw) if ts2_raw is not None else 0.0, dtype=np.float64)
-            hs_pw = ts2_val * c.hs_frac
+            H2S_tot_raw = getattr(c, "H2S_tot", 0.0)
+            H2S_tot_val = np.asarray(getattr(H2S_tot_raw, "value", H2S_tot_raw) if H2S_tot_raw is not None else 0.0, dtype=np.float64)
+            hs_pw = H2S_tot_val * c.hs_frac
 
             so4_raw = getattr(c, "SO4", 0.0)
             so4_val = np.asarray(getattr(so4_raw, "value", so4_raw) if so4_raw is not None else 0.0, dtype=np.float64)
@@ -3684,7 +3684,7 @@ def update_all_species(c: Any, mp: Any) -> None:
                             elif hasattr(target, "__setitem__"):
                                 target[:] = top_val
 
-    # 3. Update equilibrium isotope speciation companions (e.g. HS_S32, H2S_S32 from TS2_S32)
+    # 3. Update equilibrium isotope speciation companions (e.g. HS_S32, H2S_S32 from H2S_tot_S32)
     speciation_defs = getattr(mp, "speciation", {})
     if getattr(mp, "isotopes", False) and isinstance(speciation_defs, dict):
         for sys_name, sys_cfg in speciation_defs.items():

@@ -34,7 +34,7 @@ species_mapping = {
     "z": ["depth_cm", "cm", "m"],
     "SO4": ["SO4_mM", "mmol/L", "mmol/L"],
     "Ca2": ["Ca_mM", "mmol/L", "mmol/L"],
-    "TS2": ["H2S_mM", "mmol/L", "mmol/L"],
+    "H2S_tot": ["H2S_mM", "mmol/L", "mmol/L"],
     "TA": ["TA_mM", "mmol/L", "mmol/L"],
     "TPO4": ["PO4_uM", "umol/L", "umol/L"],
     "TNH4": ["NH4_uM", "umol/L", "umol/L"],
@@ -49,7 +49,7 @@ colormap_override = {
     "CH4": {"color": "#ff7f0e", "lw": 2},
     "Ca2": {"color": "#2ca02c", "lw": 2},
     "TA": {"color": "#9467bd", "lw": 2},
-    "TS2": {"color": "#8c564b", "lw": 2},
+    "H2S_tot": {"color": "#8c564b", "lw": 2},
     "TPO4": {"color": "#d62728", "lw": 2},
     "TNH4": {"color": "#17becf", "lw": 2},
     "CaCO3": {"color": "#800080", "lw": 2.5},
@@ -69,10 +69,10 @@ panel_major_solutes = liquid_species({
     "position": "left",
 })
 
-# Panel 2: Carbonate alkalinity and sulfide (TA, TS2)
-panel_ta_ts2 = liquid_species({
+# Panel 2: Carbonate alkalinity and sulfide (TA, H2S_tot)
+panel_ta_H2S_tot = liquid_species({
     "scale": "lin",
-    "species": ["TA", "TS2"],
+    "species": ["TA", "H2S_tot"],
     "lim": (0, 35),
     "units": "mmol/l",
     "position": "left",
@@ -117,7 +117,7 @@ panel_carbonates = solid_species([
 # ---- 5. Multi-panel Layout ---- #
 plot_panels = [
     [panel_major_solutes],
-    [panel_ta_ts2],
+    [panel_ta_H2S_tot],
     [panel_nutrients_po4, panel_nutrients_nh4],
     panel_carbonates,
 ]

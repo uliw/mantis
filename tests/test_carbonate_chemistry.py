@@ -140,21 +140,21 @@ def test_compute_carbonate_speciation_with_include_in_ta():
     compute_carbonate_speciation(c1, mp1)
     ph_base = float(c1.pH[0])
 
-    # 2. Case with TS2 and declarative include_in_TA: 1.0 on HS
+    # 2. Case with H2S_tot and declarative include_in_TA: 1.0 on HS
     c2 = Container()
     c2.TA = np.array([2.4])
     c2.DIC = np.array([2.2])
-    c2.TS2 = np.array([1.0])  # 1.0 mM sulfide
+    c2.H2S_tot = np.array([1.0])  # 1.0 mM sulfide
     mp2 = Params()
     mp2.is_carbonate = True
     mp2.K1_carb = 10.0 ** (-6.0)
     mp2.K2_carb = 10.0 ** (-9.0)
     mp2.species_defs = {
-        "TS2": {"phase": "liquid", "include": True},
+        "H2S_tot": {"phase": "liquid", "include": True},
         "HS": {
             "phase": "liquid",
             "include": False,
-            "equilibrium_of": "TS2",
+            "equilibrium_of": "H2S_tot",
             "fraction": "Ka1 / (Hplus + Ka1)",
             "constants": {"pKa1": 7.0},
             "include_in_TA": 1.0,

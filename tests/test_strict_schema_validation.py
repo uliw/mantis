@@ -191,7 +191,7 @@ def test_canonical_synthesis_and_bc_derivation():
 def test_validate_and_normalize_speciation_explicit():
     """Verify explicit declarative speciation block validation."""
     species = {
-        "TS2": {"phase": "liquid", "include": True, "bc_top": {"Dirichlet": 0.0}},
+        "H2S_tot": {"phase": "liquid", "include": True, "bc_top": {"Dirichlet": 0.0}},
         "Fe2_total": {"phase": "mixed", "include": True, "bc_top": {"Dirichlet": 0.0}},
     }
     raw_speciation = {
@@ -202,7 +202,7 @@ def test_validate_and_normalize_speciation_explicit():
         },
         "sulfide": {
             "type": "acid_base",
-            "primary": "TS2",
+            "primary": "H2S_tot",
             "species": {
                 "HS": {"fraction": "Ka1 / (Hplus + Ka1)", "include_in_TA": 1.0},
                 "H2S": {"fraction": "Hplus / (Hplus + Ka1)"},
@@ -242,11 +242,11 @@ def test_legacy_speciation_keys_rejected(capsys):
     """Verify that legacy speciation keys in species dictionary cause an immediate error."""
     from mantis.species_parser import parse_and_validate_species_dict
     species = {
-        "TS2": {"phase": "liquid", "include": True, "bc_top": {"Dirichlet": 0.0}},
+        "H2S_tot": {"phase": "liquid", "include": True, "bc_top": {"Dirichlet": 0.0}},
         "HS": {
             "phase": "liquid",
             "include": False,
-            "equilibrium_of": "TS2",
+            "equilibrium_of": "H2S_tot",
             "bc_top": {"Dirichlet": 0.0},
         },
     }
@@ -259,7 +259,7 @@ def test_legacy_speciation_keys_rejected(capsys):
 
 def test_invalid_speciation_type_fails(capsys):
     """Verify invalid speciation type causes an immediate exit with informative error."""
-    species = {"TS2": {"phase": "liquid", "include": True, "bc_top": {"Dirichlet": 0.0}}}
+    species = {"H2S_tot": {"phase": "liquid", "include": True, "bc_top": {"Dirichlet": 0.0}}}
     invalid_spec = {
         "bad_system": {
             "type": "quantum_field",

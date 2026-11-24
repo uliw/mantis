@@ -61,7 +61,7 @@ def get_limiters(c, mp):
 # -----------------------------------------------------------------------------
 
 def rxn_AOM(c, k_val, lim, LHS, RHS, RATES, CROSS, mp):
-    """Reaction: CH4 + SO4 -> DIC + 2 TA + TS2"""
+    """Reaction: CH4 + SO4 -> DIC + 2 TA + H2S_tot"""
     has_solid = False
     k_num = mp.k.get("k_AOM") if hasattr(mp, "k") else getattr(k_val, "k_AOM", 0.0)
     coeff_master = k_num * getattr(c, "SO4")
@@ -70,7 +70,7 @@ def rxn_AOM(c, k_val, lim, LHS, RHS, RATES, CROSS, mp):
         CROSS=CROSS, LHS=LHS, RATES=RATES, mp=mp,
         master_species={"CH4": 1.0},
         reactants={"SO4": 1.0},
-        products={'DIC': 1.0, 'TA': 2.0, 'TS2': 1.0},
+        products={'DIC': 1.0, 'TA': 2.0, 'H2S_tot': 1.0},
         coeff_master=coeff_master, rate_master=rate_master,
         has_solid=has_solid, reaction_name="AOM",
         ref_species="CH4", stoich_ref=1.0,
@@ -78,7 +78,7 @@ def rxn_AOM(c, k_val, lim, LHS, RHS, RATES, CROSS, mp):
 AOM = rxn_AOM
 
 def rxn_POC_fast_sulfate_reduction(c, k_val, lim, LHS, RHS, RATES, CROSS, mp):
-    """Reaction: 2 POC_fast + SO4 -> 2 DIC + 2 TA + TS2 + 0.302 TNH4 + 0.0188 TPO4"""
+    """Reaction: 2 POC_fast + SO4 -> 2 DIC + 2 TA + H2S_tot + 0.302 TNH4 + 0.0188 TPO4"""
     has_solid = True
     k_num = mp.k.get("POC_fast") if hasattr(mp, "k") else getattr(k_val, "POC_fast", 0.0)
     _lim_SO4 = lim.get("SO4_implicit", lim.get("SO4", 1.0))
@@ -88,7 +88,7 @@ def rxn_POC_fast_sulfate_reduction(c, k_val, lim, LHS, RHS, RATES, CROSS, mp):
         CROSS=CROSS, LHS=LHS, RATES=RATES, mp=mp,
         master_species={"POC_fast": 2.0},
         reactants={"SO4": 1.0},
-        products={'DIC': 2.0, 'TA': 2.0, 'TS2': 1.0, 'TNH4': 0.302, 'TPO4': 0.0188},
+        products={'DIC': 2.0, 'TA': 2.0, 'H2S_tot': 1.0, 'TNH4': 0.302, 'TPO4': 0.0188},
         coeff_master=coeff_master, rate_master=rate_master,
         has_solid=has_solid, reaction_name="POC_fast_sulfate_reduction",
         ref_species="POC_fast", stoich_ref=2.0,
@@ -96,7 +96,7 @@ def rxn_POC_fast_sulfate_reduction(c, k_val, lim, LHS, RHS, RATES, CROSS, mp):
 POC_fast_sulfate_reduction = rxn_POC_fast_sulfate_reduction
 
 def rxn_POC_slow_sulfate_reduction(c, k_val, lim, LHS, RHS, RATES, CROSS, mp):
-    """Reaction: 2 POC_slow + SO4 -> 2 DIC + 2 TA + TS2 + 0.302 TNH4 + 0.0188 TPO4"""
+    """Reaction: 2 POC_slow + SO4 -> 2 DIC + 2 TA + H2S_tot + 0.302 TNH4 + 0.0188 TPO4"""
     has_solid = True
     k_num = mp.k.get("POC_slow") if hasattr(mp, "k") else getattr(k_val, "POC_slow", 0.0)
     _lim_SO4 = lim.get("SO4_implicit", lim.get("SO4", 1.0))
@@ -106,7 +106,7 @@ def rxn_POC_slow_sulfate_reduction(c, k_val, lim, LHS, RHS, RATES, CROSS, mp):
         CROSS=CROSS, LHS=LHS, RATES=RATES, mp=mp,
         master_species={"POC_slow": 2.0},
         reactants={"SO4": 1.0},
-        products={'DIC': 2.0, 'TA': 2.0, 'TS2': 1.0, 'TNH4': 0.302, 'TPO4': 0.0188},
+        products={'DIC': 2.0, 'TA': 2.0, 'H2S_tot': 1.0, 'TNH4': 0.302, 'TPO4': 0.0188},
         coeff_master=coeff_master, rate_master=rate_master,
         has_solid=has_solid, reaction_name="POC_slow_sulfate_reduction",
         ref_species="POC_slow", stoich_ref=2.0,
@@ -329,46 +329,46 @@ def compute_chemical_jacobian(c, mp, k, species_names):
         _dco3_dta = - (_dic_val * _K1 * _K2 / _denom**2) * _dD_dh * _dh_dta
         _dco3_ddic = (_K1 * _K2 / _denom) - (_dic_val * _K1 * _K2 / _denom**2) * _dD_dh * _dh_ddic
 
-    # Reaction: AOM (CH4 + SO4 -> DIC + 2 TA + TS2)
-    if "CH4" in idx and "DIC" in idx and "SO4" in idx and "TA" in idx and "TS2" in idx:
+    # Reaction: AOM (CH4 + SO4 -> DIC + 2 TA + H2S_tot)
+    if "CH4" in idx and "DIC" in idx and "H2S_tot" in idx and "SO4" in idx and "TA" in idx:
         _raw_k_AOM = mp.k.get("k_AOM") if hasattr(mp, "k") else getattr(k, "k_AOM", 0.0)
         k_num_AOM = np.asarray(_raw_k_AOM, dtype=np.float64) if np.ndim(_raw_k_AOM) > 0 else float(_raw_k_AOM)
         c_CH4 = np.asarray(c["CH4"].value if hasattr(c["CH4"], "value") else c["CH4"])
         c_DIC = np.asarray(c["DIC"].value if hasattr(c["DIC"], "value") else c["DIC"])
+        c_H2S_tot = np.asarray(c["H2S_tot"].value if hasattr(c["H2S_tot"], "value") else c["H2S_tot"])
         c_SO4 = np.asarray(c["SO4"].value if hasattr(c["SO4"], "value") else c["SO4"])
         c_TA = np.asarray(c["TA"].value if hasattr(c["TA"], "value") else c["TA"])
-        c_TS2 = np.asarray(c["TS2"].value if hasattr(c["TS2"], "value") else c["TS2"])
         d_CH4_AOM = diss_fac * (k_num_AOM / 1.0) * c_SO4
         J[:, idx["CH4"], idx["CH4"]] -= 1.0 * d_CH4_AOM
         J[:, idx["SO4"], idx["CH4"]] -= 1.0 * d_CH4_AOM
         J[:, idx["DIC"], idx["CH4"]] += 1.0 * d_CH4_AOM
         J[:, idx["TA"], idx["CH4"]] += 2.0 * d_CH4_AOM
-        J[:, idx["TS2"], idx["CH4"]] += 1.0 * d_CH4_AOM
+        J[:, idx["H2S_tot"], idx["CH4"]] += 1.0 * d_CH4_AOM
         d_SO4_AOM = diss_fac * (k_num_AOM / 1.0) * c_CH4
         J[:, idx["CH4"], idx["SO4"]] -= 1.0 * d_SO4_AOM
         J[:, idx["SO4"], idx["SO4"]] -= 1.0 * d_SO4_AOM
         J[:, idx["DIC"], idx["SO4"]] += 1.0 * d_SO4_AOM
         J[:, idx["TA"], idx["SO4"]] += 2.0 * d_SO4_AOM
-        J[:, idx["TS2"], idx["SO4"]] += 1.0 * d_SO4_AOM
+        J[:, idx["H2S_tot"], idx["SO4"]] += 1.0 * d_SO4_AOM
 
-    # Reaction: POC_fast_sulfate_reduction (2 POC_fast + SO4 -> 2 DIC + 2 TA + TS2 + 0.302 TNH4 + 0.0188 TPO4)
-    if "DIC" in idx and "POC_fast" in idx and "SO4" in idx and "TA" in idx and "TNH4" in idx and "TPO4" in idx and "TS2" in idx:
+    # Reaction: POC_fast_sulfate_reduction (2 POC_fast + SO4 -> 2 DIC + 2 TA + H2S_tot + 0.302 TNH4 + 0.0188 TPO4)
+    if "DIC" in idx and "H2S_tot" in idx and "POC_fast" in idx and "SO4" in idx and "TA" in idx and "TNH4" in idx and "TPO4" in idx:
         _raw_k_POC_fast_sulfate_reduction = mp.k.get("POC_fast") if hasattr(mp, "k") else getattr(k, "POC_fast", 0.0)
         k_num_POC_fast_sulfate_reduction = np.asarray(_raw_k_POC_fast_sulfate_reduction, dtype=np.float64) if np.ndim(_raw_k_POC_fast_sulfate_reduction) > 0 else float(_raw_k_POC_fast_sulfate_reduction)
         c_DIC = np.asarray(c["DIC"].value if hasattr(c["DIC"], "value") else c["DIC"])
+        c_H2S_tot = np.asarray(c["H2S_tot"].value if hasattr(c["H2S_tot"], "value") else c["H2S_tot"])
         c_POC_fast = np.asarray(c["POC_fast"].value if hasattr(c["POC_fast"], "value") else c["POC_fast"])
         c_SO4 = np.asarray(c["SO4"].value if hasattr(c["SO4"], "value") else c["SO4"])
         c_TA = np.asarray(c["TA"].value if hasattr(c["TA"], "value") else c["TA"])
         c_TNH4 = np.asarray(c["TNH4"].value if hasattr(c["TNH4"], "value") else c["TNH4"])
         c_TPO4 = np.asarray(c["TPO4"].value if hasattr(c["TPO4"], "value") else c["TPO4"])
-        c_TS2 = np.asarray(c["TS2"].value if hasattr(c["TS2"], "value") else c["TS2"])
         _lim_SO4 = lim.get("SO4_implicit", lim.get("SO4", 1.0))
         d_POC_fast_POC_fast_sulfate_reduction = solid_fac * (k_num_POC_fast_sulfate_reduction / 2.0) * c_SO4 * _lim_SO4
         J[:, idx["POC_fast"], idx["POC_fast"]] -= 2.0 * d_POC_fast_POC_fast_sulfate_reduction
         J[:, idx["SO4"], idx["POC_fast"]] -= 1.0 * d_POC_fast_POC_fast_sulfate_reduction
         J[:, idx["DIC"], idx["POC_fast"]] += 2.0 * d_POC_fast_POC_fast_sulfate_reduction
         J[:, idx["TA"], idx["POC_fast"]] += 2.0 * d_POC_fast_POC_fast_sulfate_reduction
-        J[:, idx["TS2"], idx["POC_fast"]] += 1.0 * d_POC_fast_POC_fast_sulfate_reduction
+        J[:, idx["H2S_tot"], idx["POC_fast"]] += 1.0 * d_POC_fast_POC_fast_sulfate_reduction
         J[:, idx["TNH4"], idx["POC_fast"]] += 0.302 * d_POC_fast_POC_fast_sulfate_reduction
         J[:, idx["TPO4"], idx["POC_fast"]] += 0.0188 * d_POC_fast_POC_fast_sulfate_reduction
         d_SO4_POC_fast_sulfate_reduction = solid_fac * (k_num_POC_fast_sulfate_reduction / 2.0) * c_POC_fast * _lim_SO4
@@ -376,28 +376,28 @@ def compute_chemical_jacobian(c, mp, k, species_names):
         J[:, idx["SO4"], idx["SO4"]] -= 1.0 * d_SO4_POC_fast_sulfate_reduction
         J[:, idx["DIC"], idx["SO4"]] += 2.0 * d_SO4_POC_fast_sulfate_reduction
         J[:, idx["TA"], idx["SO4"]] += 2.0 * d_SO4_POC_fast_sulfate_reduction
-        J[:, idx["TS2"], idx["SO4"]] += 1.0 * d_SO4_POC_fast_sulfate_reduction
+        J[:, idx["H2S_tot"], idx["SO4"]] += 1.0 * d_SO4_POC_fast_sulfate_reduction
         J[:, idx["TNH4"], idx["SO4"]] += 0.302 * d_SO4_POC_fast_sulfate_reduction
         J[:, idx["TPO4"], idx["SO4"]] += 0.0188 * d_SO4_POC_fast_sulfate_reduction
 
-    # Reaction: POC_slow_sulfate_reduction (2 POC_slow + SO4 -> 2 DIC + 2 TA + TS2 + 0.302 TNH4 + 0.0188 TPO4)
-    if "DIC" in idx and "POC_slow" in idx and "SO4" in idx and "TA" in idx and "TNH4" in idx and "TPO4" in idx and "TS2" in idx:
+    # Reaction: POC_slow_sulfate_reduction (2 POC_slow + SO4 -> 2 DIC + 2 TA + H2S_tot + 0.302 TNH4 + 0.0188 TPO4)
+    if "DIC" in idx and "H2S_tot" in idx and "POC_slow" in idx and "SO4" in idx and "TA" in idx and "TNH4" in idx and "TPO4" in idx:
         _raw_k_POC_slow_sulfate_reduction = mp.k.get("POC_slow") if hasattr(mp, "k") else getattr(k, "POC_slow", 0.0)
         k_num_POC_slow_sulfate_reduction = np.asarray(_raw_k_POC_slow_sulfate_reduction, dtype=np.float64) if np.ndim(_raw_k_POC_slow_sulfate_reduction) > 0 else float(_raw_k_POC_slow_sulfate_reduction)
         c_DIC = np.asarray(c["DIC"].value if hasattr(c["DIC"], "value") else c["DIC"])
+        c_H2S_tot = np.asarray(c["H2S_tot"].value if hasattr(c["H2S_tot"], "value") else c["H2S_tot"])
         c_POC_slow = np.asarray(c["POC_slow"].value if hasattr(c["POC_slow"], "value") else c["POC_slow"])
         c_SO4 = np.asarray(c["SO4"].value if hasattr(c["SO4"], "value") else c["SO4"])
         c_TA = np.asarray(c["TA"].value if hasattr(c["TA"], "value") else c["TA"])
         c_TNH4 = np.asarray(c["TNH4"].value if hasattr(c["TNH4"], "value") else c["TNH4"])
         c_TPO4 = np.asarray(c["TPO4"].value if hasattr(c["TPO4"], "value") else c["TPO4"])
-        c_TS2 = np.asarray(c["TS2"].value if hasattr(c["TS2"], "value") else c["TS2"])
         _lim_SO4 = lim.get("SO4_implicit", lim.get("SO4", 1.0))
         d_POC_slow_POC_slow_sulfate_reduction = solid_fac * (k_num_POC_slow_sulfate_reduction / 2.0) * c_SO4 * _lim_SO4
         J[:, idx["POC_slow"], idx["POC_slow"]] -= 2.0 * d_POC_slow_POC_slow_sulfate_reduction
         J[:, idx["SO4"], idx["POC_slow"]] -= 1.0 * d_POC_slow_POC_slow_sulfate_reduction
         J[:, idx["DIC"], idx["POC_slow"]] += 2.0 * d_POC_slow_POC_slow_sulfate_reduction
         J[:, idx["TA"], idx["POC_slow"]] += 2.0 * d_POC_slow_POC_slow_sulfate_reduction
-        J[:, idx["TS2"], idx["POC_slow"]] += 1.0 * d_POC_slow_POC_slow_sulfate_reduction
+        J[:, idx["H2S_tot"], idx["POC_slow"]] += 1.0 * d_POC_slow_POC_slow_sulfate_reduction
         J[:, idx["TNH4"], idx["POC_slow"]] += 0.302 * d_POC_slow_POC_slow_sulfate_reduction
         J[:, idx["TPO4"], idx["POC_slow"]] += 0.0188 * d_POC_slow_POC_slow_sulfate_reduction
         d_SO4_POC_slow_sulfate_reduction = solid_fac * (k_num_POC_slow_sulfate_reduction / 2.0) * c_POC_slow * _lim_SO4
@@ -405,7 +405,7 @@ def compute_chemical_jacobian(c, mp, k, species_names):
         J[:, idx["SO4"], idx["SO4"]] -= 1.0 * d_SO4_POC_slow_sulfate_reduction
         J[:, idx["DIC"], idx["SO4"]] += 2.0 * d_SO4_POC_slow_sulfate_reduction
         J[:, idx["TA"], idx["SO4"]] += 2.0 * d_SO4_POC_slow_sulfate_reduction
-        J[:, idx["TS2"], idx["SO4"]] += 1.0 * d_SO4_POC_slow_sulfate_reduction
+        J[:, idx["H2S_tot"], idx["SO4"]] += 1.0 * d_SO4_POC_slow_sulfate_reduction
         J[:, idx["TNH4"], idx["SO4"]] += 0.302 * d_SO4_POC_slow_sulfate_reduction
         J[:, idx["TPO4"], idx["SO4"]] += 0.0188 * d_SO4_POC_slow_sulfate_reduction
 

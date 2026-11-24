@@ -54,7 +54,7 @@ reactions = [
     # -------------------------------------------------------------------------
     {
         "reaction_name": "sulfate_reduction",
-        "reaction": "2 POC + SO4 -> TS2",
+        "reaction": "2 POC + SO4 -> H2S_tot",
         "k_value_name": "POC",
         "limiters": ["SO4"],
     },

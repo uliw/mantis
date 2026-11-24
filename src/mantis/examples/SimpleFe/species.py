@@ -100,7 +100,7 @@ species = {
         "bc_top": {"Dirichlet": 28, "dbl": "0.05 cm"},
         "prefill": True,
     },
-    "TS2": {
+    "H2S_tot": {
         "phase": "liquid",
         "include": True,
         "formula": "H2S",
@@ -207,11 +207,11 @@ speciation = {
     },
 
     # -------------------------------------------------------------------------
-    # Dissolved Sulfide Acid-Base Speciation (TS2 -> HS- + H2S)
+    # Dissolved Sulfide Acid-Base Speciation (H2S_tot -> HS- + H2S)
     # -------------------------------------------------------------------------
     "sulfide_acid_base": {
         "type": "acid_base",
-        "primary": "TS2",
+        "primary": "H2S_tot",
         "constants": {"pKa1": 6.8912},
         "species": {
             "HS": {

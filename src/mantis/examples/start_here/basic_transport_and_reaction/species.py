@@ -30,7 +30,7 @@ Each key in the `species` dictionary represents a chemical species name:
     * True: Active transport PDE variable solved by FiPy / Newton solver.
     * False: Equilibrium, diagnostic, or fixed external species.
 - formula: Chemical formula string (e.g., 'FeS2', 'SO4', 'CH2O6').
-- equilibrium_of: (Optional) Parent species for fast dynamic speciation (e.g., 'TS2').
+- equilibrium_of: (Optional) Parent species for fast dynamic speciation (e.g., 'H2S_tot').
 - fraction: (Optional) Analytical expression or constant defining the fraction of parent.
 - partition: (Optional for 'mixed') Fractions partitioned into dissolved and sorbed phases.
 - diffusion: (Optional) Recipe for molecular diffusion coefficient calculation:
@@ -78,7 +78,7 @@ species = {
         "bc_top": {"Dirichlet": 28.2},
         "prefill": True,
     },
-    "TS2": {
+    "H2S_tot": {
         "phase": "liquid",
         "include": True,
         "formula": "H2S",

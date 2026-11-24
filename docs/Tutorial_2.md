@@ -114,12 +114,12 @@ limiters = {
 }
 {
         "reaction_name": "sulfate_reduction",
-        "reaction": "2 POC_fast + SO4 -> TS2",
+        "reaction": "2 POC_fast + SO4 -> H2S_tot",
         "k_value_name": "POC_fast",
         "limiters": ["SO4"],
         "inhibitors": ["O2", "Fe3_diss_red"],
         "isotope_fractionation": {
-            "SO4_S32 to TS2_S32": ["msr_alpha", "SO4_alpha"]
+            "SO4_S32 to H2S_tot_S32": ["msr_alpha", "SO4_alpha"]
         },
     },
 ```
@@ -129,18 +129,18 @@ Since a species can have more than one isotope system (e.g., sulfate has sulfur 
 ```jupyter-python
 {
         "reaction_name": "sulfate_reduction_slow",
-        "reaction": "2 POC_slow + SO4 -> TS2 + 2 DIC + 2 TA",
+        "reaction": "2 POC_slow + SO4 -> H2S_tot + 2 DIC + 2 TA",
         "k_value_name": "POC_slow",
         "limiters": ["SO4"],
         "inhibitors": ["O2", "Fe3_diss_red"],
         "isotope_species": {
             "SO4": "SO4_S32",
-            "TS2": "TS2_S32",
+            "H2S_tot": "H2S_tot_S32",
             "POC_slow": "POC_slow_C12",
             "DIC": "DIC_C12",
         },
         "isotope_fractionation": {
-            "SO4_S32 to TS2_S32": ["msr_alpha", "SO4_alpha"]
+            "SO4_S32 to H2S_tot_S32": ["msr_alpha", "SO4_alpha"]
         },
 ```
 
@@ -254,13 +254,13 @@ In reaction equations (in `reactions.py`), you can use the diagnostic species (e
 
 ## Speciation and Equilibrium Isotope Effects
 
-Some species, e.g., H<sub>2</sub>S exist in different forms depending on pH (\ce{H<sub>2</sub>S <-> HS- + H+}), which may also include an equilibrium isotope effect. The below example shows the pH dependent speciation of H<sub>2</sub>S and the associated fractionation. The full code is in the species file in `examples/velde_et_al_2016/with_isotopes/` . Note that in this model, H<sub>2</sub>S is called `TS2`
+Some species, e.g., H<sub>2</sub>S exist in different forms depending on pH (\ce{H<sub>2</sub>S <-> HS- + H+}), which may also include an equilibrium isotope effect. The below example shows the pH dependent speciation of H<sub>2</sub>S and the associated fractionation. The full code is in the species file in `examples/velde_et_al_2016/with_isotopes/` . Note that in this model, H<sub>2</sub>S is called `H2S_tot`
 
 ```jupyter-python
 speciation = {
     "sulfide_acid_base": {
         "type": "acid_base",
-        "primary": "TS2",
+        "primary": "H2S_tot",
         "constants": {"pKa1": 7.0},
         "equilibrium_fractionation": {
             "standard": "d34S",
@@ -341,7 +341,7 @@ For simple minerals like iron monosulfide (\ce{FeS}), Mantis supports the compac
 }
 ```
 
-In that formulation, both reactants (\ce{Fe^2+} and \ce{HS-}) are direct linear fractions of single transport variables (\ce{Fe2_total} and \ce{TS2}), and their product $[\ce{Fe^2+}][\ce{HS-}]$ directly forms the saturation state.
+In that formulation, both reactants (\ce{Fe^2+} and \ce{HS-}) are direct linear fractions of single transport variables (\ce{Fe2_total} and \ce{H2S_tot}), and their product $[\ce{Fe^2+}][\ce{HS-}]$ directly forms the saturation state.
 
 For \ce{CaCO3}, however:
 

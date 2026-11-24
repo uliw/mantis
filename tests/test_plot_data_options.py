@@ -34,7 +34,7 @@ def test_exclude_y_in_options(tmp_path):
         "z": np.linspace(0, 1, 50),
         "c_SO4": np.linspace(20, 25, 50),
         "d_SO4": np.linspace(21, 24, 50),
-        "d_TS2": np.linspace(-45, -42, 50),
+        "d_H2S_tot": np.linspace(-45, -42, 50),
     })
 
     plot_description = {
@@ -42,7 +42,7 @@ def test_exclude_y_in_options(tmp_path):
             "xaxis": [df.z, "Depth [m]"],
             "left": [
                 [df.d_SO4, "SO4", {"color": "C0"}],
-                [df.d_TS2, "TS2", {"color": "C1"}],
+                [df.d_H2S_tot, "H2S_tot", {"color": "C1"}],
             ],
             "options-left": ["set_ylim(-55, 30)", "exclude_y(-4, 20)"],
         }
@@ -114,7 +114,7 @@ def test_broken_axis_options(tmp_path):
     df = pd.DataFrame({
         "z": np.linspace(0, 1, 50),
         "d_SO4": np.linspace(21, 24, 50),
-        "d_TS2": np.linspace(-45, -42, 50),
+        "d_H2S_tot": np.linspace(-45, -42, 50),
     })
 
     # Exact syntax requested by user: ["broken_axis(-45, -35, 20, 30)"]
@@ -123,7 +123,7 @@ def test_broken_axis_options(tmp_path):
             "xaxis": [df.z, "Depth [m]"],
             "left": [
                 [df.d_SO4, "SO4", {}],
-                [df.d_TS2, "TS2", {}],
+                [df.d_H2S_tot, "H2S_tot", {}],
             ],
             "options-left": ["broken_axis(-45, -35, 20, 30)"],
         }
@@ -214,7 +214,7 @@ def test_species_delta_thresholding():
     assert is_solid_species("FeS", mp) is True
     assert is_solid_species("SO4", mp) is False
     assert is_solid_species("FeS2", mp) is True
-    assert is_solid_species("TS2", mp) is False
+    assert is_solid_species("H2S_tot", mp) is False
 
     # Verify default threshold values
     # For liquids: 0.001 mmol/L
@@ -222,10 +222,10 @@ def test_species_delta_thresholding():
     # For solids: 0.001 * phi / (1 - phi) = 0.001 * 0.8 / 0.2 = 0.004 mmol/L
     np.testing.assert_allclose(get_species_delta_threshold("FeS", mp), 0.004)
 
-    # Test species-specific override: e.g. TS2_delta_threshold and FeS_delta_threshold
-    mp.TS2_delta_threshold = 0.0005
-    assert get_species_delta_threshold("TS2", mp) == 0.0005
-    assert get_species_delta_threshold("TS2_32", mp) == 0.0005
+    # Test species-specific override: e.g. H2S_tot_delta_threshold and FeS_delta_threshold
+    mp.H2S_tot_delta_threshold = 0.0005
+    assert get_species_delta_threshold("H2S_tot", mp) == 0.0005
+    assert get_species_delta_threshold("H2S_tot_32", mp) == 0.0005
 
     mp.FeS_delta_threshold = 0.05
     assert get_species_delta_threshold("FeS", mp) == 0.05

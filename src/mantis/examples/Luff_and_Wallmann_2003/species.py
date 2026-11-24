@@ -54,7 +54,7 @@ species = {
         "bc_bot": {"Dirichlet": 68.0},  # Hydrate equilibrium at 78 atm, 4.2 C
         "prefill": False,
     },
-    "TS2": {
+    "H2S_tot": {
         "phase": "liquid",
         "include": True,
         "formula": "H2S",
@@ -199,7 +199,7 @@ speciation = {
     },
     "sulfide_acid_base": {
         "type": "acid_base",
-        "primary": "TS2",
+        "primary": "H2S_tot",
         "constants": {"pKa1": 7.0},
         "species": {
             "HS": {

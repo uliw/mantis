@@ -35,9 +35,9 @@ def test_validator_loading():
 
 def test_parse_reaction_species():
     """Test parsing of reaction strings including charges and multi-digit coefficients."""
-    r, p = ReactionSystemValidator.parse_reaction_species("2 POC_fast + SO4 -> TS2")
+    r, p = ReactionSystemValidator.parse_reaction_species("2 POC_fast + SO4 -> H2S_tot")
     assert r == [(2.0, "POC_fast"), (1.0, "SO4")]
-    assert p == [(1.0, "TS2")]
+    assert p == [(1.0, "H2S_tot")]
 
     r2, p2 = ReactionSystemValidator.parse_reaction_species("4 S0 + 4 H2O -> 3 H2S + SO4 + 2 H+")
     assert r2 == [(4.0, "S0"), (4.0, "H2O")]
@@ -53,10 +53,10 @@ def test_validation_valid_reaction():
     )
     rxn = {
         "reaction_name": "sulfate_reduction_fast",
-        "reaction": "2 POC_fast + SO4 -> TS2",
+        "reaction": "2 POC_fast + SO4 -> H2S_tot",
         "k_value_name": "POC_fast",
         "limiters": {"SO4": ["O2_inhibit", "SO4_implicit", "Fe3_diss_red_inhib"]},
-        "isotope_species": {"SO4": "SO4_S32", "TS2": "TS2_S32"},
+        "isotope_species": {"SO4": "SO4_S32", "H2S_tot": "H2S_tot_S32"},
     }
     errors = validator.validate_reaction(rxn)
     assert errors == []
@@ -71,7 +71,7 @@ def test_validation_catches_unknown_species():
     )
     rxn = {
         "reaction_name": "bad_species_rxn",
-        "reaction": "Unicorn + SO4 -> TS2",
+        "reaction": "Unicorn + SO4 -> H2S_tot",
         "k_value_name": "POC_fast",
     }
     errors = validator.validate_reaction(rxn)
@@ -119,10 +119,10 @@ def test_validation_dynamic_variables():
         limiters_path=LIMITERS_FILE,
     )
     rxn = {
-        "reaction_name": "pyrite_formation_fes_ts2",
+        "reaction_name": "pyrite_formation_fes_H2S_tot",
         "reaction": "1 FeS + 1 HS_custom -> 1 Fe3",
-        "k_value_name": "FeS_TS2",
-        "dynamic_variables": {"HS_custom": "c.TS2 * mp.hs_frac"},
+        "k_value_name": "FeS_H2S_tot",
+        "dynamic_variables": {"HS_custom": "c.H2S_tot * mp.hs_frac"},
     }
     errors = validator.validate_reaction(rxn)
     assert errors == []
@@ -180,8 +180,8 @@ def test_selective_reaction_inclusion(tmp_path):
         {
             "reaction_name": "hs_oxidation_velde",
             "reaction": "HS + 2 O2 -> SO4",
-            "k_value_name": "TS2_O2",
-            "dynamic_variables": {"HS": "c.TS2 * mp.hs_frac"},
+            "k_value_name": "H2S_tot_O2",
+            "dynamic_variables": {"HS": "c.H2S_tot * mp.hs_frac"},
             "limiters": {"O2": "O2_inhibit"},
         },
     ]
@@ -262,8 +262,8 @@ def test_resolve_and_prepare_equations_timestamp_check(tmp_path, monkeypatch):
     assert eq_file.stat().st_mtime > first_mtime
 
 
-def test_fes2_precipitation_ts2_generation():
-    """Verify FeS2_precipitation_TS2 is generated in DEFAULT_DIAGENETIC_REACTIONS and Jacobian."""
+def test_fes2_precipitation_H2S_tot_generation():
+    """Verify FeS2_precipitation_H2S_tot is generated in DEFAULT_DIAGENETIC_REACTIONS and Jacobian."""
     from mantis.generate_equation_system import EquationSystemGenerator
 
     validator = ReactionSystemValidator(
@@ -273,11 +273,11 @@ def test_fes2_precipitation_ts2_generation():
     )
     reactions = [
         {
-            "reaction_name": "FeS2_precipitation_TS2",
+            "reaction_name": "FeS2_precipitation_H2S_tot",
             "reaction": "1 FeS + 1 HS -> 1 FeS2",
-            "k_value_name": "FeS_TS2",
-            "dynamic_variables": {"HS": "c.TS2 * mp.hs_frac"},
-            "isotope_species": {"TS2": "TS2_S32", "FeS": "FeS_S32", "HS": "HS_S32"},
+            "k_value_name": "FeS_H2S_tot",
+            "dynamic_variables": {"HS": "c.H2S_tot * mp.hs_frac"},
+            "isotope_species": {"H2S_tot": "H2S_tot_S32", "FeS": "FeS_S32", "HS": "HS_S32"},
         },
     ]
 
@@ -285,17 +285,17 @@ def test_fes2_precipitation_ts2_generation():
     code = generator.generate_code()
 
     # Function defined
-    assert "def rxn_FeS2_precipitation_TS2" in code
+    assert "def rxn_FeS2_precipitation_H2S_tot" in code
     # Dispatched in DEFAULT_DIAGENETIC_REACTIONS
     def_start = code.find("DEFAULT_DIAGENETIC_REACTIONS = [")
     def_end = code.find("DIAGENETIC_REACTIONS = DEFAULT_DIAGENETIC_REACTIONS")
     default_rxns = code[def_start:def_end]
-    assert "rxn_FeS2_precipitation_TS2" in default_rxns
+    assert "rxn_FeS2_precipitation_H2S_tot" in default_rxns
 
     # Jacobian included
     jac_start = code.find("def compute_chemical_jacobian")
     jacobian_code = code[jac_start:]
-    assert "Reaction: FeS2_precipitation_TS2" in jacobian_code
+    assert "Reaction: FeS2_precipitation_H2S_tot" in jacobian_code
 
 
 def test_invalid_reaction_syntax_raises_value_error():
@@ -411,11 +411,11 @@ limiters = {
 reactions = [
     {
         "reaction_name": "sulfate_reduction_fast",
-        "reaction": "2 POC_fast + SO4 -> TS2",
+        "reaction": "2 POC_fast + SO4 -> H2S_tot",
         "k_value_name": "POC_fast",
         "limiters": ["SO4"],
         "isotope_fractionation": {
-            "SO4_S32 to TS2_S32": ["msr_alpha", "SO4_alpha"],
+            "SO4_S32 to H2S_tot_S32": ["msr_alpha", "SO4_alpha"],
         },
     },
 ]
@@ -431,11 +431,11 @@ reactions = [
     reactions = [
         {
             "reaction_name": "sulfate_reduction_fast",
-            "reaction": "2 POC_fast + SO4 -> TS2",
+            "reaction": "2 POC_fast + SO4 -> H2S_tot",
             "k_value_name": "POC_fast",
             "limiters": ["SO4"],
             "isotope_fractionation": {
-                "SO4_S32 to TS2_S32": ["msr_alpha", "SO4_alpha"],
+                "SO4_S32 to H2S_tot_S32": ["msr_alpha", "SO4_alpha"],
             },
         },
     ]
@@ -445,11 +445,11 @@ reactions = [
     bad_reactions = [
         {
             "reaction_name": "sulfate_reduction_fast",
-            "reaction": "2 POC_fast + SO4 -> TS2",
+            "reaction": "2 POC_fast + SO4 -> H2S_tot",
             "k_value_name": "POC_fast",
             "limiters": ["SO4"],
             "isotope_fractionation": {
-                "SO4_S32 to TS2_S32": ["msr_alpha", "NONEXISTENT_LIM"],
+                "SO4_S32 to H2S_tot_S32": ["msr_alpha", "NONEXISTENT_LIM"],
             },
         },
     ]

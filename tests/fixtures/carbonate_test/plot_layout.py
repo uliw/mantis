@@ -14,7 +14,7 @@ colormap_override = {
 
 liquid_species = {
     "scale": "log",
-    "species": ["SO4", "O2", "TS2", "Fe2_liq"],
+    "species": ["SO4", "O2", "H2S_tot", "Fe2_liq"],
     "lim": (1e-6, 50),
     "units": "mmol/l",
 }
@@ -37,11 +37,11 @@ solid_species = [
 ]
 
 reaction_rates = {
-    "species": ["SO4", "FeS", "Fe3", "D_bio", "TS2", "DIC", "TA", "CaCO3"],
+    "species": ["SO4", "FeS", "Fe3", "D_bio", "H2S_tot", "DIC", "TA", "CaCO3"],
 }
 
 isotopes = {
-    "species": ["d_SO4", "d_TS2", "d_FeS", "d_FeS2", "d_S0"],
+    "species": ["d_SO4", "d_H2S_tot", "d_FeS", "d_FeS2", "d_S0"],
     "lim": (-45, -37, 20, 30),
 }
 

@@ -83,7 +83,7 @@ if __name__ == "__main__":
     total_iron = df.c_Fe2_total + df.c_Fe3 + df.c_FeS
     print(f"total_iron diff = {total_iron.max() - total_iron.min():.2e}")
     print(f"max FeS = {df.c_FeS.max():.4e} mmol/L")
-    print(f"max TS2 = {df.c_TS2.max():.4e} mmol/L")
+    print(f"max H2S_tot = {df.c_H2S_tot.max():.4e} mmol/L")
     print(f"max Fe2 = {df.c_Fe2_total.max():.4e} mmol/L")
 
     result.plot_summary()

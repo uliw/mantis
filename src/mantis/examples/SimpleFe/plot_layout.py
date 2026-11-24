@@ -52,7 +52,7 @@ species_mapping = {
     "z": ["depth_in_cm", "cm", "m"],
     "SO4": ["SO4", "mmol/cm^3_pw", "mmol/L"],
     "H2S": ["TH2S", "mmol/cm^3_pw", "mmol/L"],
-    "TS2": ["TH2S", "mmol/cm^3_pw", "mmol/L"],
+    "H2S_tot": ["TH2S", "mmol/cm^3_pw", "mmol/L"],
     "Fe2_dis": ["TFe", "mmol/cm^3_pw", "umol/L"],
     "Fe2_liq": ["Fe_aq", "mmol/cm^3_pw", "nmol/L"],
     "FeS": ["FeS", "mmol/cm^3_solid", "wt%"],
@@ -76,7 +76,7 @@ liquid_species_1 = liquid_species({
 
 liquid_species_2 = liquid_species({
     "scale": "lin",
-    "species": ["TS2"],
+    "species": ["H2S_tot"],
     # "lim": (0, 30),
     "units": "mmol/l",
     "position": "right",

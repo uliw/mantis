@@ -19,7 +19,7 @@ def test_partition_equilibrium_isotope_mass_and_ratio():
     """Verify analytical 2-species isotope partitioning and isotopic mass conservation."""
     std_ratio = 0.044162589
     c_tot = 2.0  # mmol/L total sulfide
-    # Suppose bulk TS2 has delta = +10 permil
+    # Suppose bulk H2S_tot has delta = +10 permil
     r_sample = std_ratio * (1.0 + 10.0 / 1000.0)
     c_32 = c_tot / (1.0 + r_sample)
 
@@ -60,7 +60,7 @@ def test_update_all_species_speciation_isotope_fractionation():
     raw_speciation = {
         "sulfide_acid_base": {
             "type": "acid_base",
-            "primary": "TS2",
+            "primary": "H2S_tot",
             "constants": {"pKa1": 7.0},
             "equilibrium_fractionation": {
                 "standard": "d34S",
@@ -82,15 +82,15 @@ def test_update_all_species_speciation_isotope_fractionation():
     }
 
     species_defs = {
-        "TS2": {
+        "H2S_tot": {
             "phase": "liquid",
             "include": True,
-            "isotopes": {"TS2_S32": "S"},
+            "isotopes": {"H2S_tot_S32": "S"},
         },
-        "TS2_S32": {
+        "H2S_tot_S32": {
             "phase": "liquid",
             "include": True,
-            "isotope_of": "TS2",
+            "isotope_of": "H2S_tot",
         },
     }
 
@@ -108,9 +108,9 @@ def test_update_all_species_speciation_isotope_fractionation():
     })
 
     n_cells = 10
-    c_ts2 = np.full(n_cells, 1.5)
+    c_H2S_tot = np.full(n_cells, 1.5)
     std_r = 0.044162589
-    c_ts2_32 = c_ts2 / (1.0 + std_r)
+    c_H2S_tot_32 = c_H2S_tot / (1.0 + std_r)
 
     class CellVar:
         def __init__(self, arr):
@@ -123,8 +123,8 @@ def test_update_all_species_speciation_isotope_fractionation():
             self.value[s] = val
 
     c = data_container({
-        "TS2": CellVar(c_ts2),
-        "TS2_S32": CellVar(c_ts2_32),
+        "H2S_tot": CellVar(c_H2S_tot),
+        "H2S_tot_S32": CellVar(c_H2S_tot_32),
         "HS": CellVar(np.zeros(n_cells)),
         "H2S": CellVar(np.zeros(n_cells)),
         "HS_S32": CellVar(np.zeros(n_cells)),
@@ -140,7 +140,7 @@ def test_update_all_species_speciation_isotope_fractionation():
     # Verify isotope companions are populated and sum to parent
     assert np.all(c.HS_S32.value > 0.0)
     assert np.all(c.H2S_S32.value > 0.0)
-    assert np.allclose(c.HS_S32.value + c.H2S_S32.value, c.TS2_S32.value, rtol=1e-14)
+    assert np.allclose(c.HS_S32.value + c.H2S_S32.value, c.H2S_tot_S32.value, rtol=1e-14)
 
     # Verify fractionation direction
     d_hs = get_delta(c.HS.value, c.HS_S32.value, std_r)
@@ -153,7 +153,7 @@ def test_equilibrium_fractionation_invalid_species_raises_error():
     raw_speciation = {
         "sulfide_acid_base": {
             "type": "acid_base",
-            "primary": "TS2",
+            "primary": "H2S_tot",
             "constants": {"pKa1": 7.0},
             "equilibrium_fractionation": {
                 "standard": "d34S",
@@ -174,8 +174,8 @@ def test_equilibrium_fractionation_invalid_species_raises_error():
         }
     }
     species_defs = {
-        "TS2": {"phase": "liquid", "include": True, "isotopes": {"TS2_S32": "S"}},
-        "TS2_S32": {"phase": "liquid", "include": True, "isotope_of": "TS2"},
+        "H2S_tot": {"phase": "liquid", "include": True, "isotopes": {"H2S_tot_S32": "S"}},
+        "H2S_tot_S32": {"phase": "liquid", "include": True, "isotope_of": "H2S_tot"},
     }
     with pytest.raises(SystemExit):
         validate_and_normalize_speciation(raw_speciation, species_defs)

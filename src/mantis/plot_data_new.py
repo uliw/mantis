@@ -720,7 +720,7 @@ ATOMIC_WEIGHTS = {
 
 DEFAULT_GEOCHEM_COLORS = {
     "SO4": "cornflowerblue",
-    "TS2": "slateblue",
+    "H2S_tot": "slateblue",
     "HS": "slateblue",
     "H2S": "slateblue",
     "O2": "#AA4499",
@@ -1305,7 +1305,7 @@ def _pretty_species_label(name, rel_elem=None):
     label_map = {
         "SO4": r"SO$_{4}$",
         "O2": r"O$_{2}$",
-        "TS2": "TS$^{2-}$",
+        "H2S_tot": "TS$^{2-}$",
         "HS": "HS$^{-}$",
         "H2S": r"H$_{2}$S",
         "Fe3": r"Fe$^{3+}$",

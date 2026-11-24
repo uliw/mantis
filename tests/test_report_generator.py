@@ -129,16 +129,16 @@ def test_report_generator_with_isotopes(tmp_path):
     mp.reactions = [
         {
             "reaction_name": "sulfate_reduction_fast",
-            "reaction": "2 POC_fast + SO4 -> TS2",
+            "reaction": "2 POC_fast + SO4 -> H2S_tot",
             "k_value_name": "POC_fast",
-            "isotope_fractionation": {"SO4_S32 to TS2_S32": ["msr_alpha", "SO4_alpha"]},
+            "isotope_fractionation": {"SO4_S32 to H2S_tot_S32": ["msr_alpha", "SO4_alpha"]},
         }
     ]
     mp.k = {"msr_alpha": 1.07}
     mp.speciation = {
         "sulfide_acid_base": {
             "type": "acid_base",
-            "primary": "TS2",
+            "primary": "H2S_tot",
             "constants": {"pKa1": 7.0},
             "equilibrium_fractionation": {
                 "standard": "d34S",
@@ -148,7 +148,7 @@ def test_report_generator_with_isotopes(tmp_path):
     }
     mp.species_defs = {
         "SO4": {"phase": "liquid", "diffusion": 1e-9, "bc_top": {"Robin": 28.2}},
-        "TS2": {"phase": "liquid", "diffusion": 1e-9, "bc_top": {"Robin": 0.0}},
+        "H2S_tot": {"phase": "liquid", "diffusion": 1e-9, "bc_top": {"Robin": 0.0}},
     }
     for sp in mp.species_defs:
         setattr(c, sp, np.ones_like(z))
@@ -157,7 +157,7 @@ def test_report_generator_with_isotopes(tmp_path):
         mp=mp,
         c=c,
         k=data_container({"k_fast": 1.0}),
-        species_list=["SO4", "TS2"],
+        species_list=["SO4", "H2S_tot"],
         z=z,
         D_mol=data_container(),
         diagenetic_reactions=None,

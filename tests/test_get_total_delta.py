@@ -16,13 +16,13 @@ def test_get_total_delta_basic():
     })
 
     # Setup mock concentrations at index -1
-    # Dissolved: SO4, TS2 (phi = 0.8)
+    # Dissolved: SO4, H2S_tot (phi = 0.8)
     # Solid: FeS (1-phi = 0.2)
     c = data_container({
         "SO4": np.array([28.0, 20.0]),
         "SO4_32": np.array([26.8, 19.1]),
-        "TS2": np.array([1.0, 2.0]),
-        "TS2_32": np.array([0.96, 1.92]),
+        "H2S_tot": np.array([1.0, 2.0]),
+        "H2S_tot_32": np.array([0.96, 1.92]),
         "FeS": np.array([5.0, 10.0]),
         "FeS_32": np.array([4.8, 9.6]),
     })
@@ -34,15 +34,15 @@ def test_get_total_delta_basic():
     expected_delta = get_delta(19.6, 18.736, 0.044162589)
 
     # Test with string species and isotope_standart="S" as requested by user
-    res1 = get_total_delta(c, mp, species="SO4, TS2, FeS", isotope_standart="S")
+    res1 = get_total_delta(c, mp, species="SO4, H2S_tot, FeS", isotope_standart="S")
     assert np.isclose(res1, expected_delta)
 
     # Test with isotope_standard
-    res2 = get_total_delta(c, mp, species="SO4, TS2, FeS", isotope_standard="S")
+    res2 = get_total_delta(c, mp, species="SO4, H2S_tot, FeS", isotope_standard="S")
     assert np.isclose(res2, expected_delta)
 
     # Test with direct float reference ratio
-    res3 = get_total_delta(c, mp, species="SO4, TS2, FeS", isotope_standart=0.044162589)
+    res3 = get_total_delta(c, mp, species="SO4, H2S_tot, FeS", isotope_standart=0.044162589)
     assert np.isclose(res3, expected_delta)
 
     # Test default call

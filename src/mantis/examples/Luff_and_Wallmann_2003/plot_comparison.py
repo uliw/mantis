@@ -26,7 +26,7 @@ Only species/properties that exist both in the model and in the measured dataset
   1. Sulfate (SO4)
   2. Dissolved Calcium (Ca2+)
   3. Total Alkalinity (TA)
-  4. Total Sulfide (H2S / TS2)
+  4. Total Sulfide (H2S / H2S_tot)
   5. Phosphate (TPO4)
   6. Ammonia (TNH4)
   7. Carbonate solid content (CaCO3 wt%)
@@ -63,11 +63,11 @@ class MP:
     K1_carb = 8.446e-7
     K2_carb = 4.533e-10
     species_defs = {
-        "TS2": {"phase": "liquid", "include": True},
+        "H2S_tot": {"phase": "liquid", "include": True},
         "HS": {
             "phase": "liquid",
             "include": False,
-            "equilibrium_of": "TS2",
+            "equilibrium_of": "H2S_tot",
             "fraction": "Ka1 / (Hplus + Ka1)",
             "constants": {"pKa1": 7.0},
             "include_in_TA": 1.0,
@@ -77,7 +77,7 @@ class MP:
 c = Container()
 c.TA = state["TA"]
 c.DIC = state["DIC"]
-c.TS2 = state["TS2"]
+c.H2S_tot = state["H2S_tot"]
 mp = MP()
 compute_carbonate_speciation(c, mp)
 sim_ph = c.pH
@@ -120,8 +120,8 @@ axs[0, 2].legend(loc="lower right")
 axs[0, 2].grid(True, linestyle="--", alpha=0.5)
 axs[0, 2].set_title("Total Alkalinity (TA)")
 
-# Panel 4: Total Sulfide (H2S / TS2)
-axs[0, 3].plot(state["TS2"], z_cm, color="brown", lw=2.2, label="Model")
+# Panel 4: Total Sulfide (H2S / H2S_tot)
+axs[0, 3].plot(state["H2S_tot"], z_cm, color="brown", lw=2.2, label="Model")
 axs[0, 3].plot(meas["H2S_mM"], meas["depth_cm"], "*", color="brown", markersize=9, label="Measured")
 axs[0, 3].set_xlabel("H2S [mM]")
 axs[0, 3].set_xlim(0, 25)
