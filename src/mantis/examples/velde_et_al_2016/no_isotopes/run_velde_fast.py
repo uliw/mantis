@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Mantis-RTM: A Python library for reaction-transport modeling
+"""Mantis-RTM: A Python library for reaction-transport modeling.
 
 Copyright (C), 2026 - Ulrich G. Wortmann
 
