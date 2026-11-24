@@ -13,12 +13,19 @@ fi
 
 echo "Exporting Tutorial org files to Markdown..."
 
-for org_file in Tutorial_1.org Tutorial_2.org Tutorial_3.org Tutorial_4.org getting_help.org ; do
-    if [ -f "$org_file" ]; then
-        echo "Exporting $org_file ..."
-        emacsclient -e "(progn (switch-to-buffer (find-file-noselect \"$org_file\")) (end-of-buffer) (org-gfm-export-to-markdown) (kill-buffer))"
+files_to_export=("$@")
+if [ ${#files_to_export[@]} -eq 0 ]; then
+    files_to_export=(Tutorial_1.org Tutorial_2.org Tutorial_3.org Tutorial_4.org getting_help.org)
+fi
+
+for org_file in "${files_to_export[@]}"; do
+    # Strip any directory prefix if passed like docs/Tutorial_1.org
+    base_file="$(basename "$org_file")"
+    if [ -f "$base_file" ]; then
+        echo "Exporting $base_file ..."
+        emacsclient -e "(progn (switch-to-buffer (find-file-noselect \"$base_file\")) (end-of-buffer) (org-gfm-export-to-markdown) (kill-buffer))"
     else
-        echo "Warning: $org_file not found in $SCRIPT_DIR"
+        echo "Warning: $base_file not found in $SCRIPT_DIR"
     fi
 done
 
