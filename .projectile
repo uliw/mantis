@@ -1,0 +1,8 @@
+-/.nox
+-/build
+-/__pycache__
+-logs
+-_minted
+-_build
+-*.tex
+-*.md
