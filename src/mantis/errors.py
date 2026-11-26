@@ -46,19 +46,19 @@ class MantisError(Exception):
         self.details = list(details) if details is not None else None
         super().__init__(self.format_plain())
 
-    def _header(self) -> str:
+    def _header(self, *, full_path: bool = False) -> str:
         parts: list[str] = []
         if self.context:
             parts.append(self.context)
         if self.line is not None:
             parts.append(f"line {self.line}")
         if self.file_path is not None:
-            parts.append(f"in {self.file_path.name}")
+            parts.append(f"in {self.file_path if full_path else self.file_path.name}")
         return " ".join(parts)
 
     def format_plain(self) -> str:
         """Return a concise single- or multi-line plain description (for str(exc))."""
-        header = self._header()
+        header = self._header(full_path=True)
         if self.details:
             body = "\n".join(self.details)
             if self.message:
