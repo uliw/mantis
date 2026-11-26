@@ -190,7 +190,7 @@ This dynamic partitioning has crucial physical consequences:
 
 ### Declaring Lumped Species in `species.py`
 
-Here is an example of defining a lumped ferrous iron pool ($\text{Fe}^{2+}_{\text{total}}$) on a porewater basis, along with its diagnostic dissolved and sorbed sub-species:
+The mantis solver handles fast sorption/desorption reactions natively (see, e.g., `examples/~velde_et_al_2016/fe2_explicit`, bit sometimes it can advantageous to declare a lumped species rather than explicitly modeling the instantaneous sorption/desorption reactions. Here is an example of defining a lumped ferrous iron pool ($\text{Fe}^{2+}_{\text{total}}$) on a porewater basis, along with its diagnostic dissolved and sorbed sub-species:
 
 ```jupyter-python
 species = {
