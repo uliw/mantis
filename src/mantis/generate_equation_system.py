@@ -37,11 +37,46 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from mantis.errors import (
+    FilePathError,
+    InputFileError,
+    MissingDefinitionError,
+    ReactionParseError,
+    ValidationError,
+)
 
-class ValidationError(Exception):
-    """Raised when chemical reaction specifications fail validation checks."""
 
-    pass
+def _find_reaction_line_numbers(reactions_path: Path | None) -> tuple[dict[str, int], dict[int, int]]:
+    """Return ``(by_name, by_index)`` line-number maps for entries in ``reactions = [...]``."""
+    by_name: dict[str, int] = {}
+    by_index: dict[int, int] = {}
+    if reactions_path is None or not reactions_path.exists() or reactions_path.suffix.lower() != ".py":
+        return by_name, by_index
+    try:
+        source = reactions_path.read_text(encoding="utf-8")
+        tree = ast.parse(source, filename=str(reactions_path))
+    except Exception:
+        return by_name, by_index
+
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            targets = [t.id for t in node.targets if isinstance(t, ast.Name)]
+            if "reactions" in targets and isinstance(node.value, ast.List):
+                for idx, elt in enumerate(node.value.elts):
+                    if not isinstance(elt, ast.Dict):
+                        continue
+                    line_no = elt.lineno
+                    rxn_name = None
+                    for k_node, v_node in zip(elt.keys, elt.values):
+                        if isinstance(k_node, ast.Constant) and k_node.value == "reaction_name":
+                            if isinstance(v_node, ast.Constant) and isinstance(v_node.value, str):
+                                rxn_name = v_node.value
+                        elif isinstance(k_node, ast.Constant) and k_node.value == "reaction":
+                            line_no = k_node.lineno
+                    by_index[idx] = line_no
+                    if rxn_name:
+                        by_name[rxn_name] = line_no
+    return by_name, by_index
 
 
 def make_null_reactions():
@@ -101,7 +136,7 @@ class ReactionSystemValidator:
         """Loads and extracts defined species, constants, and limiters."""
         # 1. Species
         if not self.species_path.exists():
-            raise FileNotFoundError(f"Species file not found: {self.species_path}")
+            raise FilePathError(f"Species file not found: {self.species_path}", file_path=self.species_path)
         spec_species = importlib.util.spec_from_file_location("species_mod", self.species_path)
         if spec_species is None or spec_species.loader is None:
             raise ImportError(f"Could not load module from {self.species_path}")
@@ -124,11 +159,11 @@ class ReactionSystemValidator:
                     if "equilibrium_of" in sp_meta or "alias_of" in sp_meta or "fraction" in sp_meta:
                         self.valid_species.add(sp_k)
         else:
-            raise ValueError(f"No 'species' dictionary found in {self.species_path}")
+            raise InputFileError(f"No 'species' dictionary found in {self.species_path}", file_path=self.species_path)
 
         # 2. Reaction constants
         if not self.constants_path.exists():
-            raise FileNotFoundError(f"Reaction constants file not found: {self.constants_path}")
+            raise FilePathError(f"Reaction constants file not found: {self.constants_path}", file_path=self.constants_path)
         spec_constants = importlib.util.spec_from_file_location("rc_mod", self.constants_path)
         if spec_constants is None or spec_constants.loader is None:
             raise ImportError(f"Could not load module from {self.constants_path}")
@@ -248,7 +283,7 @@ class ReactionSystemValidator:
         whitespace-padded ' + ' delimiters.
         """
         if "->" not in reaction_str:
-            raise ValueError(f"Reaction string missing '->' delimiter: '{reaction_str}'")
+            raise ReactionParseError(f"Reaction string missing '->' delimiter: '{reaction_str}'")
 
         left, right = reaction_str.split("->", 1)
 
@@ -587,10 +622,23 @@ class ReactionSystemValidator:
 
     def validate_reactions(self, reactions: list[dict[str, Any]]) -> list[str]:
         """Validates all reactions in the specification list."""
+        by_name, by_index = _find_reaction_line_numbers(self.reactions_path)
+        rxn_file = self.reactions_path.name if self.reactions_path is not None else None
         all_errors = []
-        for rxn_dict in reactions:
+        for idx, rxn_dict in enumerate(reactions):
+            rxn_name = rxn_dict.get("reaction_name", "<unnamed_reaction>")
+            line_no = by_name.get(rxn_name, by_index.get(idx))
             errs = self.validate_reaction(rxn_dict)
-            all_errors.extend(errs)
+            for err in errs:
+                prefix = f"[{rxn_name}] "
+                body = err[len(prefix):] if err.startswith(prefix) else err
+                loc_parts = [f"[{rxn_name}] reaction"]
+                if line_no is not None:
+                    loc_parts.append(f"line {line_no}")
+                if rxn_file is not None:
+                    loc_parts.append(f"in {rxn_file}")
+                header = " ".join(loc_parts)
+                all_errors.append(f"{header}:\n{body}")
         return all_errors
 
 
@@ -598,7 +646,7 @@ def load_reactions_from_file(input_path: Path) -> list[dict[str, Any]]:
     """Loads the reactions list from a chemical equations Python or JSON file."""
     input_path = Path(input_path)
     if not input_path.exists():
-        raise FileNotFoundError(f"Input equations file not found: {input_path}")
+        raise FilePathError(f"Input equations file not found: {input_path}", file_path=input_path)
 
     if input_path.suffix == ".py":
         spec = importlib.util.spec_from_file_location("chem_eq_mod", input_path)
@@ -607,7 +655,7 @@ def load_reactions_from_file(input_path: Path) -> list[dict[str, Any]]:
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         if not hasattr(mod, "reactions") or not isinstance(mod.reactions, list):
-            raise ValueError(f"Input file {input_path} must define a 'reactions' list.")
+            raise InputFileError(f"Input file {input_path} must define a 'reactions' list.", file_path=input_path)
         return mod.reactions
     elif input_path.suffix == ".json":
         import json
@@ -617,9 +665,15 @@ def load_reactions_from_file(input_path: Path) -> list[dict[str, Any]]:
                 return data
             elif isinstance(data, dict) and "reactions" in data:
                 return data["reactions"]
-            raise ValueError(f"JSON input file {input_path} must be a list of reactions or contain a 'reactions' key.")
+            raise InputFileError(
+                f"JSON input file {input_path} must be a list of reactions or contain a 'reactions' key.",
+                file_path=input_path,
+            )
     else:
-        raise ValueError(f"Unsupported input file format '{input_path.suffix}'. Expected .py or .json.")
+        raise InputFileError(
+            f"Unsupported input file format '{input_path.suffix}'. Expected .py or .json.",
+            file_path=input_path,
+        )
 
 
 class MantisArgumentParser(argparse.ArgumentParser):
@@ -773,8 +827,15 @@ def generate_equations(
     # 3. Validate
     errors = validator.validate_reactions(reactions)
     if errors:
-        err_msg = f"Validation failed for {reactions_p} with {len(errors)} error(s):\n" + "\n".join(f"  • {e}" for e in errors)
-        raise ValidationError(err_msg)
+        is_missing_def = any(
+            ("not found in" in e or "not defined in" in e) for e in errors
+        )
+        err_cls = MissingDefinitionError if is_missing_def else ValidationError
+        raise err_cls(
+            f"Validation failed for {reactions_p} with {len(errors)} error(s)",
+            file_path=reactions_p,
+            details=errors,
+        )
 
     if verbose:
         print(f"[MANTIS] All {len(reactions)} reactions validated successfully!")
@@ -876,9 +937,10 @@ def resolve_and_prepare_equations(
         limiters_path = None
 
     if not reactions_path.exists():
-        raise FileNotFoundError(
+        raise FilePathError(
             f"Declarative reactions file not found: '{reactions_path}'. "
-            f"Please specify a valid 'reactions' file in p_dict or create '{exp}_reactions.py'."
+            f"Please specify a valid 'reactions' file in p_dict or create '{exp}_reactions.py'.",
+            file_path=reactions_path,
         )
 
     # Determine whether regeneration is needed based on mtime timestamps
@@ -1016,12 +1078,12 @@ class EquationSystemGenerator:
         """
         r_str = r.get("reaction", "")
         if "->" not in r_str:
-            raise ValueError(f"Reaction string missing '->' delimiter: '{r_str}'")
+            raise ReactionParseError(f"Reaction string missing '->' delimiter: '{r_str}'")
 
         try:
             reactants, products = ReactionSystemValidator.parse_reaction_species(r_str)
         except Exception as e:
-            raise ValueError(f"Could not parse reaction '{r_str}': {e}")
+            raise ReactionParseError(f"Could not parse reaction '{r_str}': {e}") from e
 
         r_sp = [sp for _, sp in reactants]
         p_sp = [sp for _, sp in products]

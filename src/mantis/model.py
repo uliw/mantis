@@ -494,13 +494,82 @@ class DiageneticModel:
             "use_numerical_jacobian": False,
         })
 
-    def _convert_value(self, val: Any) -> Any:
+    _PHYSICAL_PARAM_UNITS: dict[str, tuple[str, str]] = {
+        # param_name: (canonical_unit, human_description)
+        "t_end": ("seconds", "time unit, e.g. 's', 'day', 'yr', 'kyr'"),
+        "dt_init": ("seconds", "time unit, e.g. 's', 'day', 'yr'"),
+        "dt_min": ("seconds", "time unit, e.g. 's', 'minute', 'day'"),
+        "dt_max": ("seconds", "time unit, e.g. 's', 'day', 'yr'"),
+        "video_dt": ("seconds", "time unit, e.g. 's', 'yr', 'kyr'"),
+        "max_depth": ("meter", "length unit, e.g. 'mm', 'cm', 'm'"),
+        "display_length": ("meter", "length unit, e.g. 'mm', 'cm', 'm'"),
+        "initial_spacing": ("meter", "length unit, e.g. 'mm', 'cm', 'm'"),
+        "dx_min": ("meter", "length unit, e.g. 'mm', 'cm', 'm'"),
+        "diffusive_boundary_layer": ("meter", "length unit, e.g. 'mm', 'cm', 'm'"),
+        "dbl": ("meter", "length unit, e.g. 'mm', 'cm', 'm'"),
+        "w": ("m/s", "velocity unit, e.g. 'cm/yr', 'm/s'"),
+        "BT0": ("m^2/second", "diffusivity unit, e.g. 'cm^2/yr', 'm^2/s'"),
+        "BT_depth": ("meter", "length unit, e.g. 'cm', 'm'"),
+        "BT_attenuation": ("meter", "length unit, e.g. 'cm', 'm'"),
+        "BI0": ("1/second", "rate unit, e.g. '1/yr', '1/s'"),
+        "BI_depth": ("meter", "length unit, e.g. 'cm', 'm'"),
+        "BI_attenuation": ("meter", "length unit, e.g. 'cm', 'm'"),
+        "depth": ("meter", "length unit, e.g. 'cm', 'm'"),
+        "attenuation": ("meter", "length unit, e.g. 'cm', 'm'"),
+        "decay": ("meter", "length unit, e.g. 'cm', 'm'"),
+    }
+
+    @staticmethod
+    def _caller_location() -> tuple[str | None, int | None]:
+        """Return ``(filename, lineno)`` of the first call frame outside ``mantis/model.py``."""
+        import inspect
+
+        this_file = os.path.abspath(__file__)
+        frame = inspect.currentframe()
+        try:
+            while frame is not None:
+                fname = os.path.abspath(frame.f_code.co_filename)
+                if fname != this_file:
+                    return frame.f_code.co_filename, frame.f_lineno
+                frame = frame.f_back
+        finally:
+            del frame
+        return None, None
+
+    def _convert_value(self, val: Any, param_name: str | None = None) -> Any:
         Q_ = self.Q_
         if isinstance(val, (list, tuple)):
             converted = [self._convert_value(item) for item in val]
             return tuple(converted) if isinstance(val, tuple) else converted
         if isinstance(val, dict):
-            return {k: self._convert_value(v) for k, v in val.items()}
+            return {k: self._convert_value(v, param_name=k) for k, v in val.items()}
+        if param_name in self._PHYSICAL_PARAM_UNITS and isinstance(val, str):
+            target_unit, unit_desc = self._PHYSICAL_PARAM_UNITS[param_name]
+            try:
+                q = Q_(val)
+                if not hasattr(q, "dimensionality") or q.dimensionality != Q_(f"1 {target_unit}").dimensionality:
+                    from mantis.errors import UnitParseError
+
+                    caller_file, caller_line = self._caller_location()
+                    raise UnitParseError(
+                        f"Incompatible unit in '{val}' for '{param_name}' (expected {unit_desc}).",
+                        file_path=caller_file,
+                        line=caller_line,
+                        context=f"configure({param_name}={val!r})",
+                    )
+                return q.to(target_unit).magnitude
+            except Exception as exc:
+                from mantis.errors import UnitParseError
+
+                if isinstance(exc, UnitParseError):
+                    raise
+                caller_file, caller_line = self._caller_location()
+                raise UnitParseError(
+                    f"Invalid unit in '{val}' for '{param_name}' (expected {unit_desc}): {exc}",
+                    file_path=caller_file,
+                    line=caller_line,
+                    context=f"configure({param_name}={val!r})",
+                ) from exc
         if isinstance(val, str):
             try:
                 q = Q_(val)
@@ -610,7 +679,10 @@ class DiageneticModel:
         self._user_configured_keys.update(kwargs.keys())
         for key, val in kwargs.items():
             if key in ("video", "video_dt"):
-                self.p_dict["video_dt"] = None if str(val).lower() in ("none", "null", "false") else val
+                if str(val).lower() in ("none", "null", "false"):
+                    self.p_dict["video_dt"] = None
+                else:
+                    self.p_dict["video_dt"] = self._convert_value(val, param_name="video_dt")
             elif key == "pH":
                 self.p_dict["pH"] = float(val)
             elif key in ("steady_state_tolerance", "dt_tolerance"):
@@ -624,7 +696,7 @@ class DiageneticModel:
                     self.p_dict["diffusive_boundary_layer"] = 0.0
                     self.p_dict["dbl"] = 0.0
                 else:
-                    val_m = self._convert_value(val)
+                    val_m = self._convert_value(val, param_name=key)
                     self.p_dict["diffusive_boundary_layer"] = float(val_m)
                     self.p_dict["dbl"] = float(val_m)
             elif key == "bioturbation" and isinstance(val, dict):
@@ -654,7 +726,7 @@ class DiageneticModel:
                     self.p_dict["BI_profile"] = str(c_val["profile"]).lower()
                 self.p_dict["bioirrigation"] = c_val
             else:
-                self.p_dict[key] = self._convert_value(val)
+                self.p_dict[key] = self._convert_value(val, param_name=key)
 
         self.mp.update(self.p_dict)
         return self

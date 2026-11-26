@@ -2008,10 +2008,26 @@ def _to_meters(val: Any) -> float:
             import pint
 
             ureg = pint.UnitRegistry()
-            q = ureg(val)
-            return float(q.to("meter").magnitude)
+            try:
+                q = ureg(val)
+                return float(q.to("meter").magnitude)
+            except Exception as exc:
+                from mantis.errors import UnitParseError
+
+                raise UnitParseError(
+                    f"Invalid length unit in '{val}' (expected length unit, e.g. 'mm', 'cm', 'm'): {exc}",
+                    context="grid length",
+                ) from exc
     if hasattr(val, "to"):
-        return float(val.to("meter").magnitude)
+        try:
+            return float(val.to("meter").magnitude)
+        except Exception as exc:
+            from mantis.errors import UnitParseError
+
+            raise UnitParseError(
+                f"Invalid length unit in '{val}' (expected length unit, e.g. 'mm', 'cm', 'm'): {exc}",
+                context="grid length",
+            ) from exc
     return float(val)
 
 
@@ -3879,7 +3895,15 @@ def compute_porosity_profile(
         if val is None:
             return None
         if isinstance(val, str):
-            return ureg.Quantity(val).to("meter").magnitude
+            try:
+                return ureg.Quantity(val).to("meter").magnitude
+            except Exception as exc:
+                from mantis.errors import UnitParseError
+
+                raise UnitParseError(
+                    f"Invalid length unit in '{val}' (expected length unit, e.g. 'mm', 'cm', 'm'): {exc}",
+                    context="porosity profile",
+                ) from exc
         return float(val)
 
     zh_m = _to_meters(z_half)
@@ -4142,7 +4166,15 @@ class AgeScaledExpression:
         if isinstance(self.factor, (int, float)):
             return age_arr * float(self.factor)
         elif isinstance(self.factor, str):
-            base_mag = ureg.Quantity(self.factor).to_base_units().magnitude
+            try:
+                base_mag = ureg.Quantity(self.factor).to_base_units().magnitude
+            except Exception as exc:
+                from mantis.errors import UnitParseError
+
+                raise UnitParseError(
+                    f"Cannot parse/convert unit in AgeScaledExpression factor '{self.factor}': {exc}",
+                    context="AgeScaledExpression",
+                ) from exc
             return age_arr * float(base_mag)
         else:
             raise TypeError(f"Unsupported factor type in AgeScaledExpression: {type(self.factor)}")
@@ -4323,11 +4355,14 @@ def convert_reaction_constants(
                     q = ureg.Quantity(v.factor)
                     f_mag = float(q.to_base_units().magnitude)
                 except Exception as exc:
+                    from mantis.errors import UnitParseError
+
                     filepath, lineno = _find_constant_location(k, filename, calling_frame)
-                    loc = f" at line {lineno}" if lineno else ""
-                    file_loc = f" in {filepath}" if filepath else ""
-                    raise ValueError(
-                        f"Cannot parse/convert unit for reaction constant '{k}'{loc}{file_loc} with factor '{v.factor}': {exc}"
+                    raise UnitParseError(
+                        f"Cannot parse/convert unit for reaction constant '{k}' with factor '{v.factor}': {exc}",
+                        file_path=filepath,
+                        line=lineno,
+                        context=f"[{k}] reaction constant",
                     ) from exc
             else:
                 f_mag = float(v.factor)
@@ -4335,11 +4370,14 @@ def convert_reaction_constants(
             continue
 
         if not isinstance(v, str):
+            from mantis.errors import InputFileError
+
             filepath, lineno = _find_constant_location(k, filename, calling_frame)
-            loc = f" at line {lineno}" if lineno else ""
-            file_loc = f" in {filepath}" if filepath else ""
-            raise ValueError(
-                f"Reaction constant '{k}'{loc}{file_loc} must be a string or number, got {type(v).__name__}."
+            raise InputFileError(
+                f"Reaction constant '{k}' must be a string or number, got {type(v).__name__}.",
+                file_path=filepath,
+                line=lineno,
+                context=f"[{k}] reaction constant",
             )
 
         # Check for sediment age expression in string e.g. "age * 0.01 1/year" or "0.01 1/year * age"
@@ -4353,11 +4391,14 @@ def convert_reaction_constants(
                 q = ureg.Quantity(stripped)
                 base_mag = float(q.to_base_units().magnitude)
             except Exception as exc:
+                from mantis.errors import UnitParseError
+
                 filepath, lineno = _find_constant_location(k, filename, calling_frame)
-                loc = f" at line {lineno}" if lineno else ""
-                file_loc = f" in {filepath}" if filepath else ""
-                raise ValueError(
-                    f"Cannot parse/convert unit for reaction constant '{k}'{loc}{file_loc} with value '{v}': {exc}"
+                raise UnitParseError(
+                    f"Cannot parse/convert unit for reaction constant '{k}' with value '{v}': {exc}",
+                    file_path=filepath,
+                    line=lineno,
+                    context=f"[{k}] reaction constant",
                 ) from exc
 
             active_ap = _ActiveAgeContext.last_profile or AgeProfile(mode="relative")
@@ -4369,11 +4410,14 @@ def convert_reaction_constants(
             base_q = q.to_base_units()
             k_values[k] = float(base_q.magnitude)
         except Exception as exc:
+            from mantis.errors import UnitParseError
+
             filepath, lineno = _find_constant_location(k, filename, calling_frame)
-            loc = f" at line {lineno}" if lineno else ""
-            file_loc = f" in {filepath}" if filepath else ""
-            raise ValueError(
-                f"Cannot parse/convert unit for reaction constant '{k}'{loc}{file_loc} with value '{v}': {exc}"
+            raise UnitParseError(
+                f"Cannot parse/convert unit for reaction constant '{k}' with value '{v}': {exc}",
+                file_path=filepath,
+                line=lineno,
+                context=f"[{k}] reaction constant",
             ) from exc
 
     return k_values

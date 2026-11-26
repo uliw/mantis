@@ -45,11 +45,27 @@ def parse_time_to_seconds(val: Any) -> float | None:
     if isinstance(val, (int, float)):
         return float(val)
     if hasattr(val, "to") and hasattr(val, "magnitude"):
-        return float(val.to("seconds").magnitude)
+        try:
+            return float(val.to("seconds").magnitude)
+        except Exception as exc:
+            from mantis.errors import UnitParseError
+
+            raise UnitParseError(
+                f"Invalid time unit in '{val}' (expected time unit, e.g. 's', 'yr', 'kyr'): {exc}",
+                context="video_dt",
+            ) from exc
     if isinstance(val, str):
         import pint
         ureg = pint.UnitRegistry()
-        return float(ureg.Quantity(val).to("seconds").magnitude)
+        try:
+            return float(ureg.Quantity(val).to("seconds").magnitude)
+        except Exception as exc:
+            from mantis.errors import UnitParseError
+
+            raise UnitParseError(
+                f"Invalid time unit in '{val}' (expected time unit, e.g. 's', 'yr', 'kyr'): {exc}",
+                context="video_dt",
+            ) from exc
     return float(val)
 
 

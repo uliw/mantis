@@ -21,6 +21,17 @@ import sys
 
 import mantis.plot_data_new as _plot_data_new
 from mantis.diff_lib import get_flux, make_grid_from_sections
+from mantis.errors import (
+    FilePathError,
+    InputFileError,
+    MantisError,
+    MissingDefinitionError,
+    ReactionParseError,
+    SolverError,
+    UnitParseError,
+    ValidationError,
+    install_excepthook,
+)
 from mantis.model import DiageneticModel, DiageneticModelResult
 from mantis.plot_data_new import (
     isotopes,
@@ -29,6 +40,8 @@ from mantis.plot_data_new import (
     solid_species,
 )
 from mantis.report_generator import generate_simulation_report
+
+install_excepthook()
 
 # Alias plot_data_new in sys.modules so 'import plot_data_new' and
 # 'from plot_data_new import ...' work seamlessly even if mantis is installed as a package
@@ -44,5 +57,13 @@ __all__ = [
     "solid_species",
     "reaction_rates",
     "isotopes",
+    "MantisError",
+    "InputFileError",
+    "MissingDefinitionError",
+    "ValidationError",
+    "ReactionParseError",
+    "UnitParseError",
+    "FilePathError",
+    "SolverError",
 ]
 

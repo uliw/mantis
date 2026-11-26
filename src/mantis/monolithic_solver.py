@@ -1232,7 +1232,12 @@ def run_non_steady_state_solver_monolithic(
                     current_dt = max(current_dt * dt_controller.cut_factor, dt_controller.dt_min)
                     dt_controller._dt = current_dt
                     if current_dt <= dt_controller.dt_min + 1e-15:
-                        raise RuntimeError(f"Monolithic solver failed at dt_min: {ex}") from ex
+                        from mantis.errors import SolverError
+
+                        raise SolverError(
+                            f"Monolithic solver failed at dt_min: {ex}",
+                            context="Monolithic solver",
+                        ) from ex
                     continue
 
             # Step accepted
