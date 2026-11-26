@@ -867,7 +867,7 @@ def resolve_and_prepare_equations(
 
     Resolution scheme:
       reactions: defaults to f"{experiment}_reactions.py"
-      equations: defaults to f"{experiment}_equations.py"
+      equations: defaults to f"logs/{experiment}_equations.py" (bare filenames are placed in logs/)
       kinetic_constants: defaults to "reaction_constants.py"
       limiters: defaults to "limiters.py"
 
@@ -914,8 +914,18 @@ def resolve_and_prepare_equations(
     lim_val = p_dict.get("limiters")
     sp_val = p_dict.get("species")
 
+    def _resolve_equations(val: Any, default_name: str) -> Path:
+        filename = default_name if (val is None or val == "file_name") else str(val)
+        p = Path(filename)
+        if p.is_absolute():
+            return p.resolve()
+        # Bare filenames (e.g. "equations.py" or default) are stored under base_dir/logs/
+        if p.parent == Path("."):
+            return (base_dir / "logs" / p.name).resolve()
+        return (base_dir / p).resolve()
+
     reactions_path = _resolve(rxn_val, f"{exp}_reactions.py")
-    equations_path = _resolve(eq_val, f"{exp}_equations.py")
+    equations_path = _resolve_equations(eq_val, f"{exp}_equations.py")
     constants_path = _resolve(kc_val, "reaction_constants.py")
     species_path = _resolve(sp_val, "species.py")
 
