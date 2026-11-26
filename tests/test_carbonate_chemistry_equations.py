@@ -34,11 +34,11 @@ def get_limiters(c, mp):
     # Dynamically extract half-saturation constants in species native phase units
     K_Fe3 = getattr(mp, "K_Fe3", 0.0)
     K_Fe3_diss_red = getattr(mp, "K_Fe3_diss_red", 0.0)
+    K_H2S_tot_alpha = getattr(mp, "K_H2S_tot_alpha", 0.0)
     K_O2 = getattr(mp, "K_O2", 0.0)
     K_O2_H2S_tot = getattr(mp, "K_O2_H2S_tot", 0.0)
     K_SO4 = getattr(mp, "K_SO4", 0.0)
     K_SO4_alpha = getattr(mp, "K_SO4_alpha", 0.0)
-    K_H2S_tot_alpha = getattr(mp, "K_H2S_tot_alpha", 0.0)
     _l_O2 = 1.0 / (c.O2 + K_O2)
     limiters["O2"] = _l_O2
     limiters["O2_implicit"] = _l_O2
@@ -673,14 +673,14 @@ def compute_chemical_jacobian(c, mp, k, species_names):
         J[:, idx["TA"], idx["Fe3"]] += 8.0 * d_Fe3_dissimilatory_iron_reduction_slow
 
     # Reaction: sulfate_reduction_fast (2 POC_fast + SO4 -> H2S_tot + 2 DIC + 2 TA)
-    if "DIC" in idx and "POC_fast" in idx and "SO4" in idx and "TA" in idx and "H2S_tot" in idx:
+    if "DIC" in idx and "H2S_tot" in idx and "POC_fast" in idx and "SO4" in idx and "TA" in idx:
         _raw_k_sulfate_reduction_fast = mp.k.get("POC_fast") if hasattr(mp, "k") else getattr(k, "POC_fast", 0.0)
         k_num_sulfate_reduction_fast = np.asarray(_raw_k_sulfate_reduction_fast, dtype=np.float64) if np.ndim(_raw_k_sulfate_reduction_fast) > 0 else float(_raw_k_sulfate_reduction_fast)
         c_DIC = np.asarray(c["DIC"].value if hasattr(c["DIC"], "value") else c["DIC"])
+        c_H2S_tot = np.asarray(c["H2S_tot"].value if hasattr(c["H2S_tot"], "value") else c["H2S_tot"])
         c_POC_fast = np.asarray(c["POC_fast"].value if hasattr(c["POC_fast"], "value") else c["POC_fast"])
         c_SO4 = np.asarray(c["SO4"].value if hasattr(c["SO4"], "value") else c["SO4"])
         c_TA = np.asarray(c["TA"].value if hasattr(c["TA"], "value") else c["TA"])
-        c_H2S_tot = np.asarray(c["H2S_tot"].value if hasattr(c["H2S_tot"], "value") else c["H2S_tot"])
         _lim_SO4 = lim.get("SO4_implicit", lim.get("SO4", 1.0))
         _inh_O2 = lim.get("O2_inhibit", lim.get("O2_inhib", 1.0))
         _inh_Fe3_diss_red = lim.get("Fe3_diss_red_inhibit", lim.get("Fe3_diss_red_inhib", 1.0))
@@ -710,14 +710,14 @@ def compute_chemical_jacobian(c, mp, k, species_names):
                 J[:, idx["H2S_tot_S32"], idx["SO4_S32"]] += 1.0 * d_SO4_sulfate_reduction_fast
 
     # Reaction: sulfate_reduction_slow (2 POC_slow + SO4 -> H2S_tot + 2 DIC + 2 TA)
-    if "DIC" in idx and "POC_slow" in idx and "SO4" in idx and "TA" in idx and "H2S_tot" in idx:
+    if "DIC" in idx and "H2S_tot" in idx and "POC_slow" in idx and "SO4" in idx and "TA" in idx:
         _raw_k_sulfate_reduction_slow = mp.k.get("POC_slow") if hasattr(mp, "k") else getattr(k, "POC_slow", 0.0)
         k_num_sulfate_reduction_slow = np.asarray(_raw_k_sulfate_reduction_slow, dtype=np.float64) if np.ndim(_raw_k_sulfate_reduction_slow) > 0 else float(_raw_k_sulfate_reduction_slow)
         c_DIC = np.asarray(c["DIC"].value if hasattr(c["DIC"], "value") else c["DIC"])
+        c_H2S_tot = np.asarray(c["H2S_tot"].value if hasattr(c["H2S_tot"], "value") else c["H2S_tot"])
         c_POC_slow = np.asarray(c["POC_slow"].value if hasattr(c["POC_slow"], "value") else c["POC_slow"])
         c_SO4 = np.asarray(c["SO4"].value if hasattr(c["SO4"], "value") else c["SO4"])
         c_TA = np.asarray(c["TA"].value if hasattr(c["TA"], "value") else c["TA"])
-        c_H2S_tot = np.asarray(c["H2S_tot"].value if hasattr(c["H2S_tot"], "value") else c["H2S_tot"])
         _lim_SO4 = lim.get("SO4_implicit", lim.get("SO4", 1.0))
         _inh_O2 = lim.get("O2_inhibit", lim.get("O2_inhib", 1.0))
         _inh_Fe3_diss_red = lim.get("Fe3_diss_red_inhibit", lim.get("Fe3_diss_red_inhib", 1.0))
@@ -747,13 +747,13 @@ def compute_chemical_jacobian(c, mp, k, species_names):
                 J[:, idx["H2S_tot_S32"], idx["SO4_S32"]] += 1.0 * d_SO4_sulfate_reduction_slow
 
     # Reaction: hs_oxidation (1 HS + 2 O2 + 1 TA -> 1 SO4)
-    if "O2" in idx and "SO4" in idx and "TA" in idx and "H2S_tot" in idx:
+    if "H2S_tot" in idx and "O2" in idx and "SO4" in idx and "TA" in idx:
         _raw_k_hs_oxidation = mp.k.get("H2S_tot_O2") if hasattr(mp, "k") else getattr(k, "H2S_tot_O2", 0.0)
         k_num_hs_oxidation = np.asarray(_raw_k_hs_oxidation, dtype=np.float64) if np.ndim(_raw_k_hs_oxidation) > 0 else float(_raw_k_hs_oxidation)
+        c_H2S_tot = np.asarray(c["H2S_tot"].value if hasattr(c["H2S_tot"], "value") else c["H2S_tot"])
         c_O2 = np.asarray(c["O2"].value if hasattr(c["O2"], "value") else c["O2"])
         c_SO4 = np.asarray(c["SO4"].value if hasattr(c["SO4"], "value") else c["SO4"])
         c_TA = np.asarray(c["TA"].value if hasattr(c["TA"], "value") else c["TA"])
-        c_H2S_tot = np.asarray(c["H2S_tot"].value if hasattr(c["H2S_tot"], "value") else c["H2S_tot"])
         _lim_O2_H2S_tot = lim.get("O2_H2S_tot_implicit", lim.get("O2_H2S_tot", 1.0))
         d_H2S_tot_hs_oxidation = diss_fac * (k_num_hs_oxidation / 1.0) * (mp.hs_frac) * c_O2 * _lim_O2_H2S_tot
         J[:, idx["H2S_tot"], idx["H2S_tot"]] -= 1.0 * d_H2S_tot_hs_oxidation
@@ -779,14 +779,14 @@ def compute_chemical_jacobian(c, mp, k, species_names):
                 J[:, idx["SO4_S32"], idx["O2"]] += 1.0 * d_O2_hs_oxidation * _f_iso
 
     # Reaction: sulfide_mediated_iron_reduction_velde (HS + 8 Fe3 -> SO4 + 8 Fe2_total + 15 TA)
-    if "Fe2_total" in idx and "Fe3" in idx and "SO4" in idx and "TA" in idx and "H2S_tot" in idx:
+    if "Fe2_total" in idx and "Fe3" in idx and "H2S_tot" in idx and "SO4" in idx and "TA" in idx:
         _raw_k_sulfide_mediated_iron_reduction_velde = mp.k.get("Fe3_hs") if hasattr(mp, "k") else getattr(k, "Fe3_hs", 0.0)
         k_num_sulfide_mediated_iron_reduction_velde = np.asarray(_raw_k_sulfide_mediated_iron_reduction_velde, dtype=np.float64) if np.ndim(_raw_k_sulfide_mediated_iron_reduction_velde) > 0 else float(_raw_k_sulfide_mediated_iron_reduction_velde)
         c_Fe2_total = np.asarray(c["Fe2_total"].value if hasattr(c["Fe2_total"], "value") else c["Fe2_total"])
         c_Fe3 = np.asarray(c["Fe3"].value if hasattr(c["Fe3"], "value") else c["Fe3"])
+        c_H2S_tot = np.asarray(c["H2S_tot"].value if hasattr(c["H2S_tot"], "value") else c["H2S_tot"])
         c_SO4 = np.asarray(c["SO4"].value if hasattr(c["SO4"], "value") else c["SO4"])
         c_TA = np.asarray(c["TA"].value if hasattr(c["TA"], "value") else c["TA"])
-        c_H2S_tot = np.asarray(c["H2S_tot"].value if hasattr(c["H2S_tot"], "value") else c["H2S_tot"])
         _lim_Fe3 = lim.get("Fe3_implicit", lim.get("Fe3", 1.0))
         _inh_O2 = lim.get("O2_inhibit", lim.get("O2_inhib", 1.0))
         d_H2S_tot_sulfide_mediated_iron_reduction_velde = solid_fac * (k_num_sulfide_mediated_iron_reduction_velde / 8.0) * (mp.hs_frac) * c_Fe3 * _lim_Fe3 * _inh_O2
@@ -870,7 +870,7 @@ def compute_chemical_jacobian(c, mp, k, species_names):
     # Reversible Saturation: FeS_precipitation_dissolution
     if "Fe2_total" in idx and "H2S_tot" in idx and "FeS" in idx:
         i_fe2_total = idx["Fe2_total"]
-        i_H2S_tot = idx["H2S_tot"]
+        i_h2s_tot = idx["H2S_tot"]
         i_fes = idx["FeS"]
         Fe2_total_val = np.maximum(c["Fe2_total"].value if hasattr(c["Fe2_total"], "value") else c["Fe2_total"], 1e-20)
         Fe2_liq_pw = Fe2_total_val * (getattr(mp, 'Fe2_total_dissolved', getattr(mp, 'Fe2_liq', 1.0)))
@@ -912,13 +912,13 @@ def compute_chemical_jacobian(c, mp, k, species_names):
         d_net_dFeS = -dRd_dFeS
         J[:, i_fes, i_fe2_total] += d_net_dFe2_total
         J[:, i_fe2_total, i_fe2_total] -= d_net_dFe2_total
-        J[:, i_H2S_tot, i_fe2_total] -= d_net_dFe2_total
-        J[:, i_fes, i_H2S_tot] += d_net_dH2S_tot
-        J[:, i_fe2_total, i_H2S_tot] -= d_net_dH2S_tot
-        J[:, i_H2S_tot, i_H2S_tot] -= d_net_dH2S_tot
+        J[:, i_h2s_tot, i_fe2_total] -= d_net_dFe2_total
+        J[:, i_fes, i_h2s_tot] += d_net_dH2S_tot
+        J[:, i_fe2_total, i_h2s_tot] -= d_net_dH2S_tot
+        J[:, i_h2s_tot, i_h2s_tot] -= d_net_dH2S_tot
         J[:, i_fes, i_fes] += d_net_dFeS
         J[:, i_fe2_total, i_fes] -= d_net_dFeS
-        J[:, i_H2S_tot, i_fes] -= d_net_dFeS
+        J[:, i_h2s_tot, i_fes] -= d_net_dFeS
         if has_carb:
             _Ka1_h2s = 10.0 ** (-float(getattr(mp, "pKa1_H2S", 7.0))) if hasattr(mp, "pKa1_H2S") else float(getattr(mp, "K_a1_h2s", 10.0 ** (-7.0)))
             _domega_dh = -omega * (1.0 / (_h + 1e-30) + 1.0 / (_h + _Ka1_h2s + 1e-30))
@@ -928,18 +928,18 @@ def compute_chemical_jacobian(c, mp, k, species_names):
             J[:, i_fes, idx["DIC"]] += _d_net_dDIC
             J[:, i_fe2_total, idx["TA"]] -= _d_net_dTA
             J[:, i_fe2_total, idx["DIC"]] -= _d_net_dDIC
-            J[:, i_H2S_tot, idx["TA"]] -= _d_net_dTA
-            J[:, i_H2S_tot, idx["DIC"]] -= _d_net_dDIC
+            J[:, i_h2s_tot, idx["TA"]] -= _d_net_dTA
+            J[:, i_h2s_tot, idx["DIC"]] -= _d_net_dDIC
         if "TA" in idx:
             J[:, idx["TA"], i_fe2_total] -= 2.0 * d_net_dFe2_total
-            J[:, idx["TA"], i_H2S_tot] -= 2.0 * d_net_dH2S_tot
+            J[:, idx["TA"], i_h2s_tot] -= 2.0 * d_net_dH2S_tot
             J[:, idx["TA"], i_fes] -= 2.0 * d_net_dFeS
             if has_carb:
                 J[:, idx["TA"], idx["TA"]] -= 2.0 * _d_net_dTA
                 J[:, idx["TA"], idx["DIC"]] -= 2.0 * _d_net_dDIC
         if "FeS_S32" in idx and "H2S_tot_S32" in idx and getattr(mp, "isotopes", False):
             i_fes_s32 = idx["FeS_S32"]
-            i_H2S_tot_s32 = idx["H2S_tot_S32"]
+            i_h2s_tot_s32 = idx["H2S_tot_S32"]
             eq_alpha = getattr(mp, "h2s_hs_alpha", getattr(mp, "h2s_hs_alpha", 1.0))
             HS_iso = partition_equilibrium_isotope(
                 c["H2S_tot_S32"].value if hasattr(c["H2S_tot_S32"], "value") else c["H2S_tot_S32"],
@@ -964,22 +964,22 @@ def compute_chemical_jacobian(c, mp, k, species_names):
             dRd_iso_dFeS = np.where(~mask_m, dRd_dFeS * f_iso_r, 0.0)
             dRd_iso_dFeS_S32 = np.where(is_diss & mask_m, R_diss_bulk / FeS_val, 0.0)
             J[:, i_fes_s32, i_fe2_total] += (dRp_iso_dFe2_total - dRd_iso_dFe2_total)
-            J[:, i_H2S_tot_s32, i_fe2_total] -= (dRp_iso_dFe2_total - dRd_iso_dFe2_total)
-            J[:, i_fes_s32, i_H2S_tot] += (dRp_iso_dH2S_tot - dRd_iso_dH2S_tot)
-            J[:, i_H2S_tot_s32, i_H2S_tot] -= (dRp_iso_dH2S_tot - dRd_iso_dH2S_tot)
+            J[:, i_h2s_tot_s32, i_fe2_total] -= (dRp_iso_dFe2_total - dRd_iso_dFe2_total)
+            J[:, i_fes_s32, i_h2s_tot] += (dRp_iso_dH2S_tot - dRd_iso_dH2S_tot)
+            J[:, i_h2s_tot_s32, i_h2s_tot] -= (dRp_iso_dH2S_tot - dRd_iso_dH2S_tot)
             J[:, i_fes_s32, i_fes] -= dRd_iso_dFeS
-            J[:, i_fes_s32, i_H2S_tot_s32] += dRp_iso_dH2S_tot_S32
+            J[:, i_fes_s32, i_h2s_tot_s32] += dRp_iso_dH2S_tot_S32
             J[:, i_fes_s32, i_fes_s32] -= dRd_iso_dFeS_S32
-            J[:, i_H2S_tot_s32, i_fes] += dRd_iso_dFeS
-            J[:, i_H2S_tot_s32, i_H2S_tot_s32] -= dRp_iso_dH2S_tot_S32
-            J[:, i_H2S_tot_s32, i_fes_s32] += dRd_iso_dFeS_S32
+            J[:, i_h2s_tot_s32, i_fes] += dRd_iso_dFeS
+            J[:, i_h2s_tot_s32, i_h2s_tot_s32] -= dRp_iso_dH2S_tot_S32
+            J[:, i_h2s_tot_s32, i_fes_s32] += dRd_iso_dFeS_S32
             if has_carb:
                 _d_net_dTA_iso = (dR_prec_domega * diss_fac * f_iso_r - dR_diss_domega * solid_fac * f_iso_m) * _domega_dh * _dh_dta
                 _d_net_dDIC_iso = (dR_prec_domega * diss_fac * f_iso_r - dR_diss_domega * solid_fac * f_iso_m) * _domega_dh * _dh_ddic
                 J[:, i_fes_s32, idx["TA"]] += _d_net_dTA_iso
                 J[:, i_fes_s32, idx["DIC"]] += _d_net_dDIC_iso
-                J[:, i_H2S_tot_s32, idx["TA"]] -= _d_net_dTA_iso
-                J[:, i_H2S_tot_s32, idx["DIC"]] -= _d_net_dDIC_iso
+                J[:, i_h2s_tot_s32, idx["TA"]] -= _d_net_dTA_iso
+                J[:, i_h2s_tot_s32, idx["DIC"]] -= _d_net_dDIC_iso
 
     # Reaction: calcite_dissolution (CaCO3 -> Ca2 + DIC + 2 TA)
     if "Ca2" in idx and "CaCO3" in idx and "DIC" in idx and "TA" in idx:
