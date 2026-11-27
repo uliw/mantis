@@ -20,8 +20,8 @@ from __future__ import annotations
 """Monolithic Block Newton-Raphson Solver for MANTIS.
 
 Solves the coupled non-steady-state reactive-transport system as a monolithic
-nonlinear system using a Block Tridiagonal Matrix Algorithm (Block TDMA)
-accelerated with Numba.
+nonlinear system using a banded LAPACK LU solver (``dgbsv``) fed by a
+Numba-accelerated band packer.
 
 Eliminates decoupled Picard/Gauss-Seidel cross-species lag oscillations by
 solving all chemical species simultaneously with a fully coupled chemical Jacobian.
@@ -48,10 +48,13 @@ from .diff_lib import (
 )
 from .live_plot_lib import parse_time_to_seconds, save_final_pdf, write_to_queue_async
 from .solvers_numba import (
+    blas_thread_limit,
     compute_species_residual_linf,
     compute_species_residual_wrms,
     compute_weighted_residual_norm_wrms,
-    solve_block_tridiagonal_thomas,
+    pack_block_tridiagonal_dgbsv_from_jacobian,
+    recommended_blas_threads,
+    solve_dgbsv_banded,
 )
 
 
@@ -238,7 +241,8 @@ def build_native_1d_transport_stencil(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Constructs the exact 1D tridiagonal finite-volume transport stencil in pure NumPy.
 
-    Returns:
+    Returns
+    -------
         ab: shape (3, N) banded matrix (row 0: upper, row 1: diag, row 2: lower)
         b_transport: shape (N,) boundary flux vector
 
@@ -838,10 +842,8 @@ class MonolithicNewtonSystem:
             self.species_names[idx] for idx in self.dynamic_mixed_indices
         ]
 
-        # Preallocated scratch buffers for Block TDMA
-        self.B_work = np.zeros((N, S, S), dtype=np.float64)
-        self.C_prime = np.zeros((N, S, S), dtype=np.float64)
-        self.D_prime = np.zeros((N, S), dtype=np.float64)
+        # Preallocated scratch buffers for LAPACK banded linear system solver
+        self.ab_banded = np.zeros((3 * S + 1, N * S), dtype=np.float64, order="F")
         self.res = np.zeros((N, S), dtype=np.float64)
         self.delta_u = np.zeros((N, S), dtype=np.float64)
         self.u_curr = np.zeros((N, S), dtype=np.float64)
@@ -935,7 +937,7 @@ def run_non_steady_state_solver_monolithic(
     plot_queue: Any | None = None,
 ) -> tuple[int, float]:
     """Solves the non-steady state ADR reactive transport system using a Monolithic
-    Block Newton-Raphson backend with Numba Block TDMA.
+    Block Newton-Raphson backend with LAPACK banded LU (``dgbsv``).
     """
     log_file = (
         open("solver_debug.log", "w", buffering=1)
@@ -975,6 +977,13 @@ def run_non_steady_state_solver_monolithic(
 
     N = mono_system.num_cells
     S = mono_system.num_species
+
+    requested_blas_threads = getattr(mp, "blas_threads", None)
+    effective_blas_threads = recommended_blas_threads(S, requested=requested_blas_threads)
+    _log(
+        "Monolithic solver: BLAS thread limit = "
+        f"{effective_blas_threads if effective_blas_threads is not None else 'environment default'} (S={S})"
+    )
 
     # Newton convergence settings
     max_newton_iters = int(getattr(mp, "max_newton_iters", 8))
@@ -1043,278 +1052,274 @@ def run_non_steady_state_solver_monolithic(
     total_newton_iters = 0
 
     try:
-        while (max_steps is None or step < max_steps) and total_time < t_end:
-            step += 1
+        with blas_thread_limit(effective_blas_threads):
+            while (max_steps is None or step < max_steps) and total_time < t_end:
+                step += 1
 
-            for s_obj in species_struct:
-                s_obj["var"].updateOld()
+                for s_obj in species_struct:
+                    s_obj["var"].updateOld()
 
-            mono_system.load_state()
-            u_old = mono_system.u_old.copy()
+                mono_system.load_state()
+                u_old = mono_system.u_old.copy()
 
-            step_converged = False
-            step_first_attempt = True
+                step_converged = False
+                step_first_attempt = True
 
-            while not step_converged:
-                try:
-                    # Current iterate starting at previous time step solution
-                    u_curr = u_old.copy() if step_first_attempt else mono_system.u_curr.copy()
-                    prev_wrms_err = math.inf
+                while not step_converged:
+                    try:
+                        # Current iterate starting at previous time step solution
+                        u_curr = u_old.copy() if step_first_attempt else mono_system.u_curr.copy()
+                        prev_wrms_err = math.inf
 
-                    for iter_idx in range(1, max_newton_iters + 1):
-                        total_newton_iters += 1
-                        governor_stats.total_sweeps += 1
+                        for iter_idx in range(1, max_newton_iters + 1):
+                            total_newton_iters += 1
+                            governor_stats.total_sweeps += 1
 
-                        # 1. Evaluate base reaction rates & update dynamic mixed-phase transport
-                        rates_base = _eval_rates(u_curr, current_dt)
-                        mono_system.update_dynamic_transport(c_numpy, mp_numpy)
-
-                        # 2. Form residual vector R = (eff_phi_vol / dt)*(u - u_old) + T*u - b_trans - vol*rates
-                        Tu = mono_system.evaluate_transport_operator(u_curr)
-                        R = (mono_system.eff_phi_vol / current_dt) * (u_curr - u_old) + Tu - mono_system.b_transport
-                        for s_idx, s_name in enumerate(mono_system.species_names):
-                            r_bulk = rates_base.get(s_name, 0.0)
-                            if hasattr(r_bulk, "value"):
-                                r_bulk = np.asarray(r_bulk.value)
-                            R[:, s_idx] -= mono_system.vol * r_bulk
-
-                        # 3. Form Chemical Jacobian J_chem[:, s, m] = dR_s / dC_m
-                        if jacobian_fn is not None:
-                            mono_system.J_chem[:] = jacobian_fn(
-                                c_numpy, mp_numpy, k, mono_system.species_names
-                            )
-                        else:
-                            mono_system.J_chem.fill(0.0)
-                            eps_rel = 1e-7
-                            for m_idx, m_name in enumerate(mono_system.species_names):
-                                cm = u_curr[:, m_idx]
-                                delta_m = eps_rel * np.maximum(np.abs(cm), 1e-6)
-
-                                u_curr[:, m_idx] += delta_m
-                                rates_pert = _eval_rates(u_curr, current_dt)
-                                u_curr[:, m_idx] -= delta_m
-
-                                for s_idx, s_name in enumerate(mono_system.species_names):
-                                    r_p = rates_pert.get(s_name, 0.0)
-                                    r_b = rates_base.get(s_name, 0.0)
-                                    if hasattr(r_p, "value"):
-                                        r_p = np.asarray(r_p.value)
-                                    if hasattr(r_b, "value"):
-                                        r_b = np.asarray(r_b.value)
-                                    mono_system.J_chem[:, s_idx, m_idx] = (r_p - r_b) / delta_m
-
-                        # 4. Assemble Block Tridiagonal Matrix B_i
-                        # B_i[s, m] = delta_{sm} * (eff_phi_vol / dt + B_trans) - vol * J_chem[s, m]
-                        mono_system.B_work.fill(0.0)
-                        vol_col = mono_system.vol[:, np.newaxis, np.newaxis]
-                        mono_system.B_work = -vol_col * mono_system.J_chem
-
-                        inv_dt = mono_system.eff_phi_vol / current_dt + mono_system.B_trans
-                        for s_idx in range(S):
-                            mono_system.B_work[:, s_idx, s_idx] += inv_dt[:, s_idx]
-
-                        # RHS: -R
-                        mono_system.res[:] = -R
-
-                        # 5. Solve block tridiagonal linear system for delta_u
-                        solve_block_tridiagonal_thomas(
-                            mono_system.A,
-                            mono_system.B_work,
-                            mono_system.C,
-                            mono_system.res,
-                            mono_system.delta_u,
-                            mono_system.C_prime,
-                            mono_system.D_prime,
-                        )
-
-                        # 6. Backtracking line search with non-negativity protection
-                        is_wrms_ls = (getattr(mp, "newton_line_search_norm", "l2") == "wrms")
-                        if is_wrms_ls:
-                            res_norm_curr = compute_weighted_residual_norm_wrms(
-                                R, inv_dt, u_curr, mono_system.atol_vec, newton_tol
-                            )
-                        else:
-                            res_norm_curr = np.sqrt(np.mean(R**2))
-
-                        alpha = 1.0
-                        u_best = u_curr.copy()
-                        min_res_norm = res_norm_curr
-                        best_alpha = 1.0
-
-                        for line_step in range(4):
-                            u_trial = u_curr + alpha * mono_system.delta_u
-                            neg_mask = u_trial < 0.0
-                            if np.any(neg_mask):
-                                u_trial[neg_mask] = np.where(u_curr[neg_mask] < 1e-6, 0.0, 0.1 * u_curr[neg_mask])
-
-                            rates_trial = _eval_rates(u_trial, current_dt)
+                            # 1. Evaluate base reaction rates & update dynamic mixed-phase transport
+                            rates_base = _eval_rates(u_curr, current_dt)
                             mono_system.update_dynamic_transport(c_numpy, mp_numpy)
-                            Tu_trial = mono_system.evaluate_transport_operator(u_trial)
-                            R_trial = (mono_system.eff_phi_vol / current_dt) * (u_trial - u_old) + Tu_trial - mono_system.b_transport
+
+                            # 2. Form residual vector R = (eff_phi_vol / dt)*(u - u_old) + T*u - b_trans - vol*rates
+                            Tu = mono_system.evaluate_transport_operator(u_curr)
+                            R = (mono_system.eff_phi_vol / current_dt) * (u_curr - u_old) + Tu - mono_system.b_transport
                             for s_idx, s_name in enumerate(mono_system.species_names):
-                                r_bulk = rates_trial.get(s_name, 0.0)
+                                r_bulk = rates_base.get(s_name, 0.0)
                                 if hasattr(r_bulk, "value"):
                                     r_bulk = np.asarray(r_bulk.value)
-                                R_trial[:, s_idx] -= mono_system.vol * r_bulk
+                                R[:, s_idx] -= mono_system.vol * r_bulk
 
-                            if is_wrms_ls:
-                                res_norm_trial = compute_weighted_residual_norm_wrms(
-                                    R_trial, inv_dt, u_trial, mono_system.atol_vec, newton_tol
+                            # 3. Form Chemical Jacobian J_chem[:, s, m] = dR_s / dC_m
+                            if jacobian_fn is not None:
+                                mono_system.J_chem[:] = jacobian_fn(
+                                    c_numpy, mp_numpy, k, mono_system.species_names
                                 )
                             else:
-                                res_norm_trial = np.sqrt(np.mean(R_trial**2))
+                                mono_system.J_chem.fill(0.0)
+                                eps_rel = 1e-7
+                                for m_idx, m_name in enumerate(mono_system.species_names):
+                                    cm = u_curr[:, m_idx]
+                                    delta_m = eps_rel * np.maximum(np.abs(cm), 1e-6)
 
-                            if res_norm_trial < min_res_norm or line_step == 3:
-                                min_res_norm = res_norm_trial
-                                u_best = u_trial
-                                best_alpha = alpha
-                                break
-                            alpha *= 0.5
-                            u_best = u_trial
-                            best_alpha = alpha
+                                    u_curr[:, m_idx] += delta_m
+                                    rates_pert = _eval_rates(u_curr, current_dt)
+                                    u_curr[:, m_idx] -= delta_m
 
-                        # 7. Check convergence on actual projected step
-                        raw_newton_err = 0.0
-                        err_by_sp = {}
-                        is_wrms = (newton_norm == "wrms")
-                        for s_idx in range(S):
-                            atol_s = mono_system.atol_vec[s_idx]
-                            if is_wrms:
-                                err_s = compute_species_residual_wrms(
-                                    u_best[:, s_idx],
-                                    u_curr[:, s_idx],
-                                    inner_tol=newton_tol,
-                                    atol=atol_s,
-                                )
-                            else:
-                                err_s = compute_species_residual_linf(
-                                    u_best[:, s_idx],
-                                    u_curr[:, s_idx],
-                                    inner_tol=newton_tol,
-                                    atol=atol_s,
-                                )
-                            err_by_sp[mono_system.species_names[s_idx]] = float(err_s)
-                            raw_newton_err = max(raw_newton_err, err_s)
+                                    for s_idx, s_name in enumerate(mono_system.species_names):
+                                        r_p = rates_pert.get(s_name, 0.0)
+                                        r_b = rates_base.get(s_name, 0.0)
+                                        if hasattr(r_p, "value"):
+                                            r_p = np.asarray(r_p.value)
+                                        if hasattr(r_b, "value"):
+                                            r_b = np.asarray(r_b.value)
+                                        mono_system.J_chem[:, s_idx, m_idx] = (r_p - r_b) / delta_m
 
-                        u_curr[:] = u_best
+                            # 4 & 5. Assemble and solve linear system for delta_u
+                            inv_dt = mono_system.eff_phi_vol / current_dt + mono_system.B_trans
+                            mono_system.res[:] = -R
 
-                        if getattr(mp, "verbose", False):
-                            max_du_per_species = {
-                                mono_system.species_names[s]: float(np.max(np.abs(mono_system.delta_u[:, s])))
-                                for s in range(S)
-                            }
-                            top_sp = sorted(max_du_per_species.items(), key=lambda x: x[1], reverse=True)[:3]
-                            print(
-                                f"  [Iter {iter_idx}] max_R={np.max(np.abs(R)):.2e}, "
-                                f"res_norm={min_res_norm:.2e}, "
-                                f"max_du={np.max(np.abs(mono_system.delta_u)):.2e} ({top_sp}), "
-                                f"alpha={best_alpha:.3f}, err={raw_newton_err:.2e} ({newton_norm})",
-                                flush=True,
+                            pack_block_tridiagonal_dgbsv_from_jacobian(
+                                mono_system.A,
+                                inv_dt,
+                                mono_system.C,
+                                mono_system.vol,
+                                mono_system.J_chem,
+                                mono_system.ab_banded,
+                            )
+                            solve_dgbsv_banded(
+                                S,
+                                mono_system.ab_banded,
+                                mono_system.res,
+                                mono_system.delta_u,
                             )
 
-                        res_tol = float(getattr(mp, "newton_res_tol", 1e-12))
-                        res_converged = (min_res_norm <= 1e-6) if is_wrms_ls else (min_res_norm <= res_tol)
-                        if raw_newton_err <= 1.0 or res_converged:
-                            step_converged = True
-                            last_iters = iter_idx
-                            break
+                            # 6. Backtracking line search with non-negativity protection
+                            is_wrms_ls = (getattr(mp, "newton_line_search_norm", "l2") == "wrms")
+                            if is_wrms_ls:
+                                res_norm_curr = compute_weighted_residual_norm_wrms(
+                                    R, inv_dt, u_curr, mono_system.atol_vec, newton_tol
+                                )
+                            else:
+                                res_norm_curr = np.sqrt(np.mean(R**2))
 
-                    if not step_converged:
-                        raise RuntimeError(
-                            f"Newton iteration failed to converge in {max_newton_iters} iterations (err={raw_newton_err:.2e}, details={err_by_sp})"
-                        )
+                            alpha = 1.0
+                            u_best = u_curr.copy()
+                            min_res_norm = res_norm_curr
+                            best_alpha = 1.0
 
-                except Exception as ex:
-                    # Step failed: cut dt and retry
-                    step_first_attempt = False
-                    if getattr(mp, "verbose", False):
-                        print(f"  [RETRY step {step} at time={get_time_units(total_time):.2f~P}] {ex}", flush=True)
-                    current_dt = max(current_dt * dt_controller.cut_factor, dt_controller.dt_min)
-                    dt_controller._dt = current_dt
-                    if current_dt <= dt_controller.dt_min + 1e-15:
-                        from mantis.errors import SolverError
+                            for line_step in range(4):
+                                u_trial = u_curr + alpha * mono_system.delta_u
+                                neg_mask = u_trial < 0.0
+                                if np.any(neg_mask):
+                                    u_trial[neg_mask] = np.where(u_curr[neg_mask] < 1e-6, 0.0, 0.1 * u_curr[neg_mask])
 
-                        raise SolverError(
-                            f"Monolithic solver failed at dt_min: {ex}",
-                            context="Monolithic solver",
-                        ) from ex
-                    continue
+                                rates_trial = _eval_rates(u_trial, current_dt)
+                                mono_system.update_dynamic_transport(c_numpy, mp_numpy)
+                                Tu_trial = mono_system.evaluate_transport_operator(u_trial)
+                                R_trial = (mono_system.eff_phi_vol / current_dt) * (u_trial - u_old) + Tu_trial - mono_system.b_transport
+                                for s_idx, s_name in enumerate(mono_system.species_names):
+                                    r_bulk = rates_trial.get(s_name, 0.0)
+                                    if hasattr(r_bulk, "value"):
+                                        r_bulk = np.asarray(r_bulk.value)
+                                    R_trial[:, s_idx] -= mono_system.vol * r_bulk
 
-            # Step accepted
-            governor_stats.total_steps += 1
-            mono_system.sync_to_variables(u_curr)
-            if mono_system.dynamic_mixed_indices:
-                if hasattr(c, "TA") and hasattr(c, "DIC"):
-                    compute_carbonate_speciation(c, mp)
-                evaluate_mixed_phase_fractions(
-                    c,
-                    mp,
-                    species_names=mono_system._dynamic_mixed_names,
-                    update_mp=True,
-                )
-            total_time += current_dt
+                                if is_wrms_ls:
+                                    res_norm_trial = compute_weighted_residual_norm_wrms(
+                                        R_trial, inv_dt, u_trial, mono_system.atol_vec, newton_tol
+                                    )
+                                else:
+                                    res_norm_trial = np.sqrt(np.mean(R_trial**2))
 
-            # Optional post-step instantaneous reactions
-            if hasattr(mp, "instantenous_reactions") and mp.instantenous_reactions:
-                try:
-                    equilibrium_reactions(mp, c, k, None, rates_base, current_dt)
-                except Exception:
-                    pass
+                                if res_norm_trial < min_res_norm or line_step == 3:
+                                    min_res_norm = res_norm_trial
+                                    u_best = u_trial
+                                    best_alpha = alpha
+                                    break
+                                alpha *= 0.5
+                                u_best = u_trial
+                                best_alpha = alpha
 
-            # Adapt dt based on Newton iterations
-            if last_iters <= target_optimal_iters:
-                dt_controller._dt = min(current_dt * dt_controller.growth_factor, dt_controller.dt_max)
-                governor_stats.multi_sweep_sweeps += 1
-            elif last_iters <= max_acceptable_iters:
-                dt_controller._dt = min(current_dt * 1.05, dt_controller.dt_max)
-            else:
-                dt_controller._dt = max(current_dt * 0.85, dt_controller.dt_min)
-                governor_stats.graceful_sweeps += 1
-            current_dt = dt_controller._dt
+                            # 7. Check convergence on actual projected step
+                            raw_newton_err = 0.0
+                            err_by_sp = {}
+                            is_wrms = (newton_norm == "wrms")
+                            for s_idx in range(S):
+                                atol_s = mono_system.atol_vec[s_idx]
+                                if is_wrms:
+                                    err_s = compute_species_residual_wrms(
+                                        u_best[:, s_idx],
+                                        u_curr[:, s_idx],
+                                        inner_tol=newton_tol,
+                                        atol=atol_s,
+                                    )
+                                else:
+                                    err_s = compute_species_residual_linf(
+                                        u_best[:, s_idx],
+                                        u_curr[:, s_idx],
+                                        inner_tol=newton_tol,
+                                        atol=atol_s,
+                                    )
+                                err_by_sp[mono_system.species_names[s_idx]] = float(err_s)
+                                raw_newton_err = max(raw_newton_err, err_s)
 
-            # Milestone reporting
-            pct = int((total_time / t_end) * 100) if t_end < math.inf else 0
-            if step % 25 == 0 or pct >= next_milestone_pct:
-                t_str = f"{get_time_units(total_time):.1f~P}"
-                dt_str = f"{get_time_units(current_dt):.2f~P}"
-                print(f"Step {step}, time={t_str} ({pct}%), dt={dt_str}, iters={last_iters}", flush=True)
-                if pct >= next_milestone_pct:
-                    next_milestone_pct += 10
+                            u_curr[:] = u_best
 
-            # Grid-independent spatial L2 steady-state check
-            dz_weights = (mono_system.vol / np.sum(mono_system.vol))[:, None]
-            rms_change_per_sp = np.sqrt(np.sum(((u_curr - u_old)**2) * dz_weights, axis=0))
-            rms_change = float(np.max(rms_change_per_sp))
+                            if getattr(mp, "verbose", False):
+                                max_du_per_species = {
+                                    mono_system.species_names[s]: float(np.max(np.abs(mono_system.delta_u[:, s])))
+                                    for s in range(S)
+                                }
+                                top_sp = sorted(max_du_per_species.items(), key=lambda x: x[1], reverse=True)[:3]
+                                print(
+                                    f"  [Iter {iter_idx}] max_R={np.max(np.abs(R)):.2e}, "
+                                    f"res_norm={min_res_norm:.2e}, "
+                                    f"max_du={np.max(np.abs(mono_system.delta_u)):.2e} ({top_sp}), "
+                                    f"alpha={best_alpha:.3f}, err={raw_newton_err:.2e} ({newton_norm})",
+                                    flush=True,
+                                )
 
-            steady_tol = getattr(mp, "steady_state_tolerance", None)
-            if steady_tol is None:
-                dt_tol = getattr(mp, "dt_tolerance", None)
-                if dt_tol is not None and dt_tol > 1e-11:
-                    steady_tol = dt_tol
+                            res_tol = float(getattr(mp, "newton_res_tol", 1e-12))
+                            res_converged = (min_res_norm <= 1e-6) if is_wrms_ls else (min_res_norm <= res_tol)
+                            if raw_newton_err <= 1.0 or res_converged:
+                                step_converged = True
+                                last_iters = iter_idx
+                                break
 
-            if steady_tol is not None and rms_change < steady_tol and step > 5:
-                status = f"Steady State Met: rms_change {rms_change:.2e} < tolerance {steady_tol:.2e}"
-                print(f"\n[Solver] {status} at time={get_time_units(total_time):.2f~P} (step {step}).", flush=True)
-                break
+                        if not step_converged:
+                            raise RuntimeError(
+                                f"Newton iteration failed to converge in {max_newton_iters} iterations (err={raw_newton_err:.2e}, details={err_by_sp})"
+                            )
 
-            # Live plotting / Video frame dispatch
-            if plot_queue is not None and video_dt_sec is not None:
-                if (total_time - last_video_time) >= video_dt_sec or step == 1 or total_time >= t_end:
-                    last_video_time = total_time
-                    title_str = f"Time: {get_time_units(total_time):.2f~P}"
-                    write_to_queue_async(
-                        plot_queue,
-                        mp,
+                    except Exception as ex:
+                        # Step failed: cut dt and retry
+                        step_first_attempt = False
+                        if getattr(mp, "verbose", False):
+                            print(f"  [RETRY step {step} at time={get_time_units(total_time):.2f~P}] {ex}", flush=True)
+                        current_dt = max(current_dt * dt_controller.cut_factor, dt_controller.dt_min)
+                        dt_controller._dt = current_dt
+                        if current_dt <= dt_controller.dt_min + 1e-15:
+                            from mantis.errors import SolverError
+
+                            raise SolverError(
+                                f"Monolithic solver failed at dt_min: {ex}",
+                                context="Monolithic solver",
+                            ) from ex
+                        continue
+
+                # Step accepted
+                governor_stats.total_steps += 1
+                mono_system.sync_to_variables(u_curr)
+                if mono_system.dynamic_mixed_indices:
+                    if hasattr(c, "TA") and hasattr(c, "DIC"):
+                        compute_carbonate_speciation(c, mp)
+                    evaluate_mixed_phase_fractions(
                         c,
-                        getattr(mp, "k", k),
-                        species_list_full,
-                        z,
-                        D_mol,
-                        diagenetic_reactions,
-                        equilibrium_reactions,
-                        current_dt,
-                        title_str,
+                        mp,
+                        species_names=mono_system._dynamic_mixed_names,
+                        update_mp=True,
                     )
+                total_time += current_dt
+
+                # Optional post-step instantaneous reactions
+                if hasattr(mp, "instantenous_reactions") and mp.instantenous_reactions:
+                    try:
+                        equilibrium_reactions(mp, c, k, None, rates_base, current_dt)
+                    except Exception:
+                        pass
+
+                # Adapt dt based on Newton iterations
+                if last_iters <= target_optimal_iters:
+                    dt_controller._dt = min(current_dt * dt_controller.growth_factor, dt_controller.dt_max)
+                    governor_stats.multi_sweep_sweeps += 1
+                elif last_iters <= max_acceptable_iters:
+                    dt_controller._dt = min(current_dt * 1.05, dt_controller.dt_max)
+                else:
+                    dt_controller._dt = max(current_dt * 0.85, dt_controller.dt_min)
+                    governor_stats.graceful_sweeps += 1
+                current_dt = dt_controller._dt
+
+                # Milestone reporting
+                pct = int((total_time / t_end) * 100) if t_end < math.inf else 0
+                if step % 25 == 0 or pct >= next_milestone_pct:
+                    t_str = f"{get_time_units(total_time):.1f~P}"
+                    dt_str = f"{get_time_units(current_dt):.2f~P}"
+                    print(f"Step {step}, time={t_str} ({pct}%), dt={dt_str}, iters={last_iters}", flush=True)
+                    if pct >= next_milestone_pct:
+                        next_milestone_pct += 10
+
+                # Grid-independent spatial L2 steady-state check
+                dz_weights = (mono_system.vol / np.sum(mono_system.vol))[:, None]
+                rms_change_per_sp = np.sqrt(np.sum(((u_curr - u_old)**2) * dz_weights, axis=0))
+                rms_change = float(np.max(rms_change_per_sp))
+
+                steady_tol = getattr(mp, "steady_state_tolerance", None)
+                if steady_tol is None:
+                    dt_tol = getattr(mp, "dt_tolerance", None)
+                    if dt_tol is not None and dt_tol > 1e-11:
+                        steady_tol = dt_tol
+
+                if steady_tol is not None and rms_change < steady_tol and step > 5:
+                    status = f"Steady State Met: rms_change {rms_change:.2e} < tolerance {steady_tol:.2e}"
+                    print(f"\n[Solver] {status} at time={get_time_units(total_time):.2f~P} (step {step}).", flush=True)
+                    break
+
+                # Live plotting / Video frame dispatch
+                if plot_queue is not None and video_dt_sec is not None:
+                    if (total_time - last_video_time) >= video_dt_sec or step == 1 or total_time >= t_end:
+                        last_video_time = total_time
+                        title_str = f"Time: {get_time_units(total_time):.2f~P}"
+                        write_to_queue_async(
+                            plot_queue,
+                            mp,
+                            c,
+                            getattr(mp, "k", k),
+                            species_list_full,
+                            z,
+                            D_mol,
+                            diagenetic_reactions,
+                            equilibrium_reactions,
+                            current_dt,
+                            title_str,
+                        )
 
     except KeyboardInterrupt:
         status = "Interrupted by user"

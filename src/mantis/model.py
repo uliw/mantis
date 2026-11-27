@@ -60,6 +60,7 @@ from mantis.live_plot_lib import LivePlotter
 from mantis.monolithic_solver import (
     run_non_steady_state_solver_monolithic as run_solver,
 )
+from mantis.solvers_numba import normalize_blas_threads
 
 
 class DiageneticModelResult:
@@ -492,6 +493,7 @@ class DiageneticModel:
             "newton_target_optimal": 4,
             "newton_max_acceptable": 8,
             "use_numerical_jacobian": False,
+            "blas_threads": None,
         })
 
     _PHYSICAL_PARAM_UNITS: dict[str, tuple[str, str]] = {
@@ -663,6 +665,7 @@ class DiageneticModel:
             * ``newton_target_optimal`` (int, default=4): Iterations target to trigger time step expansion.
             * ``newton_max_acceptable`` (int, default=8): Iterations threshold before time step reduction.
             * ``use_numerical_jacobian`` (bool, default=False): Fall back to finite-difference numerical Jacobian.
+            * ``blas_threads`` (int or None, default=None): Max BLAS/LAPACK threads during linear solves (``None`` = auto policy).
             * ``check_reactant_coexistence`` (bool, default=False): Verify mutual exclusivity of designated reactants.
 
             **Live Video Recording**
@@ -725,6 +728,8 @@ class DiageneticModel:
                 if "profile" in c_val:
                     self.p_dict["BI_profile"] = str(c_val["profile"]).lower()
                 self.p_dict["bioirrigation"] = c_val
+            elif key == "blas_threads":
+                self.p_dict["blas_threads"] = normalize_blas_threads(val, param_name="blas_threads")
             else:
                 self.p_dict[key] = self._convert_value(val, param_name=key)
 
@@ -740,6 +745,7 @@ class DiageneticModel:
         cur_norm = self.p_dict.get("newton_norm", "linf")
         cur_opt_iters = self.p_dict.get("newton_target_optimal", 4)
         cur_max_acc_iters = self.p_dict.get("newton_max_acceptable", 6)
+        cur_blas_threads = self.p_dict.get("blas_threads", None)
 
         cur_video = self.p_dict.get("video_dt", "None")
         cur_dpi = self.p_dict.get("video_dpi", 120)
@@ -765,6 +771,7 @@ class DiageneticModel:
             ("--newton-target-optimal <int>", cur_opt_iters, "Target Newton iterations for timestep expansion"),
             ("--newton-max-acceptable <int>", cur_max_acc_iters, "Max acceptable iterations before timestep reduction"),
             ("--dt-tolerance <float>", cur_dt_tol, "Adaptive timestep convergence tolerance (e.g. 1e-5)"),
+            ("--blas-threads <int>", cur_blas_threads, "Max BLAS/LAPACK threads for linear solver (None = auto)"),
             ("--force-regen", False, "Force regeneration of equation system and analytical Jacobian"),
         ]
 
@@ -848,6 +855,12 @@ class DiageneticModel:
             type=float,
             metavar="TOL",
             help=f"Adaptive timestep tolerance (default: {cur_dt_tol})",
+        )
+        parser.add_argument(
+            "--blas-threads",
+            type=int,
+            metavar="THREADS",
+            help=f"Max BLAS/LAPACK threads for linear solver (default: {cur_blas_threads})",
         )
         parser.add_argument(
             "--force-regen",
@@ -973,6 +986,8 @@ class DiageneticModel:
             self.p_dict["newton_max_acceptable"] = parsed.newton_max_acceptable
         if parsed.dt_tolerance is not None:
             self.configure(dt_tolerance=parsed.dt_tolerance)
+        if parsed.blas_threads is not None:
+            self.configure(blas_threads=parsed.blas_threads)
         if parsed.force_regen:
             self.p_dict["force_regen"] = True
 
