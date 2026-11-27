@@ -1,6 +1,7 @@
 """Test regression benchmark for Luff and Wallmann (2003) simulation."""
 
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import numpy as np
@@ -8,30 +9,36 @@ import pandas as pd
 import pytest
 
 
-def test_luff_and_wallmann_2003_simulation_benchmark():
+def test_luff_and_wallmann_2003_simulation_benchmark(tmp_path: Path):
     """
-    Run Luff and Wallmann (2003) simulation and verify accuracy against reference results.
+    Run Luff and Wallmann (2003) simulation in an isolated temp directory and verify accuracy against reference results.
 
     Requirements:
-    1. Runs examples/Luff_and_Wallmann_2003/run_luff_model.py.
+    1. Copies examples/Luff_and_Wallmann_2003 to tmp_path and runs run_luff_model.py.
     2. Exits cleanly with returncode == 0 in under 60 seconds.
     3. Compares simulated concentrations with run_luff_model_reference.csv.
     4. Asserts normalized mean error across grid spacing is <= 1% for every active species.
     """
     repo_root = Path(__file__).resolve().parent.parent
-    sim_dir = repo_root / "src" / "mantis" / "examples" / "Luff_and_Wallmann_2003"
-    sim_script = sim_dir / "run_luff_model.py"
-    output_csv = sim_dir / "run_luff_model.csv"
-    reference_csv = sim_dir / "run_luff_model_reference.csv"
+    src_sim_dir = repo_root / "src" / "mantis" / "examples" / "Luff_and_Wallmann_2003"
+    reference_csv = src_sim_dir / "run_luff_model_reference.csv"
+
+    assert src_sim_dir.is_dir(), f"Simulation directory not found: {src_sim_dir}"
+    assert reference_csv.exists(), f"Reference CSV not found: {reference_csv}"
+
+    work_dir = tmp_path / "Luff_and_Wallmann_2003"
+    shutil.copytree(src_sim_dir, work_dir, ignore=shutil.ignore_patterns("__pycache__"))
+    sim_script = work_dir / "run_luff_model.py"
+    output_csv = work_dir / "run_luff_model.csv"
+    output_csv.unlink(missing_ok=True)
 
     assert sim_script.exists(), f"Simulation script not found: {sim_script}"
-    assert reference_csv.exists(), f"Reference CSV not found: {reference_csv}"
 
     # 1 & 2. Run simulation with a 60-second timeout
     try:
         proc = subprocess.run(
             [sys.executable, str(sim_script)],
-            cwd=str(sim_dir),
+            cwd=str(work_dir),
             capture_output=True,
             text=True,
             timeout=60,

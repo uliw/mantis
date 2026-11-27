@@ -1,6 +1,7 @@
 """Test regression and physics benchmark for Chromatographic Isotope Fractionation."""
 
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import numpy as np
@@ -45,31 +46,37 @@ def _check_weighted_errors(
         pytest.fail(f"{label} failed normalized error check:\n{report}")
 
 
-def test_chromatographic_fractionation_simulation_benchmark():
-    """Run chromatographic fractionation simulation and verify against reference & analytical solution.
+def test_chromatographic_fractionation_simulation_benchmark(tmp_path: Path):
+    """Run chromatographic fractionation simulation in an isolated temp directory and verify against reference & analytical solution.
 
     Requirements:
-    1. Runs src/mantis/examples/chromatographic_fractionation/run_chromatographic_fractionation.py.
+    1. Copies src/mantis/examples/chromatographic_fractionation to tmp_path and runs run_chromatographic_fractionation.py.
     2. Exits cleanly with returncode == 0 in under 60 seconds (typically < 2s).
     3. Compares simulated concentrations and isotope deltas with run_chromatographic_fractionation_reference.csv (<= 1%).
     4. Compares simulated concentrations and isotope deltas with analytical_ogata_banks.csv (<= 3%).
     """
     repo_root = Path(__file__).resolve().parent.parent
-    sim_dir = repo_root / "src" / "mantis" / "examples" / "chromatographic_fractionation"
-    sim_script = sim_dir / "run_chromatographic_fractionation.py"
-    output_csv = sim_dir / "run_chromatographic_fractionation.csv"
-    reference_csv = sim_dir / "run_chromatographic_fractionation_reference.csv"
-    analytical_csv = sim_dir / "analytical_ogata_banks.csv"
+    src_sim_dir = repo_root / "src" / "mantis" / "examples" / "chromatographic_fractionation"
+    reference_csv = src_sim_dir / "run_chromatographic_fractionation_reference.csv"
+    analytical_csv = src_sim_dir / "analytical_ogata_banks.csv"
 
-    assert sim_script.exists(), f"Simulation script not found: {sim_script}"
+    assert src_sim_dir.is_dir(), f"Simulation directory not found: {src_sim_dir}"
     assert reference_csv.exists(), f"Reference CSV not found: {reference_csv}"
     assert analytical_csv.exists(), f"Analytical CSV not found: {analytical_csv}"
+
+    work_dir = tmp_path / "chromatographic_fractionation"
+    shutil.copytree(src_sim_dir, work_dir, ignore=shutil.ignore_patterns("__pycache__"))
+    sim_script = work_dir / "run_chromatographic_fractionation.py"
+    output_csv = work_dir / "run_chromatographic_fractionation.csv"
+    output_csv.unlink(missing_ok=True)
+
+    assert sim_script.exists(), f"Simulation script not found: {sim_script}"
 
     # 1 & 2. Run simulation with a 60-second timeout
     try:
         proc = subprocess.run(
             [sys.executable, str(sim_script)],
-            cwd=str(sim_dir),
+            cwd=str(work_dir),
             capture_output=True,
             text=True,
             timeout=60,

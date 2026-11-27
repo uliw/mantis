@@ -4,60 +4,6 @@ Unit tests for Numba-accelerated solvers in mantis.solvers_numba.
 
 import numpy as np
 import pytest
-from scipy.linalg import solve_banded
-
-from mantis.solvers_numba import solve_tridiagonal_thomas
-
-
-def test_solve_tridiagonal_thomas_accuracy():
-    """Verify solve_tridiagonal_thomas produces identical results to scipy.linalg.solve_banded."""
-    rng = np.random.default_rng(42)
-
-    for N in [3, 10, 100, 1108]:
-        ab = np.zeros((3, N), dtype=np.float64)
-        # Off-diagonals (diffusion/advection)
-        ab[0, 1:] = -rng.uniform(0.1, 2.0, N - 1)
-        ab[2, :-1] = -rng.uniform(0.1, 2.0, N - 1)
-        # Diagonally dominant main diagonal
-        diag_base = np.zeros(N)
-        diag_base[:-1] += np.abs(ab[0, 1:])
-        diag_base[1:] += np.abs(ab[2, :-1])
-        ab[1, :] = diag_base + rng.uniform(0.5, 5.0, N)
-
-        b = rng.uniform(0.1, 10.0, N)
-
-        out = np.empty(N, dtype=np.float64)
-        c_prime = np.empty(N - 1, dtype=np.float64)
-
-        solve_tridiagonal_thomas(ab, b, out, c_prime)
-        expected = solve_banded((1, 1), ab, b)
-
-        max_abs_err = np.max(np.abs(out - expected))
-        max_rel_err = np.max(np.abs(out - expected) / np.abs(expected))
-
-        assert max_abs_err < 1e-12, f"Failed for N={N}: max_abs_err={max_abs_err}"
-        assert max_rel_err < 1e-12, f"Failed for N={N}: max_rel_err={max_rel_err}"
-
-
-def test_solve_tridiagonal_thomas_reproducibility():
-    """Verify calling solve_tridiagonal_thomas repeatedly with reused buffers is deterministic."""
-    N = 100
-    rng = np.random.default_rng(123)
-
-    ab = np.zeros((3, N), dtype=np.float64)
-    ab[0, 1:] = -1.0
-    ab[2, :-1] = -1.0
-    ab[1, :] = 3.0
-    b = rng.uniform(1.0, 5.0, N)
-
-    out1 = np.empty(N, dtype=np.float64)
-    out2 = np.empty(N, dtype=np.float64)
-    c_prime = np.empty(N - 1, dtype=np.float64)
-
-    solve_tridiagonal_thomas(ab, b, out1, c_prime)
-    solve_tridiagonal_thomas(ab, b, out2, c_prime)
-
-    np.testing.assert_array_equal(out1, out2)
 
 
 def test_compute_species_residual_wrms_accuracy():
@@ -83,46 +29,6 @@ def test_compute_species_residual_wrms_accuracy():
 
     assert abs(val_wrms - expected_wrms) < 1e-12
     assert abs(val_linf - expected_linf) < 1e-12
-
-
-def test_solve_block_tridiagonal_thomas_accuracy():
-    """Verify solve_block_tridiagonal_thomas matches dense scipy.linalg.solve to < 1e-12."""
-    from scipy.linalg import solve
-    from mantis.solvers_numba import solve_block_tridiagonal_thomas
-
-    rng = np.random.default_rng(42)
-
-    for N, S in [(3, 2), (5, 4), (50, 5), (100, 10)]:
-        A = -rng.uniform(0.1, 1.0, (N, S))
-        C = -rng.uniform(0.1, 1.0, (N, S))
-        B = rng.uniform(-0.2, 0.2, (N, S, S))
-        for i in range(N):
-            for r in range(S):
-                B[i, r, r] += 4.0 + abs(A[i, r]) + abs(C[i, r])
-        D = rng.uniform(1.0, 5.0, (N, S))
-
-        out = np.zeros((N, S), dtype=np.float64)
-        C_prime = np.zeros((N, S, S), dtype=np.float64)
-        D_prime = np.zeros((N, S), dtype=np.float64)
-
-        solve_block_tridiagonal_thomas(A, B, C, D, out, C_prime, D_prime)
-
-        # Assemble full (N*S, N*S) dense matrix for comparison
-        K = np.zeros((N * S, N * S), dtype=np.float64)
-        RHS_full = np.zeros(N * S, dtype=np.float64)
-        for i in range(N):
-            K[i * S : (i + 1) * S, i * S : (i + 1) * S] = B[i]
-            if i > 0:
-                for r in range(S):
-                    K[i * S + r, (i - 1) * S + r] = A[i, r]
-            if i < N - 1:
-                for r in range(S):
-                    K[i * S + r, (i + 1) * S + r] = C[i, r]
-            RHS_full[i * S : (i + 1) * S] = D[i]
-
-        expected = solve(K, RHS_full).reshape((N, S))
-        max_err = np.max(np.abs(out - expected))
-        assert max_err < 1e-11, f"Failed for N={N}, S={S}: max_err={max_err}"
 
 
 def test_compute_fractional_trust_region_alpha():
@@ -168,4 +74,173 @@ def test_compute_weighted_residual_norm_wrms():
 
     val = compute_weighted_residual_norm_wrms(R, inv_dt, u_curr, atol_vec, inner_tol)
     assert val == pytest.approx(expected, rel=1e-12)
+
+
+def test_solve_block_tridiagonal_banded_accuracy():
+    """Verify solve_block_tridiagonal_banded matches dense scipy.linalg.solve to < 1e-11."""
+    from scipy.linalg import solve
+    from mantis.solvers_numba import solve_block_tridiagonal_banded
+
+    rng = np.random.default_rng(42)
+
+    for N, S in [(3, 1), (3, 2), (5, 4), (50, 5), (100, 10), (20, 25)]:
+        A = -rng.uniform(0.1, 1.0, (N, S))
+        C = -rng.uniform(0.1, 1.0, (N, S))
+        B = rng.uniform(-0.2, 0.2, (N, S, S))
+        for i in range(N):
+            for r in range(S):
+                B[i, r, r] += 4.0 + abs(A[i, r]) + abs(C[i, r])
+        D = rng.uniform(1.0, 5.0, (N, S))
+
+        K = np.zeros((N * S, N * S), dtype=np.float64)
+        for i in range(N):
+            K[i * S : (i + 1) * S, i * S : (i + 1) * S] = B[i]
+            if i > 0:
+                for r in range(S):
+                    K[i * S + r, (i - 1) * S + r] = A[i, r]
+            if i < N - 1:
+                for r in range(S):
+                    K[i * S + r, (i + 1) * S + r] = C[i, r]
+        expected = solve(K, D.ravel()).reshape((N, S))
+
+        out_auto = np.zeros((N, S), dtype=np.float64)
+        solve_block_tridiagonal_banded(A, B, C, D, out_auto, ab_f=None)
+        assert np.max(np.abs(out_auto - expected)) < 1e-11
+
+        ab_f = np.zeros((3 * S + 1, N * S), dtype=np.float64, order="F")
+        out_prealloc = np.zeros((N, S), dtype=np.float64)
+        solve_block_tridiagonal_banded(A, B, C, D, out_prealloc, ab_f=ab_f)
+        assert np.max(np.abs(out_prealloc - expected)) < 1e-11
+
+
+def test_pack_block_tridiagonal_dgbsv_from_jacobian_accuracy():
+    """Verify fused Jacobian packer + dgbsv matches dense scipy.linalg.solve to < 1e-11."""
+    from scipy.linalg import solve
+    from mantis.solvers_numba import (
+        pack_block_tridiagonal_dgbsv_from_jacobian,
+        solve_dgbsv_banded,
+    )
+
+    rng = np.random.default_rng(101)
+
+    for N, S in [(5, 1), (5, 2), (40, 10)]:
+        A = -rng.uniform(0.1, 1.0, (N, S))
+        C = -rng.uniform(0.1, 1.0, (N, S))
+        inv_dt = rng.uniform(5.0, 15.0, (N, S)) + np.abs(A) + np.abs(C)
+        vol = rng.uniform(0.01, 0.5, N)
+        J_chem = rng.uniform(-0.5, 0.5, (N, S, S))
+        D = rng.uniform(-3.0, 3.0, (N, S))
+
+        B = -vol[:, None, None] * J_chem
+        for s in range(S):
+            B[:, s, s] += inv_dt[:, s]
+
+        K = np.zeros((N * S, N * S), dtype=np.float64)
+        for i in range(N):
+            K[i * S : (i + 1) * S, i * S : (i + 1) * S] = B[i]
+            if i > 0:
+                for r in range(S):
+                    K[i * S + r, (i - 1) * S + r] = A[i, r]
+            if i < N - 1:
+                for r in range(S):
+                    K[i * S + r, (i + 1) * S + r] = C[i, r]
+        expected = solve(K, D.ravel()).reshape((N, S))
+
+        ab_f = np.zeros((3 * S + 1, N * S), dtype=np.float64, order="F")
+        out_dgbsv = np.zeros((N, S), dtype=np.float64)
+        pack_block_tridiagonal_dgbsv_from_jacobian(A, inv_dt, C, vol, J_chem, ab_f)
+        solve_dgbsv_banded(S, ab_f, D, out_dgbsv)
+
+        assert np.max(np.abs(out_dgbsv - expected)) < 1e-11
+
+
+def test_solve_block_tridiagonal_banded_singular_raises():
+    """Verify a singular matrix raises numpy.linalg.LinAlgError."""
+    from mantis.solvers_numba import solve_block_tridiagonal_banded
+
+    N, S = 4, 3
+    A = np.zeros((N, S), dtype=np.float64)
+    C = np.zeros((N, S), dtype=np.float64)
+    B = np.broadcast_to(np.eye(S, dtype=np.float64), (N, S, S)).copy()
+    B[2, 1, :] = 0.0
+    D = np.ones((N, S), dtype=np.float64)
+    out = np.zeros((N, S), dtype=np.float64)
+
+    with pytest.raises(np.linalg.LinAlgError, match="Singular banded Jacobian matrix"):
+        solve_block_tridiagonal_banded(A, B, C, D, out)
+
+
+def test_recommended_blas_threads_policy(monkeypatch):
+    """Verify automatic and explicit BLAS thread policy rules."""
+    import os
+
+    from mantis.solvers_numba import BLAS_THREAD_ENV_VARS, recommended_blas_threads
+
+    for var in BLAS_THREAD_ENV_VARS:
+        monkeypatch.delenv(var, raising=False)
+
+    assert recommended_blas_threads(10) == 1
+    assert recommended_blas_threads(79) == 1
+    expected_large = min(4, os.cpu_count() or 1)
+    assert recommended_blas_threads(80) == expected_large
+    assert recommended_blas_threads(100) == expected_large
+
+    # Environment variable overrides auto selection cleanly
+    monkeypatch.setenv("OPENBLAS_NUM_THREADS", "2")
+    assert recommended_blas_threads(10) is None
+    assert recommended_blas_threads(100) is None
+
+    # Explicit user override wins even over environment variables
+    assert recommended_blas_threads(10, requested=3) == 3
+    assert recommended_blas_threads(100, requested=2) == 2
+
+    for bad in (0, -2, True):
+        with pytest.raises(ValueError, match="blas_threads"):
+            recommended_blas_threads(10, requested=bad)
+
+
+def test_blas_thread_limit_context_manager():
+    """Verify blas_thread_limit updates, solves accurately, and restores thread counts."""
+    from mantis.solvers_numba import (
+        _find_blas_thread_api,
+        blas_thread_limit,
+        solve_block_tridiagonal_banded,
+    )
+
+    with blas_thread_limit(None) as active:
+        assert active is None
+
+    for bad in (0, -1, False):
+        with pytest.raises(ValueError, match="num_threads"), blas_thread_limit(bad):
+            pass
+
+    api = _find_blas_thread_api()
+    before = int(api[0]()) if api is not None else None
+
+    with blas_thread_limit(1) as active:
+        if api is not None:
+            assert active == 1
+            assert int(api[0]()) == 1
+
+        N, S = 8, 3
+        A = np.full((N, S), -0.1, dtype=np.float64)
+        C = np.full((N, S), -0.1, dtype=np.float64)
+        B = np.broadcast_to(4.0 * np.eye(S, dtype=np.float64), (N, S, S)).copy()
+        D = np.ones((N, S), dtype=np.float64)
+        out = np.zeros((N, S), dtype=np.float64)
+        solve_block_tridiagonal_banded(A, B, C, D, out)
+        assert np.all(np.isfinite(out))
+
+    if api is not None and before is not None:
+        assert int(api[0]()) == before
+
+    with pytest.raises(RuntimeError, match="boom"), blas_thread_limit(2) as active:
+        if api is not None:
+            assert active == 2
+            assert int(api[0]()) == 2
+        raise RuntimeError("boom")
+
+    if api is not None and before is not None:
+        assert int(api[0]()) == before
+
 

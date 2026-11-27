@@ -40,15 +40,16 @@ def test_diagenetic_model_cli_empty_arg_query(capsys):
     assert "coupled" in captured.out or "monolithic" in captured.out
 
 
-def test_diagenetic_model_setup(tmp_path):
+def test_diagenetic_model_setup(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
     eq_file = tmp_path / "test_setup_exp_equations.py"
     model = DiageneticModel(
-        base_dir=EXP_DIR,
-        species="species.py",
-        reactions="reactions.py",
-        constants="kinetic_constants_fast.py",
+        base_dir=tmp_path,
+        species=EXP_DIR / "species.py",
+        reactions=EXP_DIR / "reactions.py",
+        constants=EXP_DIR / "kinetic_constants_fast.py",
         equations=eq_file,
-        layout="plot_layout.py",
+        layout=EXP_DIR / "plot_layout.py",
         experiment="test_setup_exp",
     )
     model.configure(
@@ -299,17 +300,19 @@ def test_exponential_bioturbation_profile():
     np.testing.assert_allclose(db[2], 10.0 / (np.e**2))
 
 
-def test_all_species_exported_and_saved(tmp_path):
+def test_all_species_exported_and_saved(tmp_path, monkeypatch):
     """Verify all species defined in species.py are exported to CSV/df and state .npz."""
     import numpy as np
     from mantis.diff_lib import save_data, save_state
 
+    monkeypatch.chdir(tmp_path)
     model = DiageneticModel(
-        base_dir=EXP_DIR,
-        species="species.py",
-        reactions="reactions.py",
-        constants="kinetic_constants_fast.py",
-        layout="plot_layout.py",
+        base_dir=tmp_path,
+        species=EXP_DIR / "species.py",
+        reactions=EXP_DIR / "reactions.py",
+        constants=EXP_DIR / "kinetic_constants_fast.py",
+        equations=tmp_path / "test_export_exp_equations.py",
+        layout=EXP_DIR / "plot_layout.py",
         experiment="test_export_exp",
     )
     model.configure(
@@ -382,10 +385,10 @@ def test_coupled_speciation_auto_numerical_jacobian(tmp_path):
     """Verify that coupled non-linear speciation auto-enables numerical jacobian unless explicitly set."""
     eq_file = tmp_path / "test_auto_jac_eq.py"
     model = DiageneticModel(
-        base_dir=EXP_DIR,
-        species="species.py",
-        reactions="reactions.py",
-        constants="kinetic_constants_fast.py",
+        base_dir=tmp_path,
+        species=EXP_DIR / "species.py",
+        reactions=EXP_DIR / "reactions.py",
+        constants=EXP_DIR / "kinetic_constants_fast.py",
         equations=eq_file,
     )
     model.configure(enable_iron_speciation=True, beta_FeHS=251.2)
@@ -395,10 +398,10 @@ def test_coupled_speciation_auto_numerical_jacobian(tmp_path):
 
     # When explicitly overridden to False by user, should respect user setting
     model2 = DiageneticModel(
-        base_dir=EXP_DIR,
-        species="species.py",
-        reactions="reactions.py",
-        constants="kinetic_constants_fast.py",
+        base_dir=tmp_path,
+        species=EXP_DIR / "species.py",
+        reactions=EXP_DIR / "reactions.py",
+        constants=EXP_DIR / "kinetic_constants_fast.py",
         equations=eq_file,
     )
     model2.configure(enable_iron_speciation=True, beta_FeHS=251.2, use_numerical_jacobian=False)
@@ -411,10 +414,10 @@ def test_uncoupled_fixed_ph_selects_analytical_jacobian(tmp_path):
     """Verify that uncoupled / static scalar speciation with fixed pH selects analytical Jacobian."""
     eq_file = tmp_path / "test_ana_jac_eq.py"
     model = DiageneticModel(
-        base_dir=EXP_DIR,
-        species="species.py",
-        reactions="reactions.py",
-        constants="kinetic_constants_fast.py",
+        base_dir=tmp_path,
+        species=EXP_DIR / "species.py",
+        reactions=EXP_DIR / "reactions.py",
+        constants=EXP_DIR / "kinetic_constants_fast.py",
         equations=eq_file,
     )
     # Default Velde 2016 has fixed pH, constant Fe2 partition -> uncoupled
@@ -490,8 +493,9 @@ def test_missing_ph_warning_only_when_reactions_require_ph(tmp_path, capsys):
     assert "[MANTIS ERROR] pH is not defined in the model, but is required" in captured.err
 
 
-def test_purely_diffusive_model_reactions_none(tmp_path):
+def test_purely_diffusive_model_reactions_none(tmp_path, monkeypatch):
     """Verify that setting reactions=None runs purely diffusive transport without requiring reactions.py or constants."""
+    monkeypatch.chdir(tmp_path)
     sp_file = tmp_path / "species.py"
     sp_file.write_text(
         "species = {\n"
@@ -527,8 +531,9 @@ def test_purely_diffusive_model_reactions_none(tmp_path):
     assert tracer_vals[-1] == pytest.approx(0.0, abs=1e-3)
 
 
-def test_purely_diffusive_model_empty_reactions_list(tmp_path):
+def test_purely_diffusive_model_empty_reactions_list(tmp_path, monkeypatch):
     """Verify that an empty reactions list (reactions = []) is recognized as diffusion-only."""
+    monkeypatch.chdir(tmp_path)
     sp_file = tmp_path / "species.py"
     sp_file.write_text(
         "species = {\n"
@@ -561,6 +566,51 @@ def test_purely_diffusive_model_empty_reactions_list(tmp_path):
     res = model.run()
     assert res is not None
     assert 4.5 < model._c.Tracer.value[0] <= 5.0
+
+
+def test_diagenetic_model_blas_threads_config_and_cli(tmp_path):
+    """Verify blas_threads configuration, validation, and CLI parsing."""
+    sp_file = tmp_path / "species.py"
+    sp_file.write_text(
+        "species = {\n"
+        "    'Tracer': {\n"
+        "        'phase': 'liquid',\n"
+        "        'include': True,\n"
+        "        'formula': 'Tracer',\n"
+        "        'diffusion': {'m0': 5.0, 'm1': 0.2},\n"
+        "        'bc_top': {'Dirichlet': 5.0},\n"
+        "        'bc_bottom': {'Neumann': 0.0},\n"
+        "    }\n"
+        "}\n"
+    )
+    rxn_file = tmp_path / "reactions.py"
+    rxn_file.write_text("reactions = []\n")
+
+    model = DiageneticModel(
+        base_dir=tmp_path,
+        species=sp_file,
+        reactions=rxn_file,
+        constants=None,
+        experiment="test_blas_threads",
+    )
+    assert model.p_dict["blas_threads"] is None
+
+    model.configure(blas_threads=2)
+    assert model.p_dict["blas_threads"] == 2
+    assert model.mp.blas_threads == 2
+
+    model.configure(blas_threads=None)
+    assert model.p_dict["blas_threads"] is None
+    assert model.mp.blas_threads is None
+
+    for bad in (0, -3, True, "abc", 1.5):
+        with pytest.raises(ValueError, match="blas_threads"):
+            model.configure(blas_threads=bad)
+
+    model.parse_cli_args(["--blas-threads", "3"])
+    assert model.p_dict["blas_threads"] == 3
+    assert model.mp.blas_threads == 3
+
 
 
 

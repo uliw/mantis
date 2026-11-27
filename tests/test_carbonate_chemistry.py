@@ -88,11 +88,11 @@ def test_missing_ca2_raises_error():
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures" / "carbonate_test"
 
 
-def test_model_carbonate_overrides_species_bc():
+def test_model_carbonate_overrides_species_bc(tmp_path: Path):
     """Test that carbonate_equilibrium_chemistry overrides any TA, DIC, pH in species.py."""
     from mantis import DiageneticModel
 
-    eq_file = Path(__file__).resolve().parent / "test_carbonate_chemistry_equations.py"
+    eq_file = tmp_path / "test_carbonate_chemistry_equations.py"
     model = DiageneticModel(
         base_dir=FIXTURES_DIR,
         species="species.py",
@@ -224,20 +224,19 @@ def test_species_parser_rejects_non_numeric_include_in_ta():
         parse_and_validate_species_dict(species, {})
 
 
-def test_carbonate_configured_via_speciation_block():
+def test_carbonate_configured_via_speciation_block(tmp_path: Path):
     """Test that defining carbonate system under speciation in species.py automatically configures carbonate chemistry."""
     from mantis import DiageneticModel
-    from pathlib import Path
 
     simplefe_dir = Path(__file__).resolve().parent.parent / "src" / "mantis" / "examples" / "SimpleFe"
     assert (simplefe_dir / "species.py").exists(), f"SimpleFe directory not found: {simplefe_dir}"
 
     model = DiageneticModel(
-        base_dir=simplefe_dir,
-        species="species.py",
-        reactions="reactions.py",
-        constants="kinetic_constants.py",
-        equations="equations.py",
+        base_dir=tmp_path,
+        species=simplefe_dir / "species.py",
+        reactions=simplefe_dir / "reactions.py",
+        constants=simplefe_dir / "kinetic_constants.py",
+        equations=tmp_path / "equations.py",
     )
     # Configure without passing carbonate_equilibrium_chemistry or iron speciation
     model.configure(

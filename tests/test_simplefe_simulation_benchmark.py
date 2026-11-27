@@ -1,6 +1,7 @@
 """Test regression benchmark for SimpleFe simulation (Du 2023)."""
 
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import numpy as np
@@ -8,30 +9,36 @@ import pandas as pd
 import pytest
 
 
-def test_simplefe_simulation_benchmark():
+def test_simplefe_simulation_benchmark(tmp_path: Path):
     """
-    Run SimpleFe simulation and verify accuracy against reference results.
+    Run SimpleFe simulation in an isolated temp directory and verify accuracy against reference results.
 
     Requirements:
-    1. Runs examples/SimpleFe/run_simplefe.py.
+    1. Copies examples/SimpleFe to tmp_path and runs run_simplefe.py.
     2. Exits cleanly with returncode == 0 in under 300 seconds.
     3. Compares simulated concentrations with run_simplefe_reference.csv.
     4. Asserts normalized mean error across grid spacing is <= 1% for every active species.
     """
     repo_root = Path(__file__).resolve().parent.parent
-    sim_dir = repo_root / "src" / "mantis" / "examples" / "SimpleFe"
-    sim_script = sim_dir / "run_simplefe.py"
-    output_csv = sim_dir / "run_simplefe.csv"
-    reference_csv = sim_dir / "run_simplefe_reference.csv"
+    src_sim_dir = repo_root / "src" / "mantis" / "examples" / "SimpleFe"
+    reference_csv = src_sim_dir / "run_simplefe_reference.csv"
+
+    assert src_sim_dir.is_dir(), f"Simulation directory not found: {src_sim_dir}"
+    assert reference_csv.exists(), f"Reference CSV not found: {reference_csv}"
+
+    work_dir = tmp_path / "SimpleFe"
+    shutil.copytree(src_sim_dir, work_dir, ignore=shutil.ignore_patterns("__pycache__"))
+    sim_script = work_dir / "run_simplefe.py"
+    output_csv = work_dir / "run_simplefe.csv"
+    output_csv.unlink(missing_ok=True)
 
     assert sim_script.exists(), f"Simulation script not found: {sim_script}"
-    assert reference_csv.exists(), f"Reference CSV not found: {reference_csv}"
 
     # 1 & 2. Run simulation with a 300-second timeout
     try:
         proc = subprocess.run(
             [sys.executable, str(sim_script)],
-            cwd=str(sim_dir),
+            cwd=str(work_dir),
             capture_output=True,
             text=True,
             timeout=300,
