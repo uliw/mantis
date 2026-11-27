@@ -395,15 +395,15 @@ def solve_carbonate_speciation_from_ta_dic(
     """Calculate full carbonate speciation given TA and DIC by solving the exact quadratic."""
     ta_val = float(ta)
     dic_val = float(dic)
-    K1 = const.K1
-    K2 = const.K2
+    K1 = float(const.K1)
+    K2 = float(const.K2)
 
     a = max(ta_val, 1e-12)
     b = K1 * (ta_val - dic_val)
     c_term = K1 * K2 * (ta_val - 2.0 * dic_val)
 
     disc = max(b**2 - 4.0 * a * c_term, 0.0)
-    h_plus = (-b + np.sqrt(disc)) / (2.0 * a)
+    h_plus = float((-b + np.sqrt(disc)) / (2.0 * a))
     h_plus = max(h_plus, 1e-14)
     ph = float(-np.log10(h_plus))
 
@@ -489,9 +489,9 @@ def adjust_for_calcite_equilibrium(
         raise ValueError("[MANTIS ERROR] CarbonateConstants must be provided.")
 
     ca2_val = float(ca2_top)
-    co3_eq = const.Ksp_calcite / ca2_val
-    K1 = const.K1
-    K2 = const.K2
+    co3_eq = float(const.Ksp_calcite) / ca2_val
+    K1 = float(const.K1)
+    K2 = float(const.K2)
 
     has_ph = ph is not None
     has_dic = dic is not None
