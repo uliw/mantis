@@ -49,6 +49,7 @@ Formulations and Citations
 """
 
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 
@@ -57,38 +58,48 @@ import numpy as np
 R_GAS_BAR = 83.1446261815324
 
 
+def _maybe_scalar(val: Any) -> float | np.ndarray:
+    """Return a Python float for 0-D inputs, or a float64 ndarray for array inputs."""
+    arr = np.asarray(val, dtype=np.float64)
+    return float(arr) if arr.ndim == 0 else arr
+
+
 @dataclass
 class CarbonateConstants:
-    """Stores thermodynamic carbonate equilibrium constants and seawater density."""
+    """Stores thermodynamic carbonate equilibrium constants and seawater density.
 
-    temp_c: float
-    temp_k: float
-    salinity: float
-    pressure_bar: float
-    rho_sw: float        # kg/m^3
-    K1: float            # mol/m^3 (= mmol/L)
-    K2: float            # mol/m^3 (= mmol/L)
-    pK1: float
-    pK2: float
-    Ksp_calcite: float   # (mol/m^3)^2 (= (mmol/L)^2)
-    K1_mol_kg: float     # mol/kg-SW
-    K2_mol_kg: float     # mol/kg-SW
-    Ksp_mol_kg: float    # (mol/kg-SW)^2
+    Fields may be scalar floats (e.g. at the sediment-water interface) or 1D
+    NumPy arrays matching the vertical sediment grid ``z``.
+    """
+
+    temp_c: float | np.ndarray
+    temp_k: float | np.ndarray
+    salinity: float | np.ndarray
+    pressure_bar: float | np.ndarray
+    rho_sw: float | np.ndarray        # kg/m^3
+    K1: float | np.ndarray            # mol/m^3 (= mmol/L)
+    K2: float | np.ndarray            # mol/m^3 (= mmol/L)
+    pK1: float | np.ndarray
+    pK2: float | np.ndarray
+    Ksp_calcite: float | np.ndarray   # (mol/m^3)^2 (= (mmol/L)^2)
+    K1_mol_kg: float | np.ndarray     # mol/kg-SW
+    K2_mol_kg: float | np.ndarray     # mol/kg-SW
+    Ksp_mol_kg: float | np.ndarray    # (mol/kg-SW)^2
     ph_scale: str = "free"
-    scale_factor: float = 1.0  # (1 + St / Ks) conversion factor between Total and Free scales
+    scale_factor: float | np.ndarray = 1.0  # (1 + St / Ks) conversion factor between Total and Free scales
 
 
-def calc_total_sulfate(salinity: float) -> float:
+def calc_total_sulfate(salinity: float | np.ndarray) -> float | np.ndarray:
     """Calculate total sulfate concentration in mol/kg-SW from practical salinity.
 
     Parameters
     ----------
-    salinity : float
+    salinity : float or np.ndarray
         Practical salinity in PSU.
 
     Returns
     -------
-    float
+    float or np.ndarray
         Total sulfate concentration in mol/kg-SW.
 
     References
@@ -99,29 +110,29 @@ def calc_total_sulfate(salinity: float) -> float:
       practices for ocean CO2 measurements. PICES Special Publication 3, Chap. 5.
 
     """
-    S = float(salinity)
-    return (0.1400 / 96.062) * (S / 1.80655)
+    S = _maybe_scalar(salinity)
+    return _maybe_scalar((0.1400 / 96.062) * (S / 1.80655))
 
 
 def calc_bisulfate_constant(
-    temp_c: float,
-    salinity: float,
-    pressure_bar: float = 1.0,
-) -> float:
+    temp_c: float | np.ndarray,
+    salinity: float | np.ndarray,
+    pressure_bar: float | np.ndarray = 1.0,
+) -> float | np.ndarray:
     """Calculate stoichiometric dissociation constant of bisulfate (HSO4-) in seawater on the free scale.
 
     Parameters
     ----------
-    temp_c : float
+    temp_c : float or np.ndarray
         Temperature in degrees Celsius.
-    salinity : float
+    salinity : float or np.ndarray
         Practical salinity in PSU.
-    pressure_bar : float, optional
+    pressure_bar : float or np.ndarray, optional
         Hydrostatic pressure in bars (default: 1.0).
 
     Returns
     -------
-    float
+    float or np.ndarray
         Stoichiometric KS in mol/kg-SW on the free scale.
 
     References
@@ -136,10 +147,10 @@ def calc_bisulfate_constant(
       Geochimica et Cosmochimica Acta, 59(4), 661-677 (Table 9).
 
     """
-    T_c = float(temp_c)
+    T_c = _maybe_scalar(temp_c)
     T_k = T_c + 273.15
-    S = float(salinity)
-    P_bar = float(pressure_bar)
+    S = _maybe_scalar(salinity)
+    P_bar = _maybe_scalar(pressure_bar)
 
     # Ionic strength on free scale (Dickson 1990)
     I = 19.924 * S / (1000.0 - 1.005 * S)
@@ -162,22 +173,25 @@ def calc_bisulfate_constant(
     lnKsfac = (-deltaVS + 0.5 * kappaS * P_bar) * P_bar / (R_GAS_BAR * T_k)
     Ks_P = Ks_0 * np.exp(lnKsfac)
 
-    return float(Ks_P)
+    return _maybe_scalar(Ks_P)
 
 
-def calc_seawater_density(temp_c: float, salinity: float = 34.0) -> float:
+def calc_seawater_density(
+    temp_c: float | np.ndarray,
+    salinity: float | np.ndarray = 34.0,
+) -> float | np.ndarray:
     """Calculate seawater density at 1 atm pressure using the UNESCO 1981 equation of state.
 
     Parameters
     ----------
-    temp_c : float
+    temp_c : float or np.ndarray
         Temperature in degrees Celsius.
-    salinity : float, optional
+    salinity : float or np.ndarray, optional
         Practical salinity in PSU (default: 34.0).
 
     Returns
     -------
-    float
+    float or np.ndarray
         Density in kg/m^3 (divide by 1000 for kg/L or g/cm^3).
 
     References
@@ -186,8 +200,8 @@ def calc_seawater_density(temp_c: float, salinity: float = 34.0) -> float:
     of state of seawater. Deep Sea Research Part A, 28(6), 625-629.
 
     """
-    T = float(temp_c)
-    S = float(salinity)
+    T = _maybe_scalar(temp_c)
+    S = _maybe_scalar(salinity)
 
     # Pure water density SMOW (kg/m^3)
     rho_w = (
@@ -211,25 +225,26 @@ def calc_seawater_density(temp_c: float, salinity: float = 34.0) -> float:
     C = 4.8314e-4
 
     rho = rho_w + A * S + B * (S**1.5) + C * (S**2)
-    return float(rho)
+    return _maybe_scalar(rho)
 
 
 def calc_carbonate_constants(
-    temp_c: float,
-    salinity: float = 34.0,
-    pressure_bar: float = 1.0,
+    temp_c: float | np.ndarray,
+    salinity: float | np.ndarray = 34.0,
+    pressure_bar: float | np.ndarray = 1.0,
     ph_scale: str = "free",
 ) -> CarbonateConstants:
     """Calculate K1, K2, and K'sp(calcite) corrected for temperature, salinity, pressure, and pH scale.
 
     Parameters
     ----------
-    temp_c : float
-        Temperature in degrees Celsius.
-    salinity : float, optional
+    temp_c : float or np.ndarray
+        Temperature in degrees Celsius (scalar or 1D depth profile).
+    salinity : float or np.ndarray, optional
         Salinity in PSU (default: 34.0).
-    pressure_bar : float, optional
+    pressure_bar : float or np.ndarray, optional
         Hydrostatic pressure in bars (default: 1.0 bar = ~10 m depth / sea surface).
+        Accepts a scalar or 1D depth profile ``P(z) = P_0 + rho_sw * g * z * 1e-5``.
     ph_scale : str, optional
         pH scale convention: 'free' (default) or 'total'.
         - 'free': [H+] considers only free hydronium ions ([H+]_F).
@@ -250,10 +265,10 @@ def calc_carbonate_constants(
       Dickson et al. (2007), Guide to best practices for ocean CO2 measurements, PICES Spec. Publ. 3.
 
     """
-    T_c = float(temp_c)
+    T_c = _maybe_scalar(temp_c)
     T_k = T_c + 273.15
-    S = float(salinity)
-    P_bar = float(pressure_bar)
+    S = _maybe_scalar(salinity)
+    P_bar = _maybe_scalar(pressure_bar)
     scale_norm = str(ph_scale).lower().strip()
     if scale_norm not in ("free", "total"):
         raise ValueError(f"Invalid ph_scale '{ph_scale}'. Supported scales are 'free' and 'total'.")
@@ -334,17 +349,17 @@ def calc_carbonate_constants(
         temp_k=T_k,
         salinity=S,
         pressure_bar=P_bar,
-        rho_sw=rho_sw,
-        K1=float(K1_mol_kg),
-        K2=float(K2_mol_kg),
-        pK1=float(-np.log10(K1_mol_kg)),
-        pK2=float(-np.log10(K2_mol_kg)),
-        Ksp_calcite=float(Ksp_m3),
-        K1_mol_kg=float(K1_mol_kg),
-        K2_mol_kg=float(K2_mol_kg),
-        Ksp_mol_kg=float(Ksp_mol_kg),
+        rho_sw=_maybe_scalar(rho_sw),
+        K1=_maybe_scalar(K1_mol_kg),
+        K2=_maybe_scalar(K2_mol_kg),
+        pK1=_maybe_scalar(-np.log10(K1_mol_kg)),
+        pK2=_maybe_scalar(-np.log10(K2_mol_kg)),
+        Ksp_calcite=_maybe_scalar(Ksp_m3),
+        K1_mol_kg=_maybe_scalar(K1_mol_kg),
+        K2_mol_kg=_maybe_scalar(K2_mol_kg),
+        Ksp_mol_kg=_maybe_scalar(Ksp_mol_kg),
         ph_scale=scale_norm,
-        scale_factor=float(scale_factor),
+        scale_factor=_maybe_scalar(scale_factor),
     )
 
 

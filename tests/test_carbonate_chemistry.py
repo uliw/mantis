@@ -256,3 +256,61 @@ def test_carbonate_configured_via_speciation_block(tmp_path: Path):
     assert model.mp.beta_FeHS == pytest.approx(251.1886, rel=1e-3)
 
 
+def test_calc_carbonate_constants_vectorized_depth_profile():
+    """Verify calc_carbonate_constants supports 1D depth profiles and matches scalar calls."""
+    z = np.array([0.0, 100.0, 500.0, 1000.0])  # meters below seafloor
+    T_z = np.array([4.0, 7.0, 19.0, 34.0])     # geothermal gradient
+    P_z = 50.0 + 1027.0 * 9.80665 * z * 1e-5   # hydrostatic pressure in bar
+
+    const_vec = calc_carbonate_constants(temp_c=T_z, salinity=35.0, pressure_bar=P_z, ph_scale="free")
+    assert isinstance(const_vec.K1, np.ndarray) and const_vec.K1.shape == z.shape
+    assert isinstance(const_vec.K2, np.ndarray) and const_vec.K2.shape == z.shape
+    assert isinstance(const_vec.Ksp_calcite, np.ndarray) and const_vec.Ksp_calcite.shape == z.shape
+
+    for i in range(len(z)):
+        c_scalar = calc_carbonate_constants(temp_c=float(T_z[i]), salinity=35.0, pressure_bar=float(P_z[i]), ph_scale="free")
+        assert const_vec.K1[i] == pytest.approx(c_scalar.K1, rel=1e-12)
+        assert const_vec.K2[i] == pytest.approx(c_scalar.K2, rel=1e-12)
+        assert const_vec.Ksp_calcite[i] == pytest.approx(c_scalar.Ksp_calcite, rel=1e-12)
+
+    # Pure isothermal pressure increase must increase calcite solubility Ksp
+    const_iso = calc_carbonate_constants(temp_c=4.0, salinity=35.0, pressure_bar=P_z, ph_scale="free")
+    assert np.all(np.diff(const_iso.Ksp_calcite) > 0.0)
+
+
+def test_deep_column_depth_dependent_carbonate_constants(tmp_path: Path):
+    """Verify DiageneticModel.setup() computes depth-dependent P(z), T(z), and carbonate constants."""
+    from mantis import DiageneticModel
+
+    simplefe_dir = Path(__file__).resolve().parent.parent / "src" / "mantis" / "examples" / "SimpleFe"
+    model = DiageneticModel(
+        base_dir=tmp_path,
+        species=simplefe_dir / "species.py",
+        reactions=simplefe_dir / "reactions.py",
+        constants=simplefe_dir / "kinetic_constants.py",
+        equations=tmp_path / "equations_deep.py",
+    )
+    model.configure(
+        grid_setup=[
+            ["0 m", "50 m", "1 m", "5 m"],
+            ["50 m", "500 m", "5 m", "25 m"],
+        ],
+        temp=[4.0, 19.0],
+        w="0.14 cm/yr",
+        phi=0.8,
+    )
+    model.setup()
+
+    mp = model.mp
+    assert hasattr(mp, "pressure_profile")
+    assert isinstance(mp.K1_carb, np.ndarray) and len(mp.K1_carb) == mp.grid_points
+    assert isinstance(mp.K2_carb, np.ndarray) and len(mp.K2_carb) == mp.grid_points
+    assert isinstance(mp.Ksp_calcite, np.ndarray) and len(mp.Ksp_calcite) == mp.grid_points
+
+    # Top pressure is ~50 bar (SimpleFe surface); bottom pressure at 500 m is ~100 bar
+    assert mp.pressure_profile[0] == pytest.approx(50.0, abs=0.5)
+    assert mp.pressure_profile[-1] > 95.0
+    assert mp.Ksp_calcite[-1] != pytest.approx(mp.Ksp_calcite[0], rel=1e-2)
+
+
+
