@@ -1948,7 +1948,7 @@ class EquationSystemGenerator:
 
         if is_calcite_precip:
             lines.extend([
-                '        _Ksp = float(mp.k.get("Ksp_calcite") if hasattr(mp, "k") else getattr(k, "Ksp_calcite", 0.4266))',
+                '        _Ksp = np.asarray(getattr(mp, "Ksp_calcite", mp.k.get("Ksp_calcite") if hasattr(mp, "k") else getattr(k, "Ksp_calcite", 0.4266)), dtype=np.float64)',
                 '        _omega = (c_Ca2 * _co3) / (_Ksp + 1e-30)',
                 '        _eps_sm = float(getattr(mp, "saturation_smooth_epsilon", 0.01))',
                 '        _df_p = np.maximum(_omega - 1.0, 0.0)',
@@ -1971,7 +1971,7 @@ class EquationSystemGenerator:
 
         if is_calcite_diss:
             lines.extend([
-                '        _Ksp = float(mp.k.get("Ksp_calcite") if hasattr(mp, "k") else getattr(k, "Ksp_calcite", 0.4266))',
+                '        _Ksp = np.asarray(getattr(mp, "Ksp_calcite", mp.k.get("Ksp_calcite") if hasattr(mp, "k") else getattr(k, "Ksp_calcite", 0.4266)), dtype=np.float64)',
                 '        _omega = (c_Ca2 * _co3) / (_Ksp + 1e-30)',
                 '        _eps_sm = float(getattr(mp, "saturation_smooth_epsilon", 0.01))',
                 '        _us_d = np.maximum(1.0 - _omega, 0.0)',

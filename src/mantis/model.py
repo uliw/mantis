@@ -1776,6 +1776,36 @@ class DiageneticModel:
         zeros = np.zeros(self.mp.grid_points)
         T_profile = np.linspace(self.mp.temp[0], self.mp.temp[1], self.mp.grid_points)
 
+        # Depth-dependent hydrostatic pressure & temperature profiles for carbonate thermodynamics
+        if is_carbonate and isinstance(carb_cfg, dict):
+            from mantis.seawater_carbonate import calc_carbonate_constants
+
+            temp_top = float(self.mp.temp[0]) if isinstance(self.mp.temp, (list, tuple, np.ndarray)) else float(self.mp.temp)
+            temp_bot = float(self.mp.temp[1]) if isinstance(self.mp.temp, (list, tuple, np.ndarray)) and len(self.mp.temp) > 1 else temp_top
+            z_max = float(self.mp.max_depth) if float(self.mp.max_depth) > 0.0 else 1.0
+            T_z = temp_top + (temp_bot - temp_top) * (z / z_max)
+
+            p0_bar = float(carb_cfg.get("pressure", self.p_dict.get("pressure", 1.0)))
+            sal_val = float(carb_cfg.get("salinity", self.p_dict.get("salinity", 34.0)))
+            ph_sc = str(carb_cfg.get("ph_scale", carb_cfg.get("pH_scale", self.p_dict.get("ph_scale", "free")))).lower().strip()
+            rho_top = float(self.mp.carb_constants.rho_sw)
+            # Hydrostatic pressure in bar: P(z) = P_0 + rho_sw * g * z * 1e-5
+            P_z = p0_bar + rho_top * 9.80665 * z * 1e-5
+
+            self.mp.carb_constants_top = self.mp.carb_constants
+            carb_z = calc_carbonate_constants(
+                temp_c=T_z, salinity=sal_val, pressure_bar=P_z, ph_scale=ph_sc
+            )
+            self.mp.pressure_profile = P_z
+            self.mp.temp_profile = T_z
+            self.mp.carb_constants_profile = carb_z
+            self.mp.scale_factor = carb_z.scale_factor
+            self.mp.pK1_carb = carb_z.pK1
+            self.mp.pK2_carb = carb_z.pK2
+            self.mp.K1_carb = carb_z.K1
+            self.mp.K2_carb = carb_z.K2
+            self.mp.Ksp_calcite = carb_z.Ksp_calcite
+
         # Sort species: included in transport vs diagnostic
         for sp_name, meta in species_defs.items():
             species_all.append(sp_name)

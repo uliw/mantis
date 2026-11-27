@@ -1148,7 +1148,7 @@ def _save_data_to_disk(mp, c, k, species_list, z, D_mol, f_final):
         data["c_HCO3"] = get_v(c.HCO3)
         data["c_CO2"] = get_v(c.CO2)
         if "c_Ca2" in data and hasattr(mp, "Ksp_calcite"):
-            ksp_val = float(mp.Ksp_calcite)
+            ksp_val = np.asarray(mp.Ksp_calcite, dtype=np.float64)
             data["Omega_calcite"] = (data["c_Ca2"] * data["c_CO3"]) / (ksp_val + 1e-30)
 
     phi_raw = get_v(getattr(mp, "phi", 0.8))
