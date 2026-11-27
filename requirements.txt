@@ -1,7 +1,7 @@
 numba
 numpy
 pandas
-scipy
+scipy>=1.18.1
 matplotlib
 pint
 watchdog
