@@ -8,6 +8,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-11-27
+
+### Added
+
+- **Vectorized Depth-Dependent Carbonate Thermodynamics (`seawater_carbonate.py`, `model.py`)**:
+  - Extended carbonate chemistry functions in `src/mantis/seawater_carbonate.py` to accept 1D array inputs for temperature, salinity, and pressure, with `_maybe_scalar` handling consistent scalar and array outputs.
+  - Added depth-dependent hydrostatic pressure, temperature, and carbonate constant profiles in `DiageneticModel` (`src/mantis/model.py`).
+  - Added unit tests for vectorized depth-profile carbonate calculations in `tests/test_carbonate_chemistry.py`.
+- **LAPACK Banded LU Solver & BLAS Thread Control (`monolithic_solver.py`, `solvers_numba.py`, `model.py`)**:
+  - Replaced the block TDMA linear solver with LAPACK banded LU factorization (`scipy.linalg.lapack.dgbsv`).
+  - Added configurable `blas_threads` parameter (and environment variable support) with automatic BLAS/LAPACK thread limiting to prevent thread oversubscription on large systems.
+- **Structured Error Hierarchy (`errors.py`)**:
+  - Added dedicated exception classes in `src/mantis/errors.py` providing tailored, formatted error messages (including full file paths) for missing species, input file issues, unit parsing errors, and invalid file names, integrated across `model.py`, `diff_lib.py`, `generate_equation_system.py`, `live_plot_lib.py`, and `monolithic_solver.py`.
+- **Explicit Sorption Equilibrium Example**:
+  - Added `src/mantis/examples/velde_et_al_2016/fe2_explicit/` demonstrating explicit Fe(II) sorption equilibrium.
+- **Documentation & Tutorials**:
+  - Added bioturbation and bio-irrigation sections to `Tutorial_2` (`docs/Tutorial_2.org`, `docs/Tutorial_2.md`) and noted that lumped species are optional.
+  - Expanded `Tutorial_4` (`docs/Tutorial_4.org`, `docs/Tutorial_4.md`) with updated `phi` porosity profile documentation and utility function guides for `compute_porosity_profile` and `compute_sediment_age`.
+
+### Changed
+
+- **Renamed `TS2` to `H2S_tot` (Breaking Change)**:
+  - Renamed total dissolved sulfide species identifier from `TS2` to `H2S_tot` throughout the codebase, bundled examples, reference outputs, tests, and documentation.
+- **Generated Equation Files Default Directory**:
+  - Moved default generated `equations.py` output paths from the working directory into `logs/` in `src/mantis/generate_equation_system.py` (while preserving backward compatibility for explicitly specified paths), removed tracked generated equation files from examples, and added `equations.py` / `*_equations.py` to `.gitignore`.
+- **Dependencies**:
+  - Updated `scipy` minimum version requirement to `>=1.18.1` in `requirements.txt` (matching `pyproject.toml`).
+
+### Fixed
+
+- **Carbonate Solubility Numerical Stability**:
+  - Ensured `Ksp_calcite` is consistently converted to `numpy.float64` arrays across `diff_lib.py`, `generate_equation_system.py`, and `live_plot_lib.py`.
+- **Test Isolation & Tooling**:
+  - Refactored simulation and solver tests to use pytest's `tmp_path` fixture for isolated temporary directories, preventing test artifacts from polluting the source tree.
+  - Improved `docs/export_tutorials.sh` to accept explicit file path arguments.
+  - Re-ran and refreshed bundled example SVG plots.
+
+## [0.9.2] - 2026-11-21
+
+### Fixed
+
+- Fixed the Read the Docs badge URL in `README.md`.
+- Added missing chromatographic fractionation reference CSV files (`analytical_ogata_banks.csv`, `run_chromatographic_fractionation_reference.csv`) required by the CI test suite.
+
 ## [0.9.1] - 2026-11-21
 
 ### Added
