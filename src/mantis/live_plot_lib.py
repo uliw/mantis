@@ -629,7 +629,7 @@ def capture_state(
         data["c_HCO3"] = _gv(c.HCO3)
         data["c_CO2"] = _gv(c.CO2)
         if "c_Ca2" in data and hasattr(mp_params, "Ksp_calcite"):
-            ksp_val = float(mp_params.Ksp_calcite)
+            ksp_val = np.asarray(mp_params.Ksp_calcite, dtype=np.float64)
             data["Omega_calcite"] = (data["c_Ca2"] * data["c_CO3"]) / (ksp_val + 1e-30)
 
     # 5. Composite solids (e.g. Total CaCO3 = Calcite + Aragonite)
